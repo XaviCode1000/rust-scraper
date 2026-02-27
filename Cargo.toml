@@ -1,0 +1,18 @@
+[package]
+name = "rust_scraper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+spider = { version = "2", features = ["chrome"] }
+supermarkdown = "0.0.5"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2"
+thiserror = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

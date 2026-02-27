@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/target/
+*.rs.bk
+Cargo.lock
+
+# Build outputs
+*.pdb
+*.dll
+*.so
+*.dylib
+
+# Testing
+coverage/
+*.gcno
+*.gcda
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+rag_dataset/
+*.md.tmp
