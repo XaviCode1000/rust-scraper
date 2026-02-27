@@ -1,5 +1,7 @@
 # 🦀 Rust Scraper
 
+[![CI](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml)
+
 Scraper web de alto rendimiento que utiliza Brave Browser para renderizar JavaScript y convertir contenido HTML a Markdown, optimizado para RAG (Retrieval-Augmented Generation).
 
 ## ✨ Características
