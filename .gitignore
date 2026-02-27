@@ -1,36 +1,46 @@
-# Rust
-/target/
-**/target/
-*.rs.bk
+```
+# Rust/Cargo specific
+target/
 Cargo.lock
+*.rs.bk
+**/*.d
+**/*.hi
+**/*.o
 
-# Build outputs
-*.pdb
-*.dll
-*.so
-*.dylib
+# Dependencies
+vendor/
 
-# Testing
-coverage/
-*.gcno
-*.gcda
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# Logs and temp files
+*.log
+*.tmp
 
 # Environment
 .env
 .env.local
-*.log
+.env.*
 
-# OS
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Project specific
-rag_dataset/
-*.md.tmp
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.tox/
+```
