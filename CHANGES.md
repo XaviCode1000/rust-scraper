@@ -1,5 +1,30 @@
 # 📋 CHANGELOG - Brave RAG Scraper v2
 
+## v0.1.2 - Actualización a Rust 2024
+
+### 🆕 Cambios Realizados
+
+#### 1. **Actualización a Rust Edition 2024**
+- **Cambio**: `edition = "2021"` → `edition = "2024"`
+- **Archivo**: `Cargo.toml`
+- **Motivo**: Aprovechar las últimas características del lenguaje
+- **Requisito**: Rust 1.85+ recomendado
+
+#### 2. **Unsafe Block para env::set_var()**
+- **Cambio**: Agregado `unsafe { }` alrededor de `env::set_var()`
+- **Archivo**: `src/config.rs`
+- **Motivo**: Rust 2024 requiere `unsafe` explícito para mutación del entorno
+- **Función**: `setup_brave_env()`
+- **Nota**: El código es seguro porque se ejecuta secuencialmente al inicio
+
+### 📊 Validación
+
+- ✅ Compilación: Sin errores
+- ✅ Clippy: Sin warnings
+- ✅ Tests: Ready para escribir
+
+---
+
 ## v0.1.1 - Corrección de Rutas y Type Safety
 
 ### 🔧 Correcciones Realizadas

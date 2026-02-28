@@ -15,7 +15,7 @@ Scraper web de alto rendimiento que utiliza Brave Browser para renderizar JavaSc
 
 ## 🚀 Requisitos
 
-- [Rust](https://rustup.rs/) (1.70+)
+- [Rust](https://rustup.rs/) (1.85+ para Edition 2024)
 - [Brave Browser](https://brave.com/) instalado
 
 ### Verificar instalación
