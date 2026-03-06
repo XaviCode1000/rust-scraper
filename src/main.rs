@@ -1,48 +1,65 @@
-mod config;
-mod markdown;
-mod scraper;
+//! Rust Scraper - Modern web scraper for RAG datasets
+//!
+//! Extracts clean, structured content from web pages using readability algorithm.
 
-use std::path::Path;
-use tracing::info;
+use anyhow::Context;
+use rust_scraper::{config, scraper, validate_and_parse_url, Args, Parser};
+use tracing::{info, warn};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Inicializar el sistema de logging
-    config::init_logging();
-    info!("🚀 Iniciando Brave RAG Scraper v2");
+async fn main() -> anyhow::Result<()> {
+    // 1. Parsear argumentos CLI - Si no hay URL, error inmediato y claro
+    let args = Args::parse();
 
-    let target_url = "https://docs.rs/spider/latest/spider/";
-    let output_dir = Path::new("rag_dataset");
+    // 2. Inicializar logging con nivel configurable
+    let log_level = match args.verbose {
+        0 => "info",
+        1 => "debug",
+        _ => "trace",
+    };
+    config::init_logging(log_level);
 
-    // 2. Validar URL
-    validate_url(target_url)?;
-    info!("✅ URL validada: {}", target_url);
+    info!("🚀 Rust Scraper v0.2.0 - Modern Stack");
+    info!("📌 Target: {}", args.url);
+    info!("📁 Output: {}", args.output.display());
 
-    // 3. Configurar el entorno de Brave
-    config::setup_brave_env()?;
+    // 3. Validar URL - parsing con la crate url
+    let parsed_url = validate_and_parse_url(&args.url).context("Invalid URL provided")?;
 
-    // 4. Ejecutar el crawler
+    info!("✅ URL validada: {}", parsed_url);
+
+    // 4. Crear cliente HTTP configurado
+    let client = scraper::create_http_client()?;
+
+    // 5. Ejecutar scraping con el nuevo enfoque
     info!("📡 Iniciando scraping...");
-    let pages = scraper::crawl_target(target_url).await;
 
-    if pages.is_empty() {
-        return Err("No se obtuvieron páginas del sitio".into());
+    let results = scraper::scrape_with_readability(
+        &client,
+        &parsed_url,
+        &args.selector,
+        args.max_pages,
+        args.delay_ms,
+    )
+    .await
+    .context("Scraping failed")?;
+
+    if results.is_empty() {
+        warn!("⚠️  No se obtuvo contenido de la página");
+        return Ok(());
     }
 
-    info!("✅ Scraping completado: {} páginas obtenidas", pages.len());
+    info!(
+        "✅ Scraping completado: {} elementos extraídos",
+        results.len()
+    );
 
-    // 5. Procesar y guardar como Markdown
-    info!("📝 Procesando contenido a Markdown...");
-    markdown::process_and_save(&pages, output_dir)?;
+    // 6. Guardar resultados
+    info!("💾 Guardando resultados...");
+    scraper::save_results(&results, &args.output, &args.format)?;
 
-    info!("🎉 Pipeline RAG completado exitosamente");
-    Ok(())
-}
+    info!("🎉 Pipeline completado exitosamente!");
+    info!("📊 Archivos generados: {}", args.output.display());
 
-/// Valida que una URL sea bien formada
-fn validate_url(url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(format!("URL debe comenzar con http:// o https://: {}", url).into());
-    }
     Ok(())
 }
