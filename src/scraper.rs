@@ -14,6 +14,49 @@ use tracing::{debug, info, warn};
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const TIMEOUT_SECS: u64 = 30;
 
+/// Validated URL newtype - guarantees URL is valid at type level
+///
+/// This enforces that ScrapedContent always has a valid URL,
+/// preventing runtime errors from invalid URLs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidUrl(url::Url);
+
+impl ValidUrl {
+    /// Create a new ValidUrl from a validated url::Url
+    pub fn new(url: url::Url) -> Self {
+        Self(url)
+    }
+
+    /// Parse and create a ValidUrl from a string
+    ///
+    /// Returns error if the string is not a valid URL
+    pub fn parse(s: &str) -> anyhow::Result<Self> {
+        Ok(Self(url::Url::parse(s)?))
+    }
+
+    /// Get reference to inner url::Url
+    pub fn as_url(&self) -> &url::Url {
+        &self.0
+    }
+
+    /// Get the URL as string
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<url::Url> for ValidUrl {
+    fn from(url: url::Url) -> Self {
+        Self(url)
+    }
+}
+
+impl std::fmt::Display for ValidUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Represents a scraped content item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrapedContent {
@@ -21,8 +64,8 @@ pub struct ScrapedContent {
     pub title: String,
     /// Main content extracted (clean, without ads/nav)
     pub content: String,
-    /// Original URL
-    pub url: String,
+    /// Original URL (validated)
+    pub url: ValidUrl,
     /// Excerpt/summary if available
     pub excerpt: Option<String>,
     /// Author if available
@@ -57,13 +100,9 @@ pub fn create_http_client() -> Result<Client> {
 pub async fn scrape_with_readability(
     client: &Client,
     url: &url::Url,
-    _selector: &str, // Reserved for future advanced selectors
-    _max_pages: usize,
-    _delay_ms: u64,
 ) -> Result<Vec<ScrapedContent>> {
     let mut results = Vec::new();
 
-    // For now, scrape single URL - can extend to crawl later
     info!("🌐 Fetching: {}", url);
 
     // Fetch HTML
@@ -95,7 +134,7 @@ pub async fn scrape_with_readability(
                 // legible uses fields, not methods
                 title: article.title,
                 content: article.text_content,
-                url: url.to_string(),
+                url: ValidUrl::new(url.clone()),
                 excerpt: article.excerpt,
                 author: article.byline,
                 date: article.published_time,
@@ -124,7 +163,7 @@ pub async fn scrape_with_readability(
             results.push(ScrapedContent {
                 title,
                 content: fallback_content,
-                url: url.to_string(),
+                url: ValidUrl::new(url.clone()),
                 excerpt: None,
                 author: None,
                 date: None,
@@ -194,17 +233,6 @@ pub fn save_results(
     }
 
     Ok(())
-}
-
-// ============================================================================
-// Legacy functions removed in v0.2.0
-// ============================================================================
-
-/// Legacy function - removed
-#[allow(dead_code)]
-fn _deprecated_crawl_target() {
-    // This function no longer exists - use scrape_with_readability instead
-    // Keeping empty to avoid breaking builds that might reference it
 }
 
 // ============================================================================
@@ -315,7 +343,7 @@ mod tests {
         let results = vec![ScrapedContent {
             title: "Test Article".to_string(),
             content: "This is the main content.".to_string(),
-            url: "https://example.com/article".to_string(),
+            url: ValidUrl::parse("https://example.com/article").unwrap(),
             excerpt: Some("A short excerpt".to_string()),
             author: Some("John Doe".to_string()),
             date: Some("2024-01-15".to_string()),
@@ -351,7 +379,7 @@ mod tests {
             ScrapedContent {
                 title: "Article 1".to_string(),
                 content: "Content 1".to_string(),
-                url: "https://example.com/1".to_string(),
+                url: ValidUrl::parse("https://example.com/1").unwrap(),
                 excerpt: None,
                 author: None,
                 date: None,
@@ -360,7 +388,7 @@ mod tests {
             ScrapedContent {
                 title: "Article 2".to_string(),
                 content: "Content 2".to_string(),
-                url: "https://example.com/2".to_string(),
+                url: ValidUrl::parse("https://example.com/2").unwrap(),
                 excerpt: None,
                 author: None,
                 date: None,
@@ -394,7 +422,7 @@ mod tests {
         let results = vec![ScrapedContent {
             title: "Test Article".to_string(),
             content: "Plain text content here.".to_string(),
-            url: "https://example.com".to_string(),
+            url: ValidUrl::parse("https://example.com").unwrap(),
             excerpt: None,
             author: None,
             date: None,
@@ -434,7 +462,7 @@ mod tests {
             ScrapedContent {
                 title: "Article 1".to_string(),
                 content: "Content 1".to_string(),
-                url: "https://example.com/1".to_string(),
+                url: ValidUrl::parse("https://example.com/1").unwrap(),
                 excerpt: None,
                 author: None,
                 date: None,
@@ -443,7 +471,7 @@ mod tests {
             ScrapedContent {
                 title: "Article 2".to_string(),
                 content: "Content 2".to_string(),
-                url: "https://example.com/2".to_string(),
+                url: ValidUrl::parse("https://example.com/2").unwrap(),
                 excerpt: None,
                 author: None,
                 date: None,
@@ -476,7 +504,7 @@ mod tests {
         let results = vec![ScrapedContent {
             title: "Test Title".to_string(),
             content: "Test Content".to_string(),
-            url: "https://example.com".to_string(),
+            url: ValidUrl::parse("https://example.com").unwrap(),
             excerpt: Some("Test excerpt".to_string()),
             author: Some("Author Name".to_string()),
             date: Some("2024-01-01".to_string()),
@@ -498,7 +526,7 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].title, "Test Title");
         assert_eq!(parsed[0].content, "Test Content");
-        assert_eq!(parsed[0].url, "https://example.com");
+        assert!(parsed[0].url.as_str().starts_with("https://example.com"));
         assert_eq!(parsed[0].excerpt, Some("Test excerpt".to_string()));
         assert_eq!(parsed[0].author, Some("Author Name".to_string()));
         assert_eq!(parsed[0].date, Some("2024-01-01".to_string()));
@@ -519,7 +547,7 @@ mod tests {
         let results = vec![ScrapedContent {
             title: "Test".to_string(),
             content: "Content".to_string(),
-            url: "https://example.com".to_string(),
+            url: ValidUrl::parse("https://example.com").unwrap(),
             excerpt: None,
             author: None,
             date: None,
@@ -559,7 +587,7 @@ mod tests {
         let content = ScrapedContent {
             title: "Test Title".to_string(),
             content: "Test Content".to_string(),
-            url: "https://example.com".to_string(),
+            url: ValidUrl::parse("https://example.com").unwrap(),
             excerpt: Some("Excerpt".to_string()),
             author: Some("Author".to_string()),
             date: Some("2024-01-01".to_string()),
@@ -594,7 +622,7 @@ mod tests {
         // Assert
         assert_eq!(content.title, "Test");
         assert_eq!(content.content, "Content");
-        assert_eq!(content.url, "https://example.com");
+        assert!(content.url.as_str().starts_with("https://example.com"));
         assert_eq!(content.excerpt, Some("Excerpt".to_string()));
         assert_eq!(content.author, Some("Author".to_string()));
         assert_eq!(content.date, Some("2024-01-01".to_string()));

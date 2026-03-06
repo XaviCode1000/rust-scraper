@@ -31,18 +31,12 @@ async fn main() -> anyhow::Result<()> {
     // 4. Crear cliente HTTP configurado
     let client = scraper::create_http_client()?;
 
-    // 5. Ejecutar scraping con el nuevo enfoque
+    // 5. Ejecutar scraping
     info!("📡 Iniciando scraping...");
 
-    let results = scraper::scrape_with_readability(
-        &client,
-        &parsed_url,
-        &args.selector,
-        args.max_pages,
-        args.delay_ms,
-    )
-    .await
-    .context("Scraping failed")?;
+    let results = scraper::scrape_with_readability(&client, &parsed_url)
+        .await
+        .context("Scraping failed")?;
 
     if results.is_empty() {
         warn!("⚠️  No se obtuvo contenido de la página");

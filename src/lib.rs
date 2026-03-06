@@ -3,11 +3,12 @@
 //! Modern web scraper for RAG datasets with clean content extraction.
 
 pub mod config;
-pub mod markdown;
 pub mod scraper;
 
 pub use clap::{Parser, ValueEnum};
-pub use scraper::{create_http_client, save_results, scrape_with_readability, ScrapedContent};
+pub use scraper::{
+    create_http_client, save_results, scrape_with_readability, ScrapedContent, ValidUrl,
+};
 pub use std::path::PathBuf;
 
 // Re-export OutputFormat for convenience
@@ -55,20 +56,6 @@ pub struct Args {
     /// Verbosity del logging
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
-}
-
-impl Default for Args {
-    fn default() -> Self {
-        Self {
-            url: String::new(),
-            selector: "body".to_string(),
-            output: PathBuf::from("output"),
-            format: OutputFormat::Markdown,
-            delay_ms: 1000,
-            max_pages: 10,
-            verbose: 0,
-        }
-    }
 }
 
 /// Valida y parsea una URL - retorna error claro si es inválida

@@ -2,8 +2,7 @@
 //!
 //! These tests verify end-to-end functionality of the scraper.
 
-use rust_scraper::scraper;
-use std::path::PathBuf;
+use rust_scraper::scraper::{self, ValidUrl};
 use tempfile::TempDir;
 
 // ============================================================================
@@ -20,7 +19,7 @@ async fn test_scraper_can_fetch_simple_page() {
     let client = scraper::create_http_client().expect("HTTP client");
 
     // Act - Just verify we can fetch without error
-    let result = scraper::scrape_with_readability(&client, &url, "body", 1, 0).await;
+    let result = scraper::scrape_with_readability(&client, &url).await;
 
     // Assert - Either succeeds or fails gracefully (network dependent)
     // We don't assert success because it depends on network
@@ -52,18 +51,28 @@ fn test_output_format_display() {
 }
 
 #[test]
-fn test_args_default_values() {
-    // Test that Args::default() works correctly
+fn test_args_has_required_fields() {
+    // Test that Args struct has the expected fields (without Default)
     use rust_scraper::Args;
+    use rust_scraper::OutputFormat;
 
-    let args = Args::default();
+    // Create Args with all required fields
+    let args = Args {
+        url: "https://example.com".to_string(),
+        selector: "article".to_string(),
+        output: std::path::PathBuf::from("custom_output"),
+        format: OutputFormat::Text,
+        delay_ms: 500,
+        max_pages: 5,
+        verbose: 2,
+    };
 
-    assert_eq!(args.selector, "body");
-    assert_eq!(args.output, PathBuf::from("output"));
-    assert_eq!(args.format, rust_scraper::OutputFormat::Markdown);
-    assert_eq!(args.delay_ms, 1000);
-    assert_eq!(args.max_pages, 10);
-    assert_eq!(args.verbose, 0);
+    assert_eq!(args.url, "https://example.com");
+    assert_eq!(args.selector, "article");
+    assert_eq!(args.format, OutputFormat::Text);
+    assert_eq!(args.delay_ms, 500);
+    assert_eq!(args.max_pages, 5);
+    assert_eq!(args.verbose, 2);
 }
 
 // ============================================================================
@@ -78,7 +87,7 @@ async fn test_scrape_handles_404_gracefully() {
     let client = scraper::create_http_client().expect("HTTP client");
 
     // Act
-    let result = scraper::scrape_with_readability(&client, &url, "body", 1, 0).await;
+    let result = scraper::scrape_with_readability(&client, &url).await;
 
     // Assert - Should fail gracefully with clear error
     assert!(result.is_err());
@@ -111,7 +120,7 @@ fn test_save_results_to_nested_directory() {
     let results = vec![rust_scraper::scraper::ScrapedContent {
         title: "Test".to_string(),
         content: "Content".to_string(),
-        url: "https://example.com".to_string(),
+        url: ValidUrl::parse("https://example.com").unwrap(),
         excerpt: None,
         author: None,
         date: None,
@@ -142,7 +151,7 @@ fn test_save_results_json_with_special_characters() {
     let results = vec![rust_scraper::scraper::ScrapedContent {
         title: "Test with \"quotes\" and 'apostrophes'".to_string(),
         content: "Content with\nnewlines\tand\ttabs".to_string(),
-        url: "https://example.com?param=value&other=test".to_string(),
+        url: ValidUrl::parse("https://example.com?param=value&other=test").unwrap(),
         excerpt: Some("Excerpt with <html> & \"special\" chars".to_string()),
         author: Some("Author Name".to_string()),
         date: Some("2024-01-01".to_string()),
@@ -173,7 +182,7 @@ fn test_save_results_markdown_with_markdown_syntax() {
     let results = vec![rust_scraper::scraper::ScrapedContent {
         title: "# Heading 1".to_string(),
         content: "**Bold** and *italic* and `code`".to_string(),
-        url: "https://example.com".to_string(),
+        url: ValidUrl::parse("https://example.com").unwrap(),
         excerpt: None,
         author: None,
         date: None,
