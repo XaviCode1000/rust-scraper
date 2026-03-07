@@ -196,9 +196,11 @@ fn test_save_results_markdown_with_markdown_syntax() {
     // Assert
     assert!(result.is_ok());
 
-    let files: Vec<_> = std::fs::read_dir(&output_dir)
-        .unwrap()
+    use walkdir::WalkDir;
+    let files: Vec<_> = WalkDir::new(&output_dir)
+        .into_iter()
         .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
         .collect();
     let content = std::fs::read_to_string(files[0].path()).unwrap();
 

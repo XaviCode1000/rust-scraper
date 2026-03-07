@@ -39,10 +39,35 @@ tracing-appender = "0.2"
 url = { version = "2", features = ["serde"] }
 futures = "0.3"
 
+# HTML to Markdown conversion (preserves headings, code blocks, lists)
+html-to-markdown-rs = "2.3"
+
+# Syntax highlighting for code blocks
+syntect = "5"
+
+# YAML frontmatter
+serde_yaml = "0.9"
+
+# Date/time for frontmatter
+chrono = { version = "0.4", features = ["serde"] }
+
+# Regex for parsing code blocks
+regex = "1"
+
+# MD5 for image filename hashing
+md5 = "0.7"
+
+# Error handling
+thiserror = "2"
+
+# Walking directories for tests
+walkdir = "2"
+
 [dev-dependencies]
 mockall = "0.12"
 tokio-test = "0.4"
 tempfile = "3"
+walkdir = "2"
 
 [profile.release]
 opt-level = 3
