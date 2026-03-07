@@ -150,6 +150,7 @@ fn test_save_results_json_with_special_characters() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let output_dir = temp_dir.path().to_path_buf();
 
+    // Use non-empty assets to ensure field is serialized
     let results = vec![rust_scraper::scraper::ScrapedContent {
         title: "Test with \"quotes\" and 'apostrophes'".to_string(),
         content: "Content with\nnewlines\tand\ttabs".to_string(),
@@ -158,7 +159,12 @@ fn test_save_results_json_with_special_characters() {
         author: Some("Author Name".to_string()),
         date: Some("2024-01-01".to_string()),
         html: None,
-        assets: Vec::new(),
+        assets: vec![rust_scraper::scraper::DownloadedAsset {
+            url: "https://example.com/img.png".to_string(),
+            local_path: "images/img.png".to_string(),
+            asset_type: "image".to_string(),
+            size: 100,
+        }],
     }];
 
     // Act

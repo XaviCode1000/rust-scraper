@@ -678,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_results_markdown_multiple_items() {
+    fn test_save_results_text_multiple_items() {
         // Arrange
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
@@ -718,13 +718,22 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .collect();
-        assert_eq!(files.len(), 1);
+        // Text format creates one file per item
+        assert_eq!(files.len(), 2);
 
-        let content = fs::read_to_string(files[0].path()).unwrap();
+        // Verify both files exist with correct content
+        let mut contents: Vec<String> = files
+            .iter()
+            .map(|f| fs::read_to_string(f.path()).unwrap())
+            .collect();
+        // Sort to ensure consistent order
+        contents.sort();
+
+        assert!(contents[0].contains("Content 1"));
+        assert!(contents[1].contains("Content 2"));
         // Text format should only contain content, not title or URL
-        assert!(content.contains("Plain text content here."));
-        assert!(!content.contains("Test Article")); // Title not in file
-        assert!(!content.contains("https://example.com")); // URL not in file
+        assert!(!contents[0].contains("Article"));
+        assert!(!contents[0].contains("https://example.com"));
     }
 
     // ==========================================================================
@@ -737,6 +746,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
 
+        // Use non-empty assets to ensure field is serialized
         let results = vec![
             ScrapedContent {
                 title: "Article 1".to_string(),
@@ -746,7 +756,12 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
-                assets: Vec::new(),
+                assets: vec![DownloadedAsset {
+                    url: "https://example.com/img.jpg".to_string(),
+                    local_path: "images/img.jpg".to_string(),
+                    asset_type: "image".to_string(),
+                    size: 1024,
+                }],
             },
             ScrapedContent {
                 title: "Article 2".to_string(),
@@ -756,7 +771,12 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
-                assets: Vec::new(),
+                assets: vec![DownloadedAsset {
+                    url: "https://example.com/doc.pdf".to_string(),
+                    local_path: "documents/doc.pdf".to_string(),
+                    asset_type: "document".to_string(),
+                    size: 2048,
+                }],
             },
         ];
 
@@ -774,6 +794,9 @@ mod tests {
         // Verify valid JSON and contains both articles
         let parsed: Vec<ScrapedContent> = serde_json::from_str(&content).expect("Valid JSON");
         assert_eq!(parsed.len(), 2);
+        // Verify assets were serialized
+        assert_eq!(parsed[0].assets.len(), 1);
+        assert_eq!(parsed[1].assets.len(), 1);
     }
 
     #[test]
@@ -782,6 +805,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
 
+        // Use non-empty assets to ensure field is serialized
         let results = vec![ScrapedContent {
             title: "Test Title".to_string(),
             content: "Test Content".to_string(),
@@ -790,7 +814,12 @@ mod tests {
             author: Some("Author Name".to_string()),
             date: Some("2024-01-01".to_string()),
             html: None, // Should be skipped in serialization
-            assets: Vec::new(),
+            assets: vec![DownloadedAsset {
+                url: "https://example.com/test.png".to_string(),
+                local_path: "images/test.png".to_string(),
+                asset_type: "image".to_string(),
+                size: 512,
+            }],
         }];
 
         // Act
