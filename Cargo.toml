@@ -17,7 +17,9 @@ full = ["images", "documents"]
 clap = { version = "4", features = ["derive"] }
 
 # HTTP & Networking - Reqwest con retry y tls
-reqwest = { version = "0.12", features = ["rustls-tls", "gzip", "brotli"] }
+# Nota: rustls-tls-native-roots usa certificados del sistema (/etc/ssl/certs)
+# Si falla SSL, actualizar certificados: sudo pacman -Sy ca-certificates
+reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli"] }
 
 # Content Extraction - Readability algorithm (Firefox Reader mode)
 legible = "0.4"
