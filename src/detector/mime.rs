@@ -5,12 +5,37 @@
 #[cfg(any(feature = "images", feature = "documents"))]
 use mimetype_detector::detect;
 
-/// Detect MIME type from file extension
+/// Detect MIME type from file extension (static mapping)
 #[cfg(any(feature = "images", feature = "documents"))]
 fn get_mime_from_extension(ext: &str) -> Option<&'static str> {
-    let data = format!(".{}", ext);
-    let mime = detect(data.as_bytes());
-    Some(mime.mime())
+    // Use static mapping - mimetype-detector is for file content, not extensions
+    match ext.to_lowercase().as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "ico" => Some("image/x-icon"),
+        "bmp" => Some("image/bmp"),
+        "tiff" | "tif" => Some("image/tiff"),
+        "pdf" => Some("application/pdf"),
+        "doc" => Some("application/msword"),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xls" => Some("application/vnd.ms-excel"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "ppt" => Some("application/vnd.ms-powerpoint"),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "csv" => Some("text/csv"),
+        "odt" => Some("application/vnd.oasis.opendocument.text"),
+        "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+        "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+        "epub" => Some("application/epub+zip"),
+        "rtf" => Some("application/rtf"),
+        "txt" => Some("text/plain"),
+        "json" => Some("application/json"),
+        "xml" => Some("application/xml"),
+        _ => None,
+    }
 }
 
 /// Supported asset types for download
