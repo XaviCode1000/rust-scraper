@@ -13,7 +13,8 @@ pub mod extractor;
 
 pub use clap::{Parser, ValueEnum};
 pub use scraper::{
-    create_http_client, save_results, scrape_with_readability, ScrapedContent, ValidUrl,
+    create_http_client, save_results, scrape_with_config, scrape_with_readability, DownloadedAsset,
+    ScrapedContent, ValidUrl,
 };
 pub use std::path::PathBuf;
 pub use url_path::{Domain, OutputPath, UrlPath};
@@ -102,6 +103,18 @@ pub struct Args {
     /// Máximo de páginas a scrapear
     #[arg(long, default_value = "10", help = "Maximum pages to scrape")]
     pub max_pages: usize,
+
+    /// Descargar imágenes encontradas en la página
+    #[arg(long, default_value = "false", help = "Download images from the page")]
+    pub download_images: bool,
+
+    /// Descargar documentos encontrados en la página (PDF, DOCX, XLSX, etc.)
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Download documents from the page"
+    )]
+    pub download_documents: bool,
 
     /// Verbosity del logging
     #[arg(short, long, action = clap::ArgAction::Count)]
