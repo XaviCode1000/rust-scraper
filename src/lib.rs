@@ -4,12 +4,14 @@
 
 pub mod config;
 pub mod scraper;
+pub mod url_path;
 
 pub use clap::{Parser, ValueEnum};
 pub use scraper::{
     create_http_client, save_results, scrape_with_readability, ScrapedContent, ValidUrl,
 };
 pub use std::path::PathBuf;
+pub use url_path::{Domain, OutputPath, UrlPath};
 
 // Re-export OutputFormat for convenience
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
