@@ -6,6 +6,12 @@ description = "Modern web scraper for RAG datasets with clean content extraction
 authors = ["GazaDev"]
 license = "MIT"
 
+[features]
+default = []
+images = ["dep:mimetype-detector"]
+documents = ["dep:mimetype-detector"]
+full = ["images", "documents"]
+
 [dependencies]
 # CLI - Argument parsing obligatorio
 clap = { version = "4", features = ["derive"] }
@@ -57,11 +63,17 @@ regex = "1"
 # MD5 for image filename hashing
 md5 = "0.7"
 
+# SHA256 for content hashing
+sha2 = "0.10"
+
 # Error handling
 thiserror = "2"
 
 # Walking directories for tests
 walkdir = "2"
+
+# MIME type detection (optional - for image/document detection)
+mimetype-detector = { version = "0.3", optional = true }
 
 [dev-dependencies]
 mockall = "0.12"
