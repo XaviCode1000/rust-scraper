@@ -1,7 +1,7 @@
 ---
 description: Investigador senior de Rust - búsqueda profunda en documentación, crates, y código actualizado 2026
 mode: subagent
-model: google/gemini-3.1-pro-preview
+model: opencode/big-pickle
 temperature: 0.2
 permission:
   skill:

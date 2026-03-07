@@ -1,7 +1,7 @@
 ---
 description: Especialista en error handling - thiserror para libs, anyhow para apps, Result + ?, error chains
 mode: subagent
-model: groq/qwen/qwen3-32b
+model: mistral/devstral-medium-latest
 temperature: 0.2
 permission:
   skill:

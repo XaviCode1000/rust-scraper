@@ -1,7 +1,7 @@
 ---
 description: Especialista en type system - newtypes, enums, generics, typestate, phantom markers, repr transparente
 mode: subagent
-model: google/gemini-2.5-pro
+model: opencode/minimax-m2.5-free
 temperature: 0.2
 permission:
   skill:

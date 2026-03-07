@@ -1,7 +1,7 @@
 ---
 description: Especialista en documentación Rust - /// comments, ejemplos compilables, secciones de errores, README, rustdoc
 mode: subagent
-model: google/gemini-2.5-flash
+model:  mistral/labs-devstral-medium-latest
 temperature: 0.2
 permission:
   skill:

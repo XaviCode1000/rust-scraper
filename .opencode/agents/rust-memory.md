@@ -1,7 +1,7 @@
 ---
 description: Especialista en memoria y ownership - borrowing, lifetimes, clones innecesarios, optimización de allocaciones
 mode: subagent
-model: google/gemini-2.5-pro
+model: mistral/devstral-medium-latest
 temperature: 0.2
 permission:
   skill:

@@ -1,7 +1,7 @@
 ---
 description: Especialista en optimización y performance - LTO, PGO, inline, profiling, benchmarks con criterion
 mode: subagent
-model: google/gemini-3-flash-preview
+model: mistral/devstral-medium-latest
 temperature: 0.2
 permission:
   skill:
