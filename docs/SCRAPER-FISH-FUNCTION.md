@@ -35,7 +35,10 @@ scraper <comando> [opciones] <url>
 | Opción | Descripción | Default |
 |--------|-------------|---------|
 | `-o, --output <dir>` | Directorio de salida | `./output` |
+| `-f, --format <fmt>` | Formato: `markdown`, `html`, `json` | `markdown` |
 | `-c, --concurrency <n>` | Descargas simultáneas | `5` |
+| `-d, --delay-ms <ms>` | Delay entre requests (ms) | `0` |
+| `-m, --max-pages <n>` | Máximo de páginas | `100` |
 | `-v, --verbose` | Logging detallado (debug) | - |
 
 ## 📖 Ejemplos
@@ -48,6 +51,9 @@ scraper https://example.com
 
 # Con directorio personalizado
 scraper -o ./mi-scrape https://example.com
+
+# Con formato HTML
+scraper -f html https://example.com
 ```
 
 ### Con Sitemap
@@ -56,8 +62,8 @@ scraper -o ./mi-scrape https://example.com
 # Auto-descubre sitemap de robots.txt
 scraper sitemap https://example.com
 
-# Sitemap explícito
-scraper sitemap --sitemap-url https://example.com/sitemap.xml.gz https://example.com
+# Sitemap explícito con formato JSON
+scraper sitemap -f json https://example.com
 ```
 
 ### Por Tipo de Asset
@@ -92,11 +98,17 @@ scraper ui sitemap https://example.com
 # Concurrency personalizada
 scraper -c 10 sitemap https://example.com
 
+# Con delay (anti-WAF)
+scraper -d 1000 sitemap https://example.com
+
+# Límite de páginas
+scraper -m 50 https://example.com
+
 # Logging detallado
 scraper -v sitemap img https://example.com
 
 # Combinado completo
-scraper -v -c 3 -o ./docs sitemap doc https://example.com
+scraper -f html -c 3 -d 500 -m 100 sitemap all https://example.com
 ```
 
 ## 🎯 Casos de Uso Comunes
@@ -158,8 +170,12 @@ alias scrap-doc="scraper doc"
 | `rust_scraper --url https://example.com` | `scraper https://example.com` |
 | `rust_scraper --use-sitemap --url https://example.com` | `scraper sitemap https://example.com` |
 | `rust_scraper --download-images --url https://example.com` | `scraper img https://example.com` |
-| `rust_scraper --interactive --use-sitemap --url https://example.com` | `scraper ui sitemap https://example.com` |
-| `rust_scraper --download-images --download-documents --url https://example.com` | `scraper all https://example.com` |
+| `rust_scraper --format html --url https://example.com` | `scraper -f html https://example.com` |
+| `rust_scraper --concurrency 3 --delay-ms 500 --url ...` | `scraper -c 3 -d 500 https://example.com` |
+| `rust_scraper --max-pages 50 --url https://example.com` | `scraper -m 50 https://example.com` |
+| `rust_scraper --interactive --use-sitemap --url ...` | `scraper ui sitemap https://example.com` |
+| `rust_scraper --download-images --download-documents --url ...` | `scraper all https://example.com` |
+| `rust_scraper --format html -c 3 -d 500 --use-sitemap --url ...` | `scraper sitemap -f html -c 3 -d 500 https://example.com` |
 
 ## 🐛 Troubleshooting
 
