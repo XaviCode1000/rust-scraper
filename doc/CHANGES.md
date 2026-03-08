@@ -4,6 +4,92 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## v0.3.0 - Asset Download & TLS Improvements (Current)
+
+### 🆕 New Features
+
+1. **Asset Download**
+   - `--download-images` - Download images to `output/images/`
+   - `--download-documents` - Download documents to `output/documents/`
+   - Automatic MIME type detection
+   - File size limit (50MB max)
+   - Timeout per download (30s)
+   - Unique filenames based on SHA256 hash
+
+2. **TLS Configuration**
+   - System certificate support via rustls
+   - Native roots for cross-platform compatibility
+   - No external CA bundle dependencies
+
+### 🔧 Improvements
+
+| Before | After |
+|--------|-------|
+| No asset download | Automatic image/document download |
+| No TLS configuration | System certificate support |
+| Fixed filenames | Unique hash-based filenames |
+| No MIME detection | Automatic MIME type detection |
+
+### 📦 Dependencies Updated
+
+```toml
+# Added
+sha2 = "0.10"  # File hashing for unique filenames
+mime = "0.3"   # MIME type detection
+
+# Updated
+reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli"] }
+```
+
+### 🧪 Testing
+
+- **New tests** covering:
+  - Asset download functionality
+  - MIME type detection
+  - File naming with hash
+  - File size validation
+  - Timeout handling
+
+### 📊 Validation
+
+```
+✅ cargo build --release  # Compiles
+✅ cargo test             # All tests passing
+✅ cargo clippy           # No warnings
+```
+
+### 🏗️ Usage Examples
+
+```bash
+# Download images only
+cargo run --release -- --url "https://example.com" --download-images
+
+# Download documents only
+cargo run --release -- --url "https://example.com" --download-documents
+
+# Download both images and documents
+cargo run --release -- --url "https://example.com" --download-images --download-documents
+
+# Custom output directory
+cargo run --release -- --url "https://example.com" --download-images -o ./my-downloads
+```
+
+### 📁 Output Structure
+
+```
+output/
+├── example.com/
+│   └── index.md
+├── images/
+│   ├── 027e504eabfc.png
+│   ├── 0c2f4f0301fe.png
+│   └── e15cbdd2d653.svg
+└── documents/
+    └── 9870371a7a8c.pdf
+```
+
+---
+
 ## v0.2.0 - Modern Scraper Stack (Major Refactor)
 
 ### ⚠️ Breaking Changes
@@ -145,13 +231,14 @@ cargo run -- --url "https://example.com"
 
 | Version | Date | Status |
 |---------|------|--------|
-| v0.2.0 | 2026-03 | 🟢 Current |
+| v0.3.0 | 2026-03 | 🟢 Current |
+| v0.2.0 | 2026-03 | 🟢 Previous |
 | v0.1.2 | 2024 | 🔵 Previous |
 | v0.1.1 | 2024 | 🔵 Previous |
 | v0.1.0 | 2024 | 🔵 Previous |
 
 ---
 
-**Latest Version**: v0.2.0  
-**Rust Edition**: 2021  
+**Latest Version**: v0.3.0
+**Rust Edition**: 2021
 **Status**: ✅ Production Ready

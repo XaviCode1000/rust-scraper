@@ -6,9 +6,15 @@ pub mod config;
 pub mod scraper;
 pub mod url_path;
 
+// Asset detection and download modules
+pub mod detector;
+pub mod downloader;
+pub mod extractor;
+
 pub use clap::{Parser, ValueEnum};
 pub use scraper::{
-    create_http_client, save_results, scrape_with_readability, ScrapedContent, ValidUrl,
+    create_http_client, save_results, scrape_with_config, scrape_with_readability, DownloadedAsset,
+    ScrapedContent, ValidUrl,
 };
 pub use std::path::PathBuf;
 pub use url_path::{Domain, OutputPath, UrlPath};
@@ -22,6 +28,49 @@ pub enum OutputFormat {
     Text,
     /// JSON estructurado
     Json,
+}
+
+/// Configuration for asset downloading
+#[derive(Debug, Clone, Default)]
+pub struct ScraperConfig {
+    /// Enable image downloading
+    pub download_images: bool,
+    /// Enable document downloading (PDF, DOCX, XLSX, etc.)
+    pub download_documents: bool,
+    /// Output directory for downloaded assets
+    pub output_dir: PathBuf,
+    /// Maximum file size in bytes (default: 50MB)
+    pub max_file_size: Option<u64>,
+}
+
+impl ScraperConfig {
+    /// Create a new config with default values
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enable image downloading
+    pub fn with_images(mut self) -> Self {
+        self.download_images = true;
+        self
+    }
+
+    /// Enable document downloading
+    pub fn with_documents(mut self) -> Self {
+        self.download_documents = true;
+        self
+    }
+
+    /// Set custom output directory
+    pub fn with_output_dir(mut self, dir: PathBuf) -> Self {
+        self.output_dir = dir;
+        self
+    }
+
+    /// Check if any download is enabled
+    pub fn has_downloads(&self) -> bool {
+        self.download_images || self.download_documents
+    }
 }
 
 /// CLI Arguments - URL es OBLIGATORIA, no hay default
@@ -54,6 +103,18 @@ pub struct Args {
     /// Máximo de páginas a scrapear
     #[arg(long, default_value = "10", help = "Maximum pages to scrape")]
     pub max_pages: usize,
+
+    /// Descargar imágenes encontradas en la página
+    #[arg(long, default_value = "false", help = "Download images from the page")]
+    pub download_images: bool,
+
+    /// Descargar documentos encontrados en la página (PDF, DOCX, XLSX, etc.)
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Download documents from the page"
+    )]
+    pub download_documents: bool,
 
     /// Verbosity del logging
     #[arg(short, long, action = clap::ArgAction::Count)]

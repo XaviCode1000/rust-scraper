@@ -3,7 +3,7 @@
 //! Extracts clean, structured content from web pages using readability algorithm.
 
 use anyhow::Context;
-use rust_scraper::{config, scraper, validate_and_parse_url, Args, Parser};
+use rust_scraper::{config, scraper, validate_and_parse_url, Args, Parser, ScraperConfig};
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -31,10 +31,25 @@ async fn main() -> anyhow::Result<()> {
     // 4. Crear cliente HTTP configurado
     let client = scraper::create_http_client()?;
 
-    // 5. Ejecutar scraping
+    // 5. Configurar scraping con opciones de descarga
+    let config = ScraperConfig {
+        download_images: args.download_images,
+        download_documents: args.download_documents,
+        output_dir: args.output.clone(),
+        max_file_size: Some(50 * 1024 * 1024), // 50MB default
+    };
+
+    if config.download_images {
+        info!("🖼️  Image download: ENABLED");
+    }
+    if config.download_documents {
+        info!("📄 Document download: ENABLED");
+    }
+
+    // 6. Ejecutar scraping
     info!("📡 Iniciando scraping...");
 
-    let results = scraper::scrape_with_readability(&client, &parsed_url)
+    let results = scraper::scrape_with_config(&client, &parsed_url, &config)
         .await
         .context("Scraping failed")?;
 
@@ -48,9 +63,18 @@ async fn main() -> anyhow::Result<()> {
         results.len()
     );
 
-    // 6. Guardar resultados
+    // 7. Guardar resultados
     info!("💾 Guardando resultados...");
     scraper::save_results(&results, &args.output, &args.format)?;
+
+    // Resumen de assets descargados
+    let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
+    if total_assets > 0 {
+        info!(
+            "📦 Total assets descargados: {} (imágenes y documentos)",
+            total_assets
+        );
+    }
 
     info!("🎉 Pipeline completado exitosamente!");
     info!("📊 Archivos generados: {}", args.output.display());

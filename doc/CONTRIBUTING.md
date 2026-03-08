@@ -52,8 +52,9 @@ src/
 ├── lib.rs          # Library root, re-exports
 ├── main.rs         # CLI entry point
 ├── scraper.rs      # Core scraping logic
-├── config.rs       # Logging configuration
-└── url_path.rs    # Type-safe URL handling
+├── config.rs       # Configuration & logging
+├── downloader.rs   # Asset download module
+└── detector.rs     # MIME type detection
 ```
 
 ## Adding Features
@@ -61,6 +62,7 @@ src/
 1. **New output format**: Add to `OutputFormat` enum in `lib.rs`
 2. **New URL handling**: Add methods to `url_path.rs`
 3. **New dependencies**: Update `Cargo.toml`
+4. **Asset download**: Add to `downloader.rs` and `detector.rs`
 
 ## Pull Request Process
 
@@ -82,7 +84,7 @@ Follow conventional commits:
 
 Example:
 ```
-feat: add syntax highlighting for code blocks
+feat: add asset download functionality
 ```
 
 ## Questions

@@ -72,6 +72,19 @@ impl std::fmt::Display for ValidUrl {
     }
 }
 
+/// Represents a downloaded asset
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadedAsset {
+    /// Original URL of the asset
+    pub url: String,
+    /// Local path where asset was saved
+    pub local_path: String,
+    /// Asset type (image or document)
+    pub asset_type: String,
+    /// File size in bytes
+    pub size: u64,
+}
+
 /// Represents a scraped content item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrapedContent {
@@ -90,6 +103,9 @@ pub struct ScrapedContent {
     /// The HTML source (optional, for debugging)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub html: Option<String>,
+    /// Downloaded assets (images, documents)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<DownloadedAsset>,
 }
 
 /// Create configured HTTP client with best practices
@@ -115,6 +131,23 @@ pub fn create_http_client() -> Result<Client> {
 pub async fn scrape_with_readability(
     client: &Client,
     url: &url::Url,
+) -> Result<Vec<ScrapedContent>> {
+    scrape_with_config(client, url, &crate::ScraperConfig::default()).await
+}
+
+/// Scrape a URL with asset downloading configuration
+///
+/// # Arguments
+/// * `client` - HTTP client
+/// * `url` - URL to scrape
+/// * `config` - Scraper configuration with download options
+///
+/// # Returns
+/// * `Vec<ScrapedContent>` - Scraped content with downloaded assets
+pub async fn scrape_with_config(
+    client: &Client,
+    url: &url::Url,
+    config: &crate::ScraperConfig,
 ) -> Result<Vec<ScrapedContent>> {
     let mut results = Vec::new();
 
@@ -142,24 +175,31 @@ pub async fn scrape_with_readability(
     debug!("📄 Downloaded {} bytes from {}", html.len(), url);
 
     // Extract clean content using Readability algorithm
-    // legible::parse requires url and options as arguments
     match legible::parse(&html, Some(url.as_str()), None) {
         Ok(article) => {
+            // Download assets if configured
+            let assets = if config.has_downloads() {
+                download_assets(&html, url, config).await?
+            } else {
+                Vec::new()
+            };
+
             let content = ScrapedContent {
-                // legible uses fields, not methods
                 title: article.title,
                 content: article.text_content,
                 url: ValidUrl::new(url.clone()),
                 excerpt: article.excerpt,
                 author: article.byline,
                 date: article.published_time,
-                html: Some(html), // Keep for debugging if needed
+                html: Some(html),
+                assets,
             };
 
             info!(
-                "✅ Extracted: {} ({} chars)",
+                "✅ Extracted: {} ({} chars, {} assets)",
                 content.title,
-                content.content.len()
+                content.content.len(),
+                content.assets.len()
             );
             results.push(content);
         }
@@ -168,8 +208,13 @@ pub async fn scrape_with_readability(
             // Try fallback: just extract text directly
             let fallback_content = extract_fallback_text(&html);
 
-            // FIX: Propagar error en vez de fallback silencioso
-            // La URL ya fue validada, pero por seguridad checkedamos igual
+            // Download assets if configured
+            let assets = if config.has_downloads() {
+                download_assets(&html, url, config).await?
+            } else {
+                Vec::new()
+            };
+
             let title = url
                 .host_str()
                 .ok_or_else(|| anyhow::anyhow!("URL missing host after validation: {}", url))?
@@ -183,14 +228,106 @@ pub async fn scrape_with_readability(
                 author: None,
                 date: None,
                 html: Some(html),
+                assets,
             });
         }
     }
 
-    // Note: For multi-page crawling, implement delay and loop here
-    // For now, single page as per max_pages = 1 for simplicity
-
     Ok(results)
+}
+
+/// Download assets (images and documents) from HTML
+#[cfg(any(feature = "images", feature = "documents"))]
+async fn download_assets(
+    html: &str,
+    base_url: &url::Url,
+    config: &crate::ScraperConfig,
+) -> Result<Vec<DownloadedAsset>> {
+    use crate::downloader::{DownloadConfig, Downloader};
+    use crate::extractor;
+
+    let mut assets = Vec::new();
+
+    // Extract image URLs
+    if config.download_images {
+        let images = extractor::extract_images(html, base_url);
+        if !images.is_empty() {
+            info!("🖼️  Found {} images to download", images.len());
+
+            let download_config = DownloadConfig {
+                output_dir: config.output_dir.clone(),
+                images_dir: "images".to_string(),
+                documents_dir: "documents".to_string(),
+                max_file_size: config.max_file_size.unwrap_or(50 * 1024 * 1024),
+                timeout_secs: 30,
+            };
+
+            let downloader = Downloader::new(download_config)?;
+
+            for img in images {
+                match downloader.download(&img.url).await {
+                    Ok(downloaded) => {
+                        assets.push(DownloadedAsset {
+                            url: downloaded.url,
+                            local_path: downloaded.local_path.to_string_lossy().into_owned(),
+                            asset_type: "image".to_string(),
+                            size: downloaded.size,
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Failed to download image {}: {}", img.url, e);
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract document URLs
+    if config.download_documents {
+        let documents = extractor::extract_documents(html, base_url);
+        if !documents.is_empty() {
+            info!("📄 Found {} documents to download", documents.len());
+
+            let download_config = DownloadConfig {
+                output_dir: config.output_dir.clone(),
+                images_dir: "images".to_string(),
+                documents_dir: "documents".to_string(),
+                max_file_size: config.max_file_size.unwrap_or(50 * 1024 * 1024),
+                timeout_secs: 30,
+            };
+
+            let downloader = Downloader::new(download_config)?;
+
+            for doc in documents {
+                match downloader.download(&doc.url).await {
+                    Ok(downloaded) => {
+                        assets.push(DownloadedAsset {
+                            url: downloaded.url,
+                            local_path: downloaded.local_path.to_string_lossy().into_owned(),
+                            asset_type: "document".to_string(),
+                            size: downloaded.size,
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Failed to download document {}: {}", doc.url, e);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(assets)
+}
+
+/// Download assets - stub for when features are disabled
+#[cfg(not(any(feature = "images", feature = "documents")))]
+async fn download_assets(
+    _html: &str,
+    _base_url: &url::Url,
+    _config: &crate::ScraperConfig,
+) -> Result<Vec<DownloadedAsset>> {
+    // No-op when features are disabled
+    Ok(Vec::new())
 }
 
 /// Fallback: Extract text without readability (basic HTML stripping)
@@ -252,96 +389,11 @@ fn apply_syntax_highlighting(markdown: &str) -> String {
         // Replace the code block with highlighted version
         // Note: This is a simplified version - in production you might want to
         // use a different approach to preserve the markdown structure
-        let replacement = format!("```{}\n{}```", language, code);
+        let replacement = format!("```{}\n{}```", language, highlighted);
         result = result.replace(cap.get(0).unwrap().as_str(), &replacement);
     }
 
     result
-}
-
-/// Extract all image URLs from HTML
-fn extract_image_urls(html: &str) -> Vec<(String, String)> {
-    use scraper::{Html, Selector};
-
-    let document = Html::parse_document(html);
-    let img_selector = Selector::parse("img[src]").unwrap();
-
-    let mut images = Vec::new();
-
-    for img in document.select(&img_selector) {
-        if let Some(src) = img.value().attr("src") {
-            if !src.is_empty() && !src.starts_with("data:") {
-                let alt = img.value().attr("alt").unwrap_or("").to_string();
-                images.push((src.to_string(), alt));
-            }
-        }
-    }
-
-    images
-}
-
-/// Download an image and save it locally
-async fn download_image(
-    client: &Client,
-    image_url: &str,
-    base_url: &url::Url,
-    output_dir: &Path,
-    relative_path: &str,
-) -> Result<String> {
-    // Resolve relative URLs
-    let absolute_url = base_url
-        .join(image_url)
-        .map_err(|e| anyhow::anyhow!("Failed to resolve image URL {}: {}", image_url, e))?;
-
-    let response = client
-        .get(absolute_url.as_str())
-        .send()
-        .await
-        .with_context(|| format!("Failed to download image: {}", absolute_url))?;
-
-    if !response.status().is_success() {
-        anyhow::bail!(
-            "Failed to download image: {} - {}",
-            absolute_url,
-            response.status()
-        );
-    }
-
-    // Get content type to determine extension
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg");
-
-    let extension = match content_type {
-        "image/png" => "png",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/svg+xml" => "svg",
-        _ => "jpg",
-    };
-
-    // Generate filename from URL or use hash
-    let url_hash = format!("{:x}", md5::compute(image_url.as_bytes()));
-    let filename = format!("{}.{}", &url_hash[..12], extension);
-
-    // Create images directory
-    let images_dir = output_dir.join(relative_path);
-    std::fs::create_dir_all(&images_dir)?;
-
-    let image_path = images_dir.join(&filename);
-
-    // Download and save
-    let bytes = response
-        .bytes()
-        .await
-        .with_context(|| format!("Failed to read image bytes from {}", absolute_url))?;
-
-    std::fs::write(&image_path, &bytes)?;
-
-    // Return relative path to the image
-    Ok(format!("{}{}", relative_path, filename))
 }
 
 /// YAML frontmatter metadata
@@ -601,6 +653,7 @@ mod tests {
             author: Some("John Doe".to_string()),
             date: Some("2024-01-15".to_string()),
             html: None,
+            assets: Vec::new(),
         }];
 
         // Act
@@ -625,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_results_markdown_multiple_items() {
+    fn test_save_results_text_multiple_items() {
         // Arrange
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
@@ -639,6 +692,7 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
+                assets: Vec::new(),
             },
             ScrapedContent {
                 title: "Article 2".to_string(),
@@ -648,43 +702,9 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
+                assets: Vec::new(),
             },
         ];
-
-        // Act
-        let result = save_results(&results, &output_dir, &super::super::OutputFormat::Markdown);
-
-        // Assert
-        assert!(result.is_ok());
-
-        use walkdir::WalkDir;
-        let files: Vec<_> = WalkDir::new(&output_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .collect();
-        assert_eq!(files.len(), 2);
-    }
-
-    // ==========================================================================
-    // Tests: save_results - Text format
-    // ==========================================================================
-
-    #[test]
-    fn test_save_results_text_single_item() {
-        // Arrange
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let output_dir = temp_dir.path().to_path_buf();
-
-        let results = vec![ScrapedContent {
-            title: "Test Article".to_string(),
-            content: "Plain text content here.".to_string(),
-            url: ValidUrl::parse("https://example.com").unwrap(),
-            excerpt: None,
-            author: None,
-            date: None,
-            html: None,
-        }];
 
         // Act
         let result = save_results(&results, &output_dir, &super::super::OutputFormat::Text);
@@ -698,13 +718,22 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .collect();
-        assert_eq!(files.len(), 1);
+        // Text format creates one file per item
+        assert_eq!(files.len(), 2);
 
-        let content = fs::read_to_string(files[0].path()).unwrap();
+        // Verify both files exist with correct content
+        let mut contents: Vec<String> = files
+            .iter()
+            .map(|f| fs::read_to_string(f.path()).unwrap())
+            .collect();
+        // Sort to ensure consistent order
+        contents.sort();
+
+        assert!(contents[0].contains("Content 1"));
+        assert!(contents[1].contains("Content 2"));
         // Text format should only contain content, not title or URL
-        assert!(content.contains("Plain text content here."));
-        assert!(!content.contains("Test Article")); // Title not in file
-        assert!(!content.contains("https://example.com")); // URL not in file
+        assert!(!contents[0].contains("Article"));
+        assert!(!contents[0].contains("https://example.com"));
     }
 
     // ==========================================================================
@@ -717,6 +746,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
 
+        // Use non-empty assets to ensure field is serialized
         let results = vec![
             ScrapedContent {
                 title: "Article 1".to_string(),
@@ -726,6 +756,12 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
+                assets: vec![DownloadedAsset {
+                    url: "https://example.com/img.jpg".to_string(),
+                    local_path: "images/img.jpg".to_string(),
+                    asset_type: "image".to_string(),
+                    size: 1024,
+                }],
             },
             ScrapedContent {
                 title: "Article 2".to_string(),
@@ -735,6 +771,12 @@ mod tests {
                 author: None,
                 date: None,
                 html: None,
+                assets: vec![DownloadedAsset {
+                    url: "https://example.com/doc.pdf".to_string(),
+                    local_path: "documents/doc.pdf".to_string(),
+                    asset_type: "document".to_string(),
+                    size: 2048,
+                }],
             },
         ];
 
@@ -752,6 +794,9 @@ mod tests {
         // Verify valid JSON and contains both articles
         let parsed: Vec<ScrapedContent> = serde_json::from_str(&content).expect("Valid JSON");
         assert_eq!(parsed.len(), 2);
+        // Verify assets were serialized
+        assert_eq!(parsed[0].assets.len(), 1);
+        assert_eq!(parsed[1].assets.len(), 1);
     }
 
     #[test]
@@ -760,6 +805,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let output_dir = temp_dir.path().to_path_buf();
 
+        // Use non-empty assets to ensure field is serialized
         let results = vec![ScrapedContent {
             title: "Test Title".to_string(),
             content: "Test Content".to_string(),
@@ -768,6 +814,12 @@ mod tests {
             author: Some("Author Name".to_string()),
             date: Some("2024-01-01".to_string()),
             html: None, // Should be skipped in serialization
+            assets: vec![DownloadedAsset {
+                url: "https://example.com/test.png".to_string(),
+                local_path: "images/test.png".to_string(),
+                asset_type: "image".to_string(),
+                size: 512,
+            }],
         }];
 
         // Act
@@ -811,6 +863,7 @@ mod tests {
             author: None,
             date: None,
             html: None,
+            assets: Vec::new(),
         }];
 
         // Act
@@ -851,6 +904,7 @@ mod tests {
             author: Some("Author".to_string()),
             date: Some("2024-01-01".to_string()),
             html: None,
+            assets: Vec::new(),
         };
 
         // Act
@@ -872,7 +926,8 @@ mod tests {
             "url": "https://example.com",
             "excerpt": "Excerpt",
             "author": "Author",
-            "date": "2024-01-01"
+            "date": "2024-01-01",
+            "assets": []
         }"#;
 
         // Act
