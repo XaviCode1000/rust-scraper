@@ -4,8 +4,8 @@
 
 use anyhow::Context;
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_config,
-    validate_and_parse_url, Args, Parser, ScraperConfig, UserAgentCache,
+    create_http_client, save_results, scrape_with_config, validate_and_parse_url, Args, Parser,
+    ScraperConfig, UserAgentCache,
 };
 use tracing::{info, warn};
 
@@ -29,7 +29,10 @@ async fn main() -> anyhow::Result<()> {
     // 3. Load user agents with TTL-based caching (TASK-001)
     info!("🔄 Loading user agents (cache check)...");
     let user_agents = UserAgentCache::load().await;
-    info!("✅ User agent loaded: {} agents available", user_agents.len());
+    info!(
+        "✅ User agent loaded: {} agents available",
+        user_agents.len()
+    );
 
     // 4. Validate URL - parse with url crate (TASK-003: RFC 3986 compliant)
     let parsed_url = validate_and_parse_url(&args.url).context("Invalid URL provided")?;

@@ -22,16 +22,17 @@
 //! # }
 //! ```
 
-use std::fs;
-use std::path::PathBuf;
-use std::time::Duration;
 use chrono::{DateTime, Datelike, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
 use tracing;
 
 /// API URL for fresh user agents
-const UA_LIST_URL: &str = "https://raw.githubusercontent.com/user-agents-api/data/main/user-agents.json";
+const UA_LIST_URL: &str =
+    "https://raw.githubusercontent.com/user-agents-api/data/main/user-agents.json";
 
 /// Minimum acceptable Chrome version (2025+)
 /// Chrome 131 = Enero 2025, Chrome 132 = Marzo 2026
@@ -53,7 +54,7 @@ impl UserAgentCache {
             .join("rust_scraper")
             .join("user_agents.json")
     }
-    
+
     /// Load UAs: cache if valid, else fetch fresh
     ///
     /// # Returns
@@ -68,22 +69,25 @@ impl UserAgentCache {
     /// - Cache is older than 1 year
     pub async fn load() -> Vec<String> {
         let current_year = Utc::now().year();
-        
+
         // Try load from cache
         if let Ok(cache) = Self::load_from_cache() {
             // Chrome 120 = 2023, Chrome 131 = 2025, Chrome 132 = 2026
             // Formula: chrome_year = 2023 + (chrome_version - 120)
             let cache_chrome_year = 2023 + (cache.chrome_version - 120) as i32;
-            
+
             // Cache valid if <= 1 year old
             if cache_chrome_year >= current_year - 1 {
                 tracing::info!("Using cached user agents (Chrome {})", cache.chrome_version);
                 return cache.agents;
             }
-            
-            tracing::warn!("Cached user agents outdated (Chrome {}), fetching fresh...", cache.chrome_version);
+
+            tracing::warn!(
+                "Cached user agents outdated (Chrome {}), fetching fresh...",
+                cache.chrome_version
+            );
         }
-        
+
         // Fetch fresh
         match Self::fetch_and_cache().await {
             Ok(agents) => agents,
@@ -93,26 +97,24 @@ impl UserAgentCache {
             }
         }
     }
-    
+
     /// Load user agents from cache file
     fn load_from_cache() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let content = fs::read_to_string(Self::cache_path())?;
         let cache: Self = serde_json::from_str(&content)?;
         Ok(cache)
     }
-    
+
     /// Fetch user agents from API and save to cache
     async fn fetch_and_cache() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()?;
-        
+        let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+
         // Fetch from API
         let agents = match client.get(UA_LIST_URL).send().await {
             Ok(resp) if resp.status().is_success() => {
                 // Extract JSON from response
                 let json: serde_json::Value = resp.json().await?;
-                
+
                 // Filter Chrome 131+ UAs
                 json.as_array()
                     .map(|arr| {
@@ -135,35 +137,40 @@ impl UserAgentCache {
             }
             _ => Self::fallback_agents(),
         };
-        
+
         // Extract Chrome version from first UA
-        let chrome_version = agents.first()
+        let chrome_version = agents
+            .first()
             .and_then(|ua| ua.split("Chrome/").nth(1))
             .and_then(|s| s.split('.').next())
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(MIN_CHROME_VERSION);
-        
+
         // Save cache (ignore errors - read-only FS, containers, etc.)
         let cache = UserAgentCache {
             agents: agents.clone(),
             chrome_version,
             downloaded_at: Utc::now(),
         };
-        
+
         if let Some(parent) = Self::cache_path().parent() {
             let _ = fs::create_dir_all(parent); // Ignore errors
         }
-        
+
         // Silently ignore write errors (read-only FS, containers, etc.)
         if let Ok(json) = serde_json::to_string_pretty(&cache) {
             let _ = fs::write(Self::cache_path(), json);
         }
-        
-        tracing::info!("Cached {} user agents (Chrome {})", agents.len(), chrome_version);
-        
+
+        tracing::info!(
+            "Cached {} user agents (Chrome {})",
+            agents.len(),
+            chrome_version
+        );
+
         Ok(agents)
     }
-    
+
     /// Fallback: hardcoded list updated 2026
     /// Chrome 131 (Enero 2025) y Chrome 132 (Marzo 2026)
     pub fn fallback_agents() -> Vec<String> {
@@ -226,7 +233,9 @@ mod tests {
         let agents = UserAgentCache::load().await;
         assert!(!agents.is_empty());
         // At least one should contain Chrome/13x or Firefox
-        assert!(agents.iter().any(|ua| ua.contains("Chrome/") || ua.contains("Firefox/")));
+        assert!(agents
+            .iter()
+            .any(|ua| ua.contains("Chrome/") || ua.contains("Firefox/")));
     }
 
     #[test]

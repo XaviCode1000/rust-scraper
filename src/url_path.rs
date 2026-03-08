@@ -22,9 +22,8 @@ use thiserror::Error;
 /// These names cannot be used as file names on Windows, regardless of extension.
 /// Attempting to create files with these names will crash on Windows.
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 /// Domain extracted from URL, validated and sanitized.
@@ -122,18 +121,18 @@ impl UrlPath {
         let path_trimmed = self.raw.trim_start_matches('/');
         let last_component = path_trimmed.rsplit('/').next().unwrap_or(path_trimmed);
         let sanitized = Self::sanitize_path_segment(last_component);
-        
+
         // Check Windows reserved names (case-insensitive)
         let upper = sanitized.to_uppercase();
         let is_reserved = WINDOWS_RESERVED.iter().any(|&r| r == upper);
-        
+
         let final_name = if is_reserved {
             // Append suffix to avoid collision
             format!("{}_safe", sanitized)
         } else {
             sanitized
         };
-        
+
         format!("{}.md", final_name)
     }
 
