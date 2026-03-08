@@ -324,7 +324,7 @@ impl CrawlResult {
 #[non_exhaustive]
 pub enum CrawlError {
     /// Network error during HTTP request
-    /// 
+    ///
     /// Note: Does NOT contain reqwest::Error (that's Infra detail).
     /// Infrastructure layer converts reqwest::Error → this variant.
     #[error("network error: {message} (status: {status_code:?})")]
@@ -403,12 +403,12 @@ pub fn matches_pattern(url_str: &str, pattern: &str) -> bool {
     // Parse URL FIRST (extract real host)
     let url = match Url::parse(url_str) {
         Ok(u) => u,
-        Err(_) => return false,  // Invalid URL → no match
+        Err(_) => return false, // Invalid URL → no match
     };
 
     let host = match url.host_str() {
         Some(h) => h,
-        None => return false,  // No host → no match
+        None => return false, // No host → no match
     };
 
     // Handle empty pattern
@@ -594,7 +594,7 @@ mod tests {
             "https://evil.com/?q=example.com/path",
             "*.example.com/*"
         ));
-        
+
         assert!(!matches_pattern(
             "https://attacker.com/?redirect=example.com/admin",
             "*.example.com/*"
@@ -614,7 +614,7 @@ mod tests {
             "https://blog.example.com/post",
             "*.example.com/*"
         ));
-        
+
         assert!(matches_pattern(
             "https://sub.example.com/page",
             "*.example.com"
@@ -634,7 +634,7 @@ mod tests {
             "https://example.com:8080/path",
             "*.example.com/*"
         ));
-        
+
         assert!(matches_pattern(
             "https://blog.example.com:443/post",
             "*.example.com/*"
@@ -653,10 +653,7 @@ mod tests {
     #[test]
     fn test_matches_pattern_ipv6() {
         // IPv6 debe funcionar
-        assert!(matches_pattern(
-            "http://[::1]:8080/path",
-            "[::1]"
-        ));
+        assert!(matches_pattern("http://[::1]:8080/path", "[::1]"));
     }
 
     #[test]
@@ -687,7 +684,10 @@ mod tests {
     #[test]
     fn test_matches_pattern_exact_host() {
         assert!(matches_pattern("https://example.com/page", "example.com"));
-        assert!(!matches_pattern("https://sub.example.com/page", "example.com"));
+        assert!(!matches_pattern(
+            "https://sub.example.com/page",
+            "example.com"
+        ));
     }
 
     #[test]

@@ -71,10 +71,7 @@ pub fn create_rate_limited_client(delay_ms: u64) -> Result<Client> {
 ///
 /// * `Ok(String)` - Response text
 /// * `Err(CrawlError)` - Error during fetch
-pub async fn fetch_url(
-    url: &str,
-    config: &CrawlerConfig,
-) -> Result<String, CrawlError> {
+pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<String, CrawlError> {
     debug!("Fetching URL: {}", url);
 
     let client = create_rate_limited_client(config.delay_ms)
@@ -99,13 +96,10 @@ pub async fn fetch_url(
         });
     }
 
-    let text = response
-        .text()
-        .await
-        .map_err(|e| CrawlError::Network {
-            message: e.to_string(),
-            status_code: None,
-        })?;
+    let text = response.text().await.map_err(|e| CrawlError::Network {
+        message: e.to_string(),
+        status_code: None,
+    })?;
 
     Ok(text)
 }

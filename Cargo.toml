@@ -19,7 +19,7 @@ clap = { version = "4", features = ["derive"] }
 # HTTP & Networking - Reqwest con retry y tls
 # Nota: rustls-tls-native-roots usa certificados del sistema (/etc/ssl/certs)
 # Si falla SSL, actualizar certificados: sudo pacman -Sy ca-certificates
-reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli", "stream"] }
+reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli", "stream", "json"] }
 
 # Bytes type for streaming
 bytes = "1"
@@ -81,6 +81,9 @@ thiserror = "2"
 
 # Random for user agent rotation (TASK-05)
 rand = "0.8"
+
+# Cache directory management (TASK-001: User-Agent lazy update)
+dirs = "5"
 
 # Walking directories for tests
 walkdir = "2"

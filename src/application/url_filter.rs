@@ -213,20 +213,11 @@ mod tests {
     fn test_matches_pattern_exact_host() {
         // Exact host match (no path matching in SSRF-safe version)
         // Pattern matches HOST only, path is ignored
-        assert!(matches_pattern(
-            "https://example.com/page",
-            "example.com"
-        ));
+        assert!(matches_pattern("https://example.com/page", "example.com"));
         // Same host, different path - STILL MATCHES (host-only comparison)
-        assert!(matches_pattern(
-            "https://example.com/other",
-            "example.com"
-        ));
+        assert!(matches_pattern("https://example.com/other", "example.com"));
         // Different host - no match
-        assert!(!matches_pattern(
-            "https://other.com/page",
-            "example.com"
-        ));
+        assert!(!matches_pattern("https://other.com/page", "example.com"));
     }
 
     #[test]
@@ -423,10 +414,13 @@ mod tests {
     fn test_is_excluded_ssrf_safe() {
         // SSRF bypass attempt should NOT be excluded (different host)
         let patterns = vec!["*.example.com".to_string()];
-        
+
         // Evil domain should NOT match example.com pattern
-        assert!(!is_excluded("https://evil.com/?q=example.com/admin", &patterns));
-        
+        assert!(!is_excluded(
+            "https://evil.com/?q=example.com/admin",
+            &patterns
+        ));
+
         // Real example.com subdomain SHOULD match
         assert!(is_excluded("https://admin.example.com/page", &patterns));
     }

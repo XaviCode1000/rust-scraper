@@ -54,6 +54,7 @@ pub mod extractor;
 pub mod url_path;
 pub mod user_agent;
 pub use url_path::{Domain, OutputPath, UrlPath};
+pub use user_agent::{get_random_user_agent_from_pool, UserAgentCache};
 
 // CLI types
 pub use clap::{Parser, ValueEnum};
@@ -194,14 +195,24 @@ pub struct Args {
     pub verbose: u8,
 }
 
-/// Validate and parse a URL
+/// Validate and parse URL using url crate (RFC 3986 compliant)
 ///
 /// # Arguments
+///
 /// * `url` - URL string to validate
 ///
 /// # Returns
+///
 /// * `Ok(url::Url)` - Validated and parsed URL
 /// * `Err(ScraperError::InvalidUrl)` - Invalid URL
+///
+/// # Errors
+///
+/// Returns error if:
+/// - URL is empty
+/// - URL has invalid format
+/// - URL scheme is not http or https
+/// - URL has no host
 ///
 /// # Examples
 ///
@@ -219,14 +230,21 @@ pub fn validate_and_parse_url(url: &str) -> Result<url::Url> {
         return Err(ScraperError::invalid_url("URL cannot be empty"));
     }
 
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(ScraperError::invalid_url(
-            "URL must start with http:// or https://",
-        ));
-    }
+    // Url::parse automatically trims whitespace and handles case-insensitive schemes
+    // Following rust-skills: url-no-string-split (don't use starts_with for URLs)
+    let parsed = url::Url::parse(url.trim())
+        .map_err(|e| ScraperError::invalid_url(format!("Failed to parse URL '{}': {}", url, e)))?;
 
-    let parsed = url::Url::parse(url)
-        .map_err(|e| ScraperError::invalid_url(format!("Failed to parse URL: {}", e)))?;
+    // Check scheme (case-insensitive, already lowercased by Url::parse)
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(ScraperError::invalid_url(format!(
+                "URL must use http or https scheme, got '{}'",
+                scheme
+            )))
+        }
+    }
 
     if parsed.host_str().is_none() {
         return Err(ScraperError::invalid_url("URL must have a valid host"));
@@ -286,6 +304,77 @@ mod tests {
     #[test]
     fn test_validate_and_parse_url_invalid_scheme() {
         let result = validate_and_parse_url("ftp://example.com");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    // ========================================================================
+    // TASK-003: URL Validation Robusta Tests
+    // ========================================================================
+
+    #[test]
+    fn test_url_validation_with_spaces() {
+        // Url::parse trims whitespace automatically
+        let url = validate_and_parse_url(" https://example.com ").unwrap();
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_case_insensitive() {
+        // Scheme is case-insensitive
+        let url = validate_and_parse_url("HTTP://EXAMPLE.COM").unwrap();
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_https_uppercase() {
+        let url = validate_and_parse_url("HTTPS://example.com").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_mixed_case() {
+        let url = validate_and_parse_url("HtTpS://Example.COM").unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_with_leading_spaces() {
+        let url = validate_and_parse_url("   https://example.com").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_with_trailing_spaces() {
+        let url = validate_and_parse_url("https://example.com   ").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_invalid_scheme_ftp() {
+        let result = validate_and_parse_url("ftp://example.com");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    #[test]
+    fn test_url_validation_invalid_scheme_file() {
+        let result = validate_and_parse_url("file:///etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    #[test]
+    fn test_url_validation_no_scheme() {
+        let result = validate_and_parse_url("example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_url_validation_malformed() {
+        let result = validate_and_parse_url("not-a-valid-url-at-all");
         assert!(result.is_err());
     }
 }

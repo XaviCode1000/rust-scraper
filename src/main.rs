@@ -4,8 +4,8 @@
 
 use anyhow::Context;
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_config, validate_and_parse_url, Args, Parser,
-    ScraperConfig,
+    create_http_client, save_results, scrape_with_config,
+    validate_and_parse_url, Args, Parser, ScraperConfig, UserAgentCache,
 };
 use tracing::{info, warn};
 
@@ -22,24 +22,31 @@ async fn main() -> anyhow::Result<()> {
     };
     rust_scraper::config::init_logging(log_level);
 
-    info!("🚀 Rust Scraper v0.3.0 - Clean Architecture");
+    info!("🚀 Rust Scraper v0.4.0 - Clean Architecture");
     info!("📌 Target: {}", args.url);
     info!("📁 Output: {}", args.output.display());
 
-    // 3. Validate URL - parse with url crate
+    // 3. Load user agents with TTL-based caching (TASK-001)
+    info!("🔄 Loading user agents (cache check)...");
+    let user_agents = UserAgentCache::load().await;
+    info!("✅ User agent loaded: {} agents available", user_agents.len());
+
+    // 4. Validate URL - parse with url crate (TASK-003: RFC 3986 compliant)
     let parsed_url = validate_and_parse_url(&args.url).context("Invalid URL provided")?;
 
     info!("✅ URL validated: {}", parsed_url);
 
-    // 4. Create configured HTTP client (with retry + user-agent rotation)
+    // 5. Create configured HTTP client (with retry + user-agent rotation)
+    // Note: Uses deprecated get_random_user_agent() for backward compatibility
     let client = create_http_client()?;
 
-    // 5. Configure scraping with download options
+    // 6. Configure scraping with download options
     let config = ScraperConfig {
         download_images: args.download_images,
         download_documents: args.download_documents,
         output_dir: args.output.clone(),
         max_file_size: Some(50 * 1024 * 1024), // 50MB default
+        scraper_concurrency: 3,                // HDD-aware: nproc - 1 for 4C CPU
     };
 
     if config.download_images {
@@ -49,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         info!("📄 Document download: ENABLED");
     }
 
-    // 6. Execute scraping
+    // 7. Execute scraping
     info!("📡 Starting scraping...");
 
     let results = scrape_with_config(&client, &parsed_url, &config)
@@ -66,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         results.len()
     );
 
-    // 7. Save results
+    // 8. Save results
     info!("💾 Saving results...");
     save_results(&results, &args.output, &args.format)?;
 
