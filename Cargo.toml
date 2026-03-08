@@ -110,6 +110,8 @@ num_cpus = "1"
 
 # UUID for temp file generation (production-ready streaming)
 uuid = { version = "1", features = ["v4"] }
+async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
+tokio-util = { version = "0.7.18", features = ["io"] }
 
 [dev-dependencies]
 mockall = "0.12"

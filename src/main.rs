@@ -1,11 +1,13 @@
 //! Rust Scraper - Modern web scraper for RAG datasets
 //!
 //! Extracts clean, structured content from web pages using readability algorithm.
+//!
+//! FASE 3: Added sitemap support with --use-sitemap and --sitemap-url flags.
 
 use anyhow::Context;
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_config, validate_and_parse_url, Args, Parser,
-    ScraperConfig, UserAgentCache,
+    application::crawl_with_sitemap, create_http_client, save_results, scrape_with_config,
+    validate_and_parse_url, Args, CrawlerConfig, Parser, ScraperConfig, UserAgentCache,
 };
 use tracing::{info, warn};
 
@@ -59,29 +61,62 @@ async fn main() -> anyhow::Result<()> {
         info!("📄 Document download: ENABLED");
     }
 
-    // 7. Execute scraping
-    info!("📡 Starting scraping...");
+    // 7. FASE 3: Sitemap-based URL discovery (optional)
+    let urls_to_scrape = if args.use_sitemap {
+        info!("🗺️  Sitemap mode: ENABLED");
+        info!("🔍 Discovering URLs from sitemap...");
 
-    let results = scrape_with_config(&client, &parsed_url, &config)
-        .await
-        .context("Scraping failed")?;
+        // Use sitemap to discover URLs
+        let crawler_config = CrawlerConfig::new(parsed_url.clone());
+        let discovered =
+            crawl_with_sitemap(&args.url, args.sitemap_url.as_deref(), &crawler_config).await?;
 
-    if results.is_empty() {
-        warn!("⚠️  No content extracted from page");
+        info!("✅ Found {} URLs from sitemap", discovered.len());
+
+        if discovered.is_empty() {
+            warn!("⚠️  No URLs found in sitemap, falling back to direct scraping");
+            vec![parsed_url.clone()]
+        } else {
+            discovered.into_iter().map(|d| d.url).collect()
+        }
+    } else {
+        // Direct scraping (legacy mode)
+        vec![parsed_url.clone()]
+    };
+
+    // 8. Execute scraping for each discovered URL
+    let mut all_results = Vec::new();
+
+    for url_to_scrape in &urls_to_scrape {
+        info!("📡 Scraping: {}", url_to_scrape);
+
+        let results = scrape_with_config(&client, url_to_scrape, &config)
+            .await
+            .context(format!("Scraping failed for {}", url_to_scrape))?;
+
+        if results.is_empty() {
+            warn!("⚠️  No content extracted from {}", url_to_scrape);
+        } else {
+            info!(
+                "✅ Scraping completed: {} elements extracted from {}",
+                results.len(),
+                url_to_scrape
+            );
+            all_results.extend(results);
+        }
+    }
+
+    if all_results.is_empty() {
+        warn!("⚠️  No content extracted from any URL");
         return Ok(());
     }
 
-    info!(
-        "✅ Scraping completed: {} elements extracted",
-        results.len()
-    );
-
-    // 8. Save results
+    // 9. Save results
     info!("💾 Saving results...");
-    save_results(&results, &args.output, &args.format)?;
+    save_results(&all_results, &args.output, &args.format)?;
 
     // Summary of downloaded assets
-    let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
+    let total_assets: usize = all_results.iter().map(|r| r.assets.len()).sum();
     if total_assets > 0 {
         info!(
             "📦 Total assets downloaded: {} (images and documents)",
@@ -91,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("🎉 Pipeline completed successfully!");
     info!("📊 Files generated: {}", args.output.display());
+    info!("📈 Total URLs processed: {}", urls_to_scrape.len());
 
     Ok(())
 }

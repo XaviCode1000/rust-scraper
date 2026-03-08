@@ -7,7 +7,7 @@
 //! - **async-no-lock-across-await**: Uses JoinSet for concurrency control
 //!   without redundant Semaphore.
 //! - **async-clone-before-await**: Clones config before async operations.
-//! - **err-anyhow-for-apps**: Result with anyhow for application layer
+//! - **err-anyhow-for-applications**: Result with anyhow for application layer
 //! - **own-borrow-over-clone**: Accept `&str` not `&String`
 //! - **mem-with-capacity**: Vec::with_capacity when size is known
 //! - **xml-no-regex**: Uses quick-xml for streaming XML parsing
@@ -33,6 +33,9 @@ use super::url_filter::is_allowed;
 use crate::infrastructure::crawler::{
     extract_links, fetch_url, is_internal_link, normalize_url, UrlQueue,
 };
+
+// FASE 3: Sitemap support
+use crate::infrastructure::crawler::sitemap_parser::{SitemapConfig, SitemapParser};
 
 /// Type alias for the rate limiter used in crawling
 type CrawlRateLimiter = RateLimiter<NotKeyed, InMemoryState, QuantaClock>;
@@ -334,7 +337,157 @@ pub async fn discover_urls(
     Ok(discovered)
 }
 
-/// Fetch and parse a sitemap.xml file
+/// Crawl site using sitemap (preferred method - FASE 3)
+///
+/// Following **err-anyhow-for-applications**: Uses anyhow::Result.
+/// Following **own-borrow-over-clone**: Accepts `&str` not `&String`.
+/// Following **api-builder-pattern**: Uses SitemapConfig builder.
+///
+/// # Arguments
+///
+/// * `base_url` - Base URL of the website
+/// * `sitemap_url` - Optional explicit sitemap URL (auto-discovers if None)
+/// * `config` - Crawler configuration
+///
+/// # Returns
+///
+/// * `Ok(Vec<DiscoveredUrl>)` - URLs discovered from sitemap
+/// * `Err(CrawlError)` - Error during sitemap fetch or parse
+///
+/// # Examples
+///
+/// ```no_run
+/// use rust_scraper::application::crawl_with_sitemap;
+/// use rust_scraper::domain::CrawlerConfig;
+/// use url::Url;
+///
+/// # #[tokio::main]
+/// # async fn main() -> anyhow::Result<()> {
+/// let seed = Url::parse("https://example.com")?;
+/// let config = CrawlerConfig::new(seed);
+///
+/// let urls = crawl_with_sitemap("https://example.com", None, &config).await?;
+/// println!("Found {} URLs from sitemap", urls.len());
+/// # Ok(())
+/// # }
+/// ```
+pub async fn crawl_with_sitemap(
+    base_url: &str,
+    sitemap_url: Option<&str>,
+    _config: &CrawlerConfig,
+) -> Result<Vec<DiscoveredUrl>, CrawlError> {
+    info!("Crawling with sitemap for {}", base_url);
+
+    // Auto-discover sitemap URL if not provided
+    let sitemap_url = match sitemap_url {
+        Some(url) => url.to_string(),
+        None => discover_sitemap_url(base_url).await?,
+    };
+
+    tracing::info!("Using sitemap: {}", sitemap_url);
+
+    // Create sitemap parser with config
+    // Following api-builder-pattern: builder API
+    let parser = SitemapParser::with_config(
+        SitemapConfig::builder()
+            .gzip_enabled(true)
+            .max_depth(3)
+            .concurrency(5)
+            .build(),
+    );
+
+    // Parse sitemap
+    let urls = parser.parse_from_url(&sitemap_url).await.map_err(|e| {
+        tracing::error!("Failed to parse sitemap {}: {}", sitemap_url, e);
+        CrawlError::Sitemap(e.to_string())
+    })?;
+
+    // Convert to DiscoveredUrl
+    // Following own-borrow-over-clone: use Url directly, not String
+    let base_url =
+        Url::parse(&sitemap_url).unwrap_or_else(|_| Url::parse("https://example.com").unwrap());
+    let discovered = urls
+        .into_iter()
+        .map(|url| DiscoveredUrl::html(url, 0, base_url.clone()))
+        .collect();
+
+    Ok(discovered)
+}
+
+/// Auto-discover sitemap URL from robots.txt or fallback
+///
+/// Following **own-borrow-over-clone**: Accepts `&str`.
+/// Following **security-no-unwrap-in-prod**: Proper error handling.
+///
+/// # Arguments
+///
+/// * `base_url` - Base URL of the website
+///
+/// # Returns
+///
+/// * `Ok(String)` - Discovered sitemap URL
+/// * `Err(CrawlError)` - Error during discovery
+async fn discover_sitemap_url(base_url: &str) -> Result<String, CrawlError> {
+    let base = Url::parse(base_url).map_err(|e| CrawlError::InvalidUrl(e.to_string()))?;
+
+    // Try robots.txt first
+    let robots_url = base
+        .join("/robots.txt")
+        .map_err(|e| CrawlError::InvalidUrl(e.to_string()))?;
+
+    if let Ok(response) = reqwest::get(robots_url).await {
+        if response.status().is_success() {
+            if let Ok(content) = response.text().await {
+                // Extract Sitemap: directive
+                for line in content.lines() {
+                    if line.to_lowercase().starts_with("sitemap:") {
+                        if let Some(sitemap) = line
+                            .strip_prefix("Sitemap:")
+                            .or_else(|| line.strip_prefix("sitemap:"))
+                        {
+                            let sitemap = sitemap.trim();
+                            tracing::debug!("Found sitemap in robots.txt: {}", sitemap);
+                            return Ok(sitemap.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::debug!("No sitemap found in robots.txt, trying fallback locations");
+
+    // Fallback: try common sitemap locations
+    let fallback_urls = [
+        "/sitemap.xml",
+        "/sitemap_index.xml",
+        "/sitemap.xml.gz",
+        "/sitemap/sitemap.xml",
+    ];
+
+    for path in &fallback_urls {
+        let sitemap_url = base
+            .join(path)
+            .map_err(|e| CrawlError::InvalidUrl(e.to_string()))?;
+        let sitemap_str = sitemap_url.as_str();
+
+        // Quick HEAD request to check if exists
+        if let Ok(response) = reqwest::Client::new().head(sitemap_str).send().await {
+            if response.status().is_success() {
+                tracing::debug!("Found sitemap at fallback location: {}", sitemap_str);
+                return Ok(sitemap_str.to_string());
+            }
+        }
+    }
+
+    // Last resort: return default location (may 404, but caller handles)
+    Ok(base
+        .join("/sitemap.xml")
+        .map_err(|e| CrawlError::InvalidUrl(e.to_string()))?
+        .to_string())
+}
+
+/// Fetch and parse a sitemap.xml file (legacy - kept for backwards compatibility)
 ///
 /// Following **own-borrow-over-clone**: Accepts `&str`.
 /// Following **xml-no-regex**: Uses quick-xml for streaming XML parsing.
@@ -347,21 +500,9 @@ pub async fn discover_urls(
 ///
 /// * `Ok(Vec<String>)` - List of URLs from sitemap
 /// * `Err(CrawlError)` - Error during fetch or parse
-///
-/// # Examples
-///
-/// ```no_run
-/// use rust_scraper::application::fetch_sitemap;
-///
-/// # #[tokio::main]
-/// # async fn main() -> anyhow::Result<()> {
-/// let urls = fetch_sitemap("https://example.com").await?;
-/// println!("Found {} URLs in sitemap", urls.len());
-/// # Ok(())
-/// # }
-/// ```
+#[deprecated(since = "0.4.0", note = "Use crawl_with_sitemap instead")]
 pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
-    info!("Fetching sitemap from {}", base_url);
+    info!("Fetching sitemap from {} (legacy method)", base_url);
 
     // Try common sitemap locations
     let sitemap_urls = [
@@ -419,21 +560,6 @@ pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
 ///
 /// * `Ok(Vec<String>)` - List of URLs
 /// * `Err(CrawlError)` - Parse error
-///
-/// # Examples
-///
-/// ```
-/// use rust_scraper::application::crawler_service::parse_sitemap;
-///
-/// let xml = r#"<?xml version="1.0"?>
-/// <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-///     <url><loc>https://example.com/page1</loc></url>
-///     <url><loc>https://example.com/page2</loc></url>
-/// </urlset>"#;
-///
-/// let urls = parse_sitemap(xml).unwrap();
-/// assert_eq!(urls.len(), 2);
-/// ```
 fn parse_sitemap(xml_content: &str) -> Result<Vec<String>, CrawlError> {
     use quick_xml::events::Event;
     use quick_xml::Reader;

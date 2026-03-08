@@ -372,6 +372,12 @@ pub enum CrawlError {
     /// Internal error (unspecified)
     #[error("internal error: {0}")]
     Internal(String),
+
+    /// Sitemap parsing error (FASE 3)
+    /// Note: Does NOT contain sitemap_parser::SitemapError (that's Infra detail).
+    /// Infrastructure layer converts SitemapError → this variant.
+    #[error("sitemap error: {0}")]
+    Sitemap(String),
 }
 
 /// Pattern matching helper function
