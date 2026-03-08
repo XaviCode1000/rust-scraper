@@ -71,7 +71,10 @@ pub enum OutputFormat {
 }
 
 /// Configuration for asset downloading
-#[derive(Debug, Clone, Default)]
+///
+/// Following **config-externalize**: All concurrency settings are configurable.
+/// Following **async-concurrency-limit**: Default is HDD-aware (3 for 4C CPU).
+#[derive(Debug, Clone)]
 pub struct ScraperConfig {
     /// Enable image downloading
     pub download_images: bool,
@@ -81,6 +84,21 @@ pub struct ScraperConfig {
     pub output_dir: std::path::PathBuf,
     /// Maximum file size in bytes (default: 50MB)
     pub max_file_size: Option<u64>,
+    /// Maximum concurrent scrapers (default: 3 for HDD-aware on 4C CPU)
+    /// Following rust-skills: config-externalize, async-concurrency-limit
+    pub scraper_concurrency: usize,
+}
+
+impl Default for ScraperConfig {
+    fn default() -> Self {
+        Self {
+            download_images: false,
+            download_documents: false,
+            output_dir: std::path::PathBuf::from("output"),
+            max_file_size: Some(50 * 1024 * 1024), // 50MB default
+            scraper_concurrency: 3, // HDD-aware: nproc - 1 for 4C CPU
+        }
+    }
 }
 
 impl ScraperConfig {
@@ -108,6 +126,23 @@ impl ScraperConfig {
     #[must_use]
     pub fn with_output_dir(mut self, dir: std::path::PathBuf) -> Self {
         self.output_dir = dir;
+        self
+    }
+
+    /// Set scraper concurrency limit
+    ///
+    /// # Arguments
+    ///
+    /// * `concurrency` - Maximum concurrent scrapers
+    ///
+    /// # Recommendations
+    ///
+    /// - **HDD**: 3 (default) — avoids disk thrashing
+    /// - **SSD**: 5-8 — faster random I/O
+    /// - **NVMe**: 10+ — very high IOPS
+    #[must_use]
+    pub fn with_scraper_concurrency(mut self, concurrency: usize) -> Self {
+        self.scraper_concurrency = concurrency;
         self
     }
 
@@ -213,6 +248,7 @@ mod tests {
         assert!(!config.download_images);
         assert!(!config.download_documents);
         assert!(!config.has_downloads());
+        assert_eq!(config.scraper_concurrency, 3);
     }
 
     #[test]
@@ -227,6 +263,12 @@ mod tests {
         let config = ScraperConfig::default().with_documents();
         assert!(config.download_documents);
         assert!(config.has_downloads());
+    }
+
+    #[test]
+    fn test_scraper_config_with_concurrency() {
+        let config = ScraperConfig::default().with_scraper_concurrency(5);
+        assert_eq!(config.scraper_concurrency, 5);
     }
 
     #[test]

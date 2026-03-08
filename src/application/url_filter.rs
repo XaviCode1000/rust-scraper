@@ -7,6 +7,7 @@
 //! - **own-borrow-over-clone**: Accepts `&str` not `&String`, `&[T]` not `&Vec<T>`
 //! - **opt-inline**: Inlines hot path functions
 //! - **test-proptest-properties**: Property-based tests for pattern matching
+//! - **url-no-string-split**: Uses url crate for RFC 3986 compliant parsing
 
 use crate::domain::CrawlerConfig;
 
@@ -111,9 +112,15 @@ pub fn is_allowed(url: &str, config: &CrawlerConfig) -> bool {
     config.matches_include(url)
 }
 
-/// Extract the domain from a URL
+/// Extract domain from URL using url crate (RFC 3986 compliant)
 ///
-/// Following **own-borrow-over-clone**: Accepts `&str`.
+/// Following **url-no-string-split**: Uses `url::Url::parse().host_str()`
+/// instead of string splitting for proper RFC 3986 compliance.
+///
+/// Handles:
+/// - Credentials: `http://user:pass@domain.com` → `domain.com`
+/// - Ports: `https://domain.com:8080/path` → `domain.com`
+/// - IPv6: `http://[::1]:8080` → `[::1]`
 ///
 /// # Arguments
 ///
@@ -128,15 +135,17 @@ pub fn is_allowed(url: &str, config: &CrawlerConfig) -> bool {
 /// ```
 /// use rust_scraper::application::url_filter::extract_domain;
 ///
-/// assert_eq!(extract_domain("https://example.com/page"), Some("example.com"));
-/// assert_eq!(extract_domain("https://blog.example.com/post"), Some("blog.example.com"));
+/// assert_eq!(extract_domain("https://example.com/page"), Some("example.com".to_string()));
+/// assert_eq!(extract_domain("https://blog.example.com/post"), Some("blog.example.com".to_string()));
+/// assert_eq!(extract_domain("http://user:pass@domain.com:8080/path"), Some("domain.com".to_string()));
+/// assert_eq!(extract_domain("http://[::1]:8080/path"), Some("[::1]".to_string()));
 /// ```
 #[inline]
 #[must_use]
-pub fn extract_domain(url: &str) -> Option<&str> {
-    url.split("://")
-        .nth(1)
-        .and_then(|rest| rest.split('/').next())
+pub fn extract_domain(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(String::from))
 }
 
 /// Check if a URL is internal (same domain as seed)
@@ -309,17 +318,41 @@ mod tests {
     fn test_extract_domain() {
         assert_eq!(
             extract_domain("https://example.com/page"),
-            Some("example.com")
+            Some("example.com".to_string())
         );
         assert_eq!(
             extract_domain("https://blog.example.com/post"),
-            Some("blog.example.com")
+            Some("blog.example.com".to_string())
         );
         assert_eq!(
             extract_domain("http://sub.domain.example.com/path"),
-            Some("sub.domain.example.com")
+            Some("sub.domain.example.com".to_string())
         );
         assert_eq!(extract_domain("invalid-url"), None);
+    }
+
+    #[test]
+    fn test_extract_domain_with_credentials() {
+        assert_eq!(
+            extract_domain("http://user:pass@domain.com/path"),
+            Some("domain.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_domain_with_port() {
+        assert_eq!(
+            extract_domain("https://domain.com:8080/path"),
+            Some("domain.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_domain_ipv6() {
+        assert_eq!(
+            extract_domain("http://[::1]:8080/path"),
+            Some("[::1]".to_string())
+        );
     }
 
     #[test]

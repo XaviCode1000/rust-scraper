@@ -4,12 +4,13 @@
 //!
 //! # Rules Applied
 //!
-//! - **async-no-lock-across-await**: Uses Semaphore for concurrency control
-//!   instead of Mutex to avoid holding locks across .await.
+//! - **async-no-lock-across-await**: Uses JoinSet for concurrency control
+//!   without redundant Semaphore.
 //! - **async-clone-before-await**: Clones config before async operations.
 //! - **err-anyhow-for-apps**: Result with anyhow for application layer
 //! - **own-borrow-over-clone**: Accept `&str` not `&String`
 //! - **mem-with-capacity**: Vec::with_capacity when size is known
+//! - **xml-no-regex**: Uses quick-xml for streaming XML parsing
 
 use std::collections::HashSet;
 use std::num::NonZeroU32;
@@ -17,8 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use governor::{Quota, RateLimiter};
-use tokio::sync::Semaphore;
+use governor::{clock::QuantaClock, state::{InMemoryState, NotKeyed}, Quota, RateLimiter};
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -29,10 +30,13 @@ use crate::infrastructure::crawler::{
     extract_links, fetch_url, is_internal_link, normalize_url, UrlQueue,
 };
 
+/// Type alias for the rate limiter used in crawling
+type CrawlRateLimiter = RateLimiter<NotKeyed, InMemoryState, QuantaClock>;
+
 /// Crawl a website starting from the seed URL
 ///
-/// Following **async-no-lock-across-await**: Uses Semaphore for concurrency control
-/// instead of Mutex to avoid holding locks across .await.
+/// Following **async-no-lock-across-await**: Uses JoinSet for concurrency control
+/// without redundant Semaphore (JoinSet already limits via tasks.len()).
 /// Following **async-clone-before-await**: Clones config before async operations.
 ///
 /// # Arguments
@@ -77,10 +81,7 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     let quota = Quota::with_period(Duration::from_millis(config_clone.delay_ms))
         .unwrap()
         .allow_burst(NonZeroU32::new(config_clone.concurrency as u32).unwrap());
-    let rate_limiter = Arc::new(RateLimiter::direct(quota));
-
-    // Create semaphore for concurrency control (avoiding Mutex across await)
-    let semaphore = Arc::new(Semaphore::new(config_clone.concurrency));
+    let rate_limiter: Arc<CrawlRateLimiter> = Arc::new(RateLimiter::direct(quota));
 
     // Create URL queue
     let queue = Arc::new(UrlQueue::new());
@@ -94,183 +95,160 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     queue.push(seed_discovered);
 
     // Track visited URLs
-    let visited = Arc::new(tokio::sync::Mutex::new(HashSet::<String>::new()));
+    let visited = Arc::new(Mutex::new(HashSet::<String>::new()));
 
     // Results collector
-    let results = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let results = Arc::new(Mutex::new(Vec::new()));
     let error_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let mut tasks = tokio::task::JoinSet::new();
+    let mut url_queue = std::collections::VecDeque::new();
+    url_queue.push_back(DiscoveredUrl::html(
+        config_clone.seed_url.clone(),
+        0,
+        config_clone.seed_url.clone(),
+    ));
 
     // Main crawl loop
-    loop {
+    while !url_queue.is_empty() || !tasks.is_empty() {
         // Check if we've reached max pages
         {
             let results_guard = results.lock().await;
             if results_guard.len() >= config_clone.max_pages {
                 info!("Reached max pages limit: {}", config_clone.max_pages);
+                drop(results_guard);
                 break;
             }
         }
 
-        // Get next URL from queue
-        let Some(discovered_url) = queue.pop() else {
-            // Queue is empty, wait for tasks to complete
-            debug!("Queue empty, waiting for tasks");
-            if tasks.is_empty() {
+        // Process completed tasks FIRST (non-blocking)
+        while let Some(result) = tasks.try_join_next() {
+            handle_crawl_result(
+                result,
+                &error_count,
+            );
+        }
+
+        // Spawn new tasks up to concurrency limit
+        while let Some(discovered_url) = url_queue.pop_front() {
+            // Check concurrency limit
+            if tasks.len() >= config_clone.concurrency {
+                // Queue llena, re-encolar y break
+                url_queue.push_front(discovered_url);
                 break;
             }
-            // Wait for at least one task to complete
-            if let Some(task_result) = tasks.join_next().await {
-                match task_result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        warn!("Task error: {}", e);
-                        error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    Err(e) => {
-                        warn!("Task panicked: {}", e);
-                        error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
+
+            // Check if already visited
+            {
+                let visited_guard = visited.lock().await;
+                if visited_guard.contains(discovered_url.url.as_str()) {
+                    drop(visited_guard);
+                    continue;
                 }
             }
-            continue;
-        };
 
-        // Check depth limit
-        if discovered_url.depth > config_clone.max_depth {
-            debug!(
-                "Skipping URL at depth {} (max: {})",
-                discovered_url.depth, config_clone.max_depth
-            );
-            continue;
-        }
+            // Clone data for task (async-clone-before-await)
+            let config_task = Arc::clone(&config);
+            let queue_task = Arc::clone(&queue);
+            let results_task = Arc::clone(&results);
+            let visited_task = Arc::clone(&visited);
+            let error_count_task = Arc::clone(&error_count);
+            let rate_limiter_task = Arc::clone(&rate_limiter);
+            let discovered_url_task = discovered_url.clone();
 
-        // Clone URL string before moving discovered_url
-        let url_str = discovered_url.url.as_str().to_string();
-        let url_depth = discovered_url.depth;
+            // Clone parent URL before moving discovered_url_task
+            let parent_url = discovered_url_task.url.clone();
 
-        // Check if already visited
-        {
-            let visited_guard = visited.lock().await;
-            if visited_guard.contains(&url_str) {
-                debug!("Already visited: {}", url_str);
-                continue;
-            }
-            drop(visited_guard);
-        }
+            // Spawn task
+            tasks.spawn(async move {
+                // Rate limiting
+                rate_limiter_task.until_ready().await;
 
-        // Clone data for task (async-clone-before-await)
-        let config_task = Arc::clone(&config);
-        let queue_task = Arc::clone(&queue);
-        let results_task = Arc::clone(&results);
-        let visited_task = Arc::clone(&visited);
-        let error_count_task = Arc::clone(&error_count);
-        let semaphore_task = Arc::clone(&semaphore);
-        let rate_limiter_task = Arc::clone(&rate_limiter);
-        let discovered_url_task = discovered_url.clone();
-        let parent_url = discovered_url_task.url.clone();
+                let url_str = discovered_url_task.url.as_str().to_string();
+                let url_depth = discovered_url_task.depth;
 
-        // Spawn crawl task
-        tasks.spawn(async move {
-            // Acquire semaphore permit (concurrency control)
-            let _permit = semaphore_task
-                .acquire()
-                .await
-                .map_err(|e| CrawlError::Internal(anyhow::anyhow!("Semaphore error: {}", e)))?;
+                debug!("Crawling: {} (depth={})", url_str, url_depth);
 
-            // Rate limiting
-            rate_limiter_task.until_ready().await;
+                // Fetch URL
+                match fetch_url(&url_str, &config_task).await {
+                    Ok(response) => {
+                        // Add to results
+                        {
+                            let mut results_guard = results_task.lock().await;
+                            results_guard.push(discovered_url_task);
+                        }
 
-            debug!("Crawling: {} (depth={})", url_str, url_depth);
+                        // Extract links and add to queue
+                        if url_depth < config_task.max_depth {
+                            match extract_links(&response, &url_str) {
+                                Ok(links) => {
+                                    for link in links {
+                                        let normalized = normalize_url(&link);
+                                        if let Ok(parsed_url) = Url::parse(&normalized) {
+                                            // Check if internal link
+                                            if let Some(seed_domain) =
+                                                config_task.seed_url.host_str()
+                                            {
+                                                if is_internal_link(&normalized, seed_domain) {
+                                                    // Check if allowed by filters
+                                                    if is_allowed(&normalized, &config_task) {
+                                                        // Check if not visited
+                                                        let visited_guard =
+                                                            visited_task.lock().await;
+                                                        if !visited_guard.contains(&normalized) {
+                                                            drop(visited_guard);
 
-            // Fetch URL
-            match fetch_url(&url_str, &config_task).await {
-                Ok(response) => {
-                    // Add to results
-                    {
-                        let mut results_guard = results_task.lock().await;
-                        results_guard.push(discovered_url_task);
-                    }
-
-                    // Extract links and add to queue
-                    if url_depth < config_task.max_depth {
-                        match extract_links(&response, &url_str) {
-                            Ok(links) => {
-                                for link in links {
-                                    let normalized = normalize_url(&link);
-                                    if let Ok(parsed_url) = Url::parse(&normalized) {
-                                        // Check if internal link
-                                        if let Some(seed_domain) = config_task.seed_url.host_str() {
-                                            if is_internal_link(&normalized, seed_domain) {
-                                                // Check if allowed by filters
-                                                if is_allowed(&normalized, &config_task) {
-                                                    // Check if not visited
-                                                    let visited_guard = visited_task.lock().await;
-                                                    if !visited_guard.contains(&normalized) {
-                                                        drop(visited_guard);
-
-                                                        let new_discovered = DiscoveredUrl::html(
-                                                            parsed_url,
-                                                            url_depth + 1,
-                                                            parent_url.clone(),
-                                                        );
-                                                        queue_task.push(new_discovered);
+                                                            let new_discovered =
+                                                                DiscoveredUrl::html(
+                                                                    parsed_url,
+                                                                    url_depth + 1,
+                                                                    parent_url.clone(),
+                                                                );
+                                                            queue_task.push(new_discovered);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                warn!("Failed to extract links from {}: {}", url_str, e);
-                                error_count_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                Err(e) => {
+                                    warn!("Failed to extract links from {}: {}", url_str, e);
+                                    error_count_task
+                                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    error!("Failed to fetch {}: {}", url_str, e);
-                    error_count_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    return Err(e);
-                }
-            }
-
-            Ok(())
-        });
-
-        // Limit concurrent tasks
-        if tasks.len() >= config_clone.concurrency {
-            if let Some(task_result) = tasks.join_next().await {
-                match task_result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        warn!("Task error: {}", e);
-                        error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
                     Err(e) => {
-                        warn!("Task panicked: {}", e);
-                        error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        error!("Failed to fetch {}: {}", url_str, e);
+                        error_count_task
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        return Err(e);
                     }
                 }
+
+                Ok(())
+            });
+        }
+
+        // If no tasks can be spawned and queue is not empty, wait for one task
+        if tasks.len() >= config_clone.concurrency && !url_queue.is_empty() {
+            if let Some(result) = tasks.join_next().await {
+                handle_crawl_result(
+                    result,
+                    &error_count,
+                );
             }
         }
     }
 
     // Wait for remaining tasks
-    while let Some(task_result) = tasks.join_next().await {
-        match task_result {
-            Ok(Err(e)) => {
-                warn!("Task error: {}", e);
-                error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            Err(e) => {
-                warn!("Task panicked: {}", e);
-                error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            _ => {}
-        }
+    while let Some(result) = tasks.join_next().await {
+        handle_crawl_result(
+            result,
+            &error_count,
+        );
     }
 
     // Collect results
@@ -281,6 +259,28 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     info!("Crawl complete: {} pages, {} errors", total_pages, errors);
 
     Ok(CrawlResult::new(results_guard.clone(), total_pages, errors))
+}
+
+/// Handle result from a completed crawl task
+///
+/// Helper function to process task results.
+fn handle_crawl_result(
+    result: std::result::Result<Result<(), CrawlError>, tokio::task::JoinError>,
+    error_count: &Arc<std::sync::atomic::AtomicUsize>,
+) {
+    match result {
+        Ok(Ok(())) => {
+            // Task completed successfully
+        }
+        Ok(Err(e)) => {
+            warn!("Task error: {}", e);
+            error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Err(e) => {
+            warn!("Task panicked: {}", e);
+            error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 }
 
 /// Discover URLs from a single page
@@ -343,6 +343,7 @@ pub async fn discover_urls(
 /// Fetch and parse a sitemap.xml file
 ///
 /// Following **own-borrow-over-clone**: Accepts `&str`.
+/// Following **xml-no-regex**: Uses quick-xml for streaming XML parsing.
 ///
 /// # Arguments
 ///
@@ -387,8 +388,8 @@ pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
 
         match fetch_url(sitemap_url, &config_clone).await {
             Ok(response) => {
-                // Parse sitemap XML using regex as fallback
-                match parse_sitemap_simple(&response) {
+                // Parse sitemap XML using quick-xml (streaming parser)
+                match parse_sitemap(&response) {
                     Ok(urls) => {
                         info!("Found {} URLs in {}", urls.len(), sitemap_url);
                         all_urls.extend(urls);
@@ -411,7 +412,10 @@ pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
     Ok(all_urls)
 }
 
-/// Parse sitemap XML content using simple regex
+/// Parse sitemap XML content using quick-xml (streaming parser)
+///
+/// Following **xml-no-regex**: Uses quick-xml instead of regex for XML parsing.
+/// Following **mem-stream-processing**: Streaming approach avoids loading entire DOM.
 ///
 /// # Arguments
 ///
@@ -421,15 +425,64 @@ pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
 ///
 /// * `Ok(Vec<String>)` - List of URLs
 /// * `Err(CrawlError)` - Parse error
-fn parse_sitemap_simple(xml_content: &str) -> Result<Vec<String>, CrawlError> {
-    // Simple regex to extract <loc>...</loc> content
-    let re = regex::Regex::new(r"<loc>\s*([^<]+)\s*</loc>")
-        .map_err(|e| CrawlError::Parse(format!("Failed to compile regex: {}", e)))?;
+///
+/// # Examples
+///
+/// ```
+/// use rust_scraper::application::crawler_service::parse_sitemap;
+///
+/// let xml = r#"<?xml version="1.0"?>
+/// <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+///     <url><loc>https://example.com/page1</loc></url>
+///     <url><loc>https://example.com/page2</loc></url>
+/// </urlset>"#;
+///
+/// let urls = parse_sitemap(xml).unwrap();
+/// assert_eq!(urls.len(), 2);
+/// ```
+fn parse_sitemap(xml_content: &str) -> Result<Vec<String>, CrawlError> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
 
-    let urls: Vec<String> = re
-        .captures_iter(xml_content)
-        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
-        .collect();
+    let mut reader = Reader::from_str(xml_content);
+    let mut buf = Vec::new();
+    let mut urls = Vec::new();
+    let mut in_loc = false;
+
+    loop {
+        buf.clear();
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+                if e.name().as_ref() == b"loc" {
+                    in_loc = true;
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                if e.name().as_ref() == b"loc" {
+                    in_loc = false;
+                }
+            }
+            Ok(Event::Text(ref e)) if in_loc => {
+                let text = e
+                    .unescape()
+                    .map_err(|e| CrawlError::Parse(e.to_string()))?;
+                let url = text.trim().to_string();
+                if !url.is_empty() {
+                    urls.push(url);
+                }
+            }
+            Ok(Event::CData(ref e)) if in_loc => {
+                // Handle CDATA sections - BytesCData derefs to [u8]
+                let url = String::from_utf8_lossy(&e).trim().to_string();
+                if !url.is_empty() {
+                    urls.push(url);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(CrawlError::Parse(e.to_string())),
+            _ => {}
+        }
+    }
 
     Ok(urls)
 }
@@ -453,11 +506,40 @@ mod tests {
     </url>
 </urlset>"#;
 
-        let urls = parse_sitemap_simple(xml).unwrap();
+        let urls = parse_sitemap(xml).unwrap();
         assert_eq!(urls.len(), 3);
         assert_eq!(urls[0], "https://example.com/page1");
         assert_eq!(urls[1], "https://example.com/page2");
         assert_eq!(urls[2], "https://example.com/page3");
+    }
+
+    #[test]
+    fn test_parse_sitemap_with_cdata() {
+        let xml = r#"<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc><![CDATA[https://example.com/page1]]></loc></url>
+    <url><loc>https://example.com/page2</loc></url>
+</urlset>"#;
+
+        let urls = parse_sitemap(xml).unwrap();
+        assert_eq!(urls.len(), 2);
+        assert!(urls.contains(&"https://example.com/page1".to_string()));
+        assert!(urls.contains(&"https://example.com/page2".to_string()));
+    }
+
+    #[test]
+    fn test_parse_sitemap_with_namespaces() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <url>
+        <loc>https://example.com/page1</loc>
+    </url>
+</urlset>"#;
+
+        let urls = parse_sitemap(xml).unwrap();
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0], "https://example.com/page1");
     }
 
     #[test]
@@ -466,7 +548,7 @@ mod tests {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 </urlset>"#;
 
-        let urls = parse_sitemap_simple(xml).unwrap();
+        let urls = parse_sitemap(xml).unwrap();
         assert!(urls.is_empty());
     }
 
