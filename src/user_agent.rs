@@ -133,7 +133,7 @@ impl UserAgentCache {
                             .map(String::from)
                             .collect()
                     })
-                    .unwrap_or_else(|| Self::fallback_agents())
+                    .unwrap_or_else(Self::fallback_agents)
             }
             _ => Self::fallback_agents(),
         };

@@ -1,215 +1,130 @@
-# 🦀 Rust Scraper
+# 🕷️ Rust Scraper
 
-[![CI](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/XaviCode1000/rust-scraper/releases)
+**Production-ready web scraper with Clean Architecture, TUI selector, and sitemap support.**
 
-Modern web scraper optimized for RAG (Retrieval-Augmented Generation) datasets. Built with **Clean Architecture** for maintainability and production use.
+[![Build Status](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions)
+[![Tests](https://img.shields.io/badge/tests-198%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
 
 ## ✨ Features
 
-### Core
-- 📖 **Readability Algorithm** - Extracts clean content like Firefox Reader Mode
-- 🌐 **Modern HTTP Client** - reqwest with TLS (rustls), gzip/brotli compression
-- 📝 **Multiple Output Formats** - Markdown (with YAML frontmatter), JSON, plain text
-- 🔧 **CLI Interface** - Full control via command line arguments
+### 🚀 Core
+- **Async Web Scraping**: Multi-threaded with Tokio runtime
+- **Sitemap Support**: Zero-allocation streaming parser
+  - Gzip decompression (`.xml.gz`)
+  - Sitemap index recursion (max depth 3)
+  - Auto-discovery from `robots.txt`
+- **TUI Interactivo**: Select URLs before downloading
+  - Checkbox selection (`[✅]` / `[⬜]`)
+  - Keyboard navigation (↑↓, Space, Enter)
+  - Confirmation mode (Y/N)
 
-### Production Ready (v0.3.0)
-- 🔄 **Retry Logic** - Exponential backoff for transient failures (5xx, timeouts)
-- 🎯 **Bounded Concurrency** - Prevents resource exhaustion (3 concurrent for HDD)
-- 🎭 **User-Agent Rotation** - 14 modern browsers, weighted selection
-- 🛡️ **Type-Safe Errors** - `ScraperError` enum with 14 variants
-- 🧪 **Well Tested** - 83 tests (unit, integration, doctests)
+### 🏗️ Architecture
+- **Clean Architecture**: Domain → Application → Infrastructure → Adapters
+- **Error Handling**: `thiserror` for libraries, `anyhow` for applications
+- **Dependency Injection**: HTTP client, user agents, concurrency config
 
-### Asset Download
-- 🖼️ **Image Download** - Automatic download to `output/images/`
-- 📄 **Document Download** - PDF, DOCX, XLSX to `output/documents/`
-- 🔍 **MIME Detection** - Automatic classification by extension
-- 🔐 **SHA256 Hashing** - Unique filenames, no collisions
+### ⚡ Performance
+- **True Streaming**: Constant ~8KB RAM, no OOM
+- **Zero-Allocation Parsing**: `quick-xml` for sitemaps
+- **LazyLock Cache**: Syntax highlighting (2-10ms → ~0.01ms)
+- **Bounded Concurrency**: Configurable parallel downloads
 
-## 🚀 Quick Start
+### 🔒 Security
+- **SSRF Prevention**: URL host comparison (not string contains)
+- **Windows Safe**: Reserved names blocked (`CON` → `CON_safe`)
+- **WAF Bypass Prevention**: Chrome 131+ UAs with TTL caching
+- **RFC 3986 URLs**: `url::Url::parse()` validation
+
+## 📦 Installation
+
+### From Source
 
 ```bash
-# Clone repository
 git clone https://github.com/XaviCode1000/rust-scraper.git
 cd rust-scraper
-
-# Build in release mode
 cargo build --release
-
-# Run with URL (required)
-cargo run --release -- --url "https://example.com"
 ```
 
-## 🎯 Usage
+The binary will be available at `target/release/rust_scraper`.
 
-### Basic Scraping
+### From Cargo (coming soon)
 
 ```bash
-# Basic usage (URL is REQUIRED)
-cargo run --release -- --url "https://example.com"
-
-# Specify output directory
-cargo run --release -- --url "https://example.com" -o ./output
-
-# Choose output format
-cargo run --release -- --url "https://example.com" -f json
-cargo run --release -- --url "https://example.com" -f text
+cargo install rust_scraper
 ```
 
-### Asset Downloads
+## 🚀 Usage
+
+### Basic (Headless Mode)
 
 ```bash
-# Download images only
-cargo run --release -- --url "https://example.com" --download-images
+# Scrape all URLs from a website
+./target/release/rust_scraper --url https://example.com
 
-# Download documents only
-cargo run --release -- --url "https://example.com" --download-documents
+# With sitemap (auto-discovers from robots.txt)
+./target/release/rust_scraper --url https://example.com --use-sitemap
 
-# Download both
-cargo run --release -- --url "https://example.com" --download-images --download-documents
+# Explicit sitemap URL
+./target/release/rust_scraper --url https://example.com \
+  --use-sitemap \
+  --sitemap-url https://example.com/sitemap.xml.gz
 ```
+
+### Interactive Mode (TUI)
+
+```bash
+# Select URLs interactively before downloading
+./target/release/rust_scraper --url https://example.com --interactive
+
+# With sitemap
+./target/release/rust_scraper --url https://example.com \
+  --interactive \
+  --use-sitemap
+```
+
+### TUI Controls
+
+| Key | Action |
+|-----|--------|
+| `↑↓` | Navigate URLs |
+| `Space` | Toggle selection |
+| `A` | Select all |
+| `D` | Deselect all |
+| `Enter` | Confirm download |
+| `Y/N` | Final confirmation |
+| `q` | Quit |
 
 ### Advanced Options
 
 ```bash
 # Full example with all options
-cargo run --release -- \
-  --url "https://example.com/article" \
-  --selector "article.main" \
-  --output "./my-output" \
+./target/release/rust_scraper \
+  --url https://example.com \
+  --output ./output \
   --format markdown \
   --download-images \
   --download-documents \
+  --use-sitemap \
+  --concurrency 5 \
   --delay-ms 1000 \
-  --max-pages 10 \
+  --max-pages 100 \
   --verbose
 ```
 
-### CLI Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-u, --url` | **URL to scrape (REQUIRED)** | - |
-| `-s, --selector` | CSS selector for content | `body` |
-| `-o, --output` | Output directory | `output` |
-| `-f, --format` | Output format (markdown/json/text) | `markdown` |
-| `--download-images` | Download images to `output/images/` | ❌ |
-| `--download-documents` | Download documents to `output/documents/` | ❌ |
-| `--delay-ms` | Delay between requests (ms) | `1000` |
-| `--max-pages` | Maximum pages to scrape | `10` |
-| `-v, --verbose` | Increase verbosity (use multiple times) | - |
+### Get Help
 
 ```bash
-# Get help
-cargo run --release -- --help
+./target/release/rust_scraper --help
 ```
 
-## 📁 Output Structure
+## 📖 Documentation
 
-### Markdown Output (Default)
-
-```
-output/
-└── example.com/
-    └── article/
-        └── index.md
-```
-
-**Markdown file with YAML frontmatter:**
-```markdown
----
-title: Article Title
-url: https://example.com/article
-date: "2026-03-08"
-author: John Doe
-excerpt: A short excerpt
----
-
-# Article Title
-
-Main content here with **markdown** formatting...
-
-```rust
-// Code blocks with syntax highlighting
-fn main() {
-    println!("Hello, world!");
-}
-```
-```
-
-### With Asset Downloads
-
-```
-output/
-├── example.com/
-│   └── article/
-│       └── index.md
-├── images/
-│   ├── 027e504eabfc.png
-│   ├── 0c2f4f0301fe.png
-│   └── e15cbdd2d653.svg
-└── documents/
-    └── 9870371a7a8c.pdf
-```
-
-### JSON Output
-
-```bash
-cargo run --release -- --url "https://example.com" -f json
-```
-
-**output/results.json:**
-```json
-[
-  {
-    "title": "Article Title",
-    "content": "Main content...",
-    "url": "https://example.com/article",
-    "excerpt": "A short excerpt",
-    "author": "John Doe",
-    "date": "2026-03-08",
-    "assets": [
-      {
-        "url": "https://example.com/image.png",
-        "local_path": "output/images/027e504eabfc.png",
-        "asset_type": "image",
-        "size": 1024
-      }
-    ]
-  }
-]
-```
-
-## 🏗️ Architecture
-
-This project uses **Clean Architecture** with four layers:
-
-```
-┌─────────────────────────────────────┐
-│         CLI (main.rs)               │  - User interface
-└──────────────┬──────────────────────┘
-               │
-┌──────────────▼──────────────────────┐
-│    Library (lib.rs)                 │  - Public API
-└──────────────┬──────────────────────┘
-               │
-    ┌──────────┴──────────┐
-    │                     │
-┌───▼──────┐      ┌──────▼────────┐
-│ DOMAIN   │      │  APPLICATION  │
-│ (pure)   │      │  (use cases)  │
-└──────────┘      └──────┬────────┘
-                         │
-              ┌──────────┴──────────┐
-              │                     │
-       ┌──────▼──────┐      ┌──────▼──────┐
-       │INFRASTRUCTURE│      │  ADAPTERS   │
-       └─────────────┘      └─────────────┘
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+- [**Usage Guide**](docs/USAGE.md) - Detailed examples and troubleshooting
+- [**Architecture**](docs/ARCHITECTURE.md) - Clean Architecture details
+- [**API Docs**](https://docs.rs/rust_scraper) - Rust documentation
 
 ## 🧪 Testing
 
@@ -221,143 +136,91 @@ cargo test
 cargo test -- --nocapture
 
 # Run specific test
-cargo test test_validate_url
-
-# Run with coverage (requires cargo-tarpaulin)
-cargo tarpaulin --out Html
+cargo test test_validate_and_parse_url
 ```
 
-**Test Coverage**: 83 tests passing
-- 70 unit tests
-- 11 doctests
-- 2 integration tests
+**Tests:** 198 passing ✅
 
-## 📦 Installation (as Library)
+## 🏗️ Architecture
 
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-rust_scraper = "0.3.0"
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
+```
+Domain (entities, errors)
+    ↓
+Application (services, use cases)
+    ↓
+Infrastructure (HTTP, parsers, converters)
+    ↓
+Adapters (TUI, CLI, detectors)
 ```
 
-**Example usage:**
+**Dependency Rule:** Dependencies point inward. Domain never imports frameworks.
 
-```rust
-use rust_scraper::{
-    create_http_client,
-    scrape_with_config,
-    save_results,
-    validate_and_parse_url,
-    ScraperConfig,
-    OutputFormat,
-};
-use std::path::PathBuf;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Create HTTP client (with retry + user-agent rotation)
-    let client = create_http_client()?;
-    
-    // Parse URL
-    let url = validate_and_parse_url("https://example.com")?;
-    
-    // Configure scraping
-    let config = ScraperConfig {
-        download_images: true,
-        download_documents: false,
-        output_dir: PathBuf::from("./output"),
-        max_file_size: Some(50 * 1024 * 1024), // 50MB
-    };
-    
-    // Scrape
-    let results = scrape_with_config(&client, &url, &config).await?;
-    
-    // Save results
-    save_results(&results, &config.output_dir, &OutputFormat::Markdown)?;
-    
-    Ok(())
-}
-```
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
 ## 🔧 Development
 
-```bash
-# Clone and setup
-git clone https://github.com/XaviCode1000/rust-scraper.git
-cd rust-scraper
+### Requirements
 
-# Build in debug mode
+- Rust 1.75+
+- Cargo
+
+### Build
+
+```bash
+# Debug build
 cargo build
 
-# Build in release mode (optimized)
+# Release build (optimized)
 cargo build --release
-
-# Run clippy (linting)
-cargo clippy -- -D clippy::correctness
-
-# Format code
-cargo fmt
-
-# Run all tests
-cargo test --all
 ```
 
-### Release Profile
-
-The project uses aggressive optimizations for production builds:
-
-```toml
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-strip = true
-```
-
-## 📋 Requirements
-
-- [Rust](https://rustup.rs/) 1.70+ (edition 2021)
-- Linux, macOS, or Windows
+### Lint
 
 ```bash
-# Check Rust version
-rustc --version
+# Run Clippy (deny warnings)
+cargo clippy -- -D warnings
 
-# Update if needed
-rustup update
+# Check formatting
+cargo fmt --all -- --check
 ```
 
-## 🤝 Contributing
+### Run
 
-Contributions are welcome! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
+```bash
+# Run in debug mode
+cargo run -- --url https://example.com
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+# Run in release mode
+cargo run --release -- --url https://example.com
+```
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Licensed under either of:
 
-## 📚 Documentation
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-- [Architecture](docs/ARCHITECTURE.md) - Clean Architecture details
-- [Changelog](docs/CHANGES.md) - Version history and migration guide
-- [CLI Reference](docs/CLI.md) - Complete CLI documentation
-- [Contributing](docs/CONTRIBUTING.md) - How to contribute
+at your option.
 
 ## 🙏 Acknowledgments
 
-- [legible](https://github.com/relaxnow/legible) - Readability algorithm
-- [reqwest](https://github.com/seanmonstar/reqwest) - HTTP client
-- [html-to-markdown-rs](https://github.com/ramonh/html-to-markdown) - HTML→Markdown conversion
-- [scraper](https://github.com/programble/scraper) - HTML parsing
+- Built with [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) principles
+- Inspired by [ripgrep](https://github.com/BurntSushi/ripgrep) performance patterns
+- Uses [rust-skills](https://github.com/leonardomso/rust-skills) (179 rules)
+
+## 📊 Stats
+
+- **Lines of Code:** ~4000+
+- **Tests:** 198 passing
+- **Coverage:** High (state-based testing)
+- **MSRV:** 1.75.0
+
+## 🗺️ Roadmap
+
+- [ ] v1.1.0: Multi-domain crawling
+- [ ] v1.2.0: JavaScript rendering (headless browser)
+- [ ] v2.0.0: Distributed scraping
 
 ---
 

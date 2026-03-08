@@ -1,10 +1,16 @@
 [package]
 name = "rust_scraper"
-version = "0.3.0"
+version = "1.0.0"
 edition = "2021"
-description = "Modern web scraper for RAG datasets with clean content extraction"
+description = "Production-ready web scraper with Clean Architecture, TUI selector, and sitemap support"
 authors = ["GazaDev"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/XaviCode1000/rust-scraper"
+homepage = "https://github.com/XaviCode1000/rust-scraper"
+documentation = "https://docs.rs/rust_scraper"
+keywords = ["scraper", "web", "crawler", "rag", "tui"]
+categories = ["command-line-utilities", "web-programming"]
+rust-version = "1.80"
 
 [features]
 default = []
