@@ -1,7 +1,7 @@
 ---
 description: Especialista en optimización y performance - LTO, PGO, inline, profiling, benchmarks con criterion
 mode: subagent
-model: mistral/devstral-medium-latest
+model: cloudflare-workers-ai/@cf/zai-org/glm-4.7-flash
 temperature: 0.2
 permission:
   skill:

@@ -269,7 +269,7 @@ async fn download_assets(
                     Ok(downloaded) => {
                         assets.push(DownloadedAsset {
                             url: downloaded.url,
-                            local_path: downloaded.local_path.to_string_lossy().to_string(),
+                            local_path: downloaded.local_path.to_string_lossy().into_owned(),
                             asset_type: "image".to_string(),
                             size: downloaded.size,
                         });
@@ -303,7 +303,7 @@ async fn download_assets(
                     Ok(downloaded) => {
                         assets.push(DownloadedAsset {
                             url: downloaded.url,
-                            local_path: downloaded.local_path.to_string_lossy().to_string(),
+                            local_path: downloaded.local_path.to_string_lossy().into_owned(),
                             asset_type: "document".to_string(),
                             size: downloaded.size,
                         });

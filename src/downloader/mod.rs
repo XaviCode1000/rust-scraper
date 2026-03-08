@@ -148,7 +148,7 @@ impl Downloader {
     /// Generate a unique filename from URL and content hash
     fn generate_filename(&self, url: &str, content: &[u8]) -> String {
         // Get extension from URL
-        let extension = crate::detector::get_extension(url).unwrap_or_else(|| "bin".to_string());
+        let extension = crate::detector::get_extension(url).unwrap_or_else(|| "bin".into());
 
         // Create hash from content
         let mut hasher = Sha256::new();

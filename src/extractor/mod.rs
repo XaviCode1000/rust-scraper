@@ -127,7 +127,7 @@ pub fn extract_documents(html: &str, base_url: &url::Url) -> Vec<AssetUrl> {
                     let asset_type = crate::detector::detect_from_url(&url);
                     if asset_type.is_document() {
                         // Get link text as description
-                        let text = link.text().collect::<String>().trim().to_string();
+                        let text = link.text().collect::<String>().trim().to_owned();
                         let description = if text.is_empty() { None } else { Some(text) };
 
                         assets.push(AssetUrl {
