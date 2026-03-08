@@ -1,77 +1,161 @@
-# Rust Scraper
+# 🦀 Rust Scraper
 
-A modern web scraper optimized for RAG (Retrieval-Augmented Generation) datasets. Uses the Readability algorithm (same as Firefox Reader Mode) to extract clean, structured content from web pages.
+[![CI](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-## Features
+Modern web scraper optimized for RAG (Retrieval-Augmented Generation) datasets. Uses the Readability algorithm (same as Firefox Reader Mode) to extract clean, structured content from web pages.
 
-- **Readability Algorithm** - Extracts clean content like Firefox Reader Mode
-- **Structured Markdown** - Preserves headings, code blocks, lists, emphasis
-- **Domain-based Organization** - Files saved in `output/{domain}/{path}`
-- **YAML Frontmatter** - Rich metadata (title, url, date, author, excerpt)
-- **Multiple Output Formats** - Markdown, JSON, or plain text
-- **Syntax Highlighting** - Code blocks with language detection
-- **High Performance** - Optimized release profile with LTO
+## ✨ Features
 
-## Quick Start
+- 📖 **Readability Algorithm** - Extracts clean content like Firefox Reader Mode
+- 🌐 **HTTP Client** - Robust reqwest-based fetching with TLS support (rustls)
+- 📝 **Multiple Output Formats** - Markdown, JSON, or plain text
+- 🔧 **CLI Interface** - Full control via command line arguments
+- ⚡ **High Performance** - Optimized release profile with LTO
+- 🧪 **Well Tested** - 38 unit and integration tests
+- 📦 **Zero External Dependencies** - No browser required
+- 🖼️ **Asset Download** - Download images and documents automatically
+- 🔒 **TLS Configuration** - System certificate support for secure connections
+
+## 🚀 Requirements
+
+- [Rust](https://rustup.rs/) (1.70+ for edition 2021)
+```bash
+rustc --version
+```
+
+## 📦 Installation
 
 ```bash
-# Build
-cargo build --release
+# Clone repository
+git clone https://github.com/XaviCode1000/rust-scraper.git
+cd rust-scraper
 
-# Scrape a URL
+# Build in release mode
+cargo build --release
+```
+
+## 🎯 Usage
+
+```bash
+# Basic usage (URL is REQUIRED)
 cargo run --release -- --url "https://example.com"
 
-# Output to custom directory
-cargo run --release -- --url "https://example.com" -o ./my-output
+# Specify output directory
+cargo run --release -- --url "https://example.com" -o ./output
+
+# Choose output format
+cargo run --release -- --url "https://example.com" -f json
+cargo run --release -- --url "https://example.com" -f text
+
+# Download images and documents
+cargo run --release -- --url "https://example.com" --download-images --download-documents
+
+# More options
+cargo run --release -- --help
 ```
 
-## Output Structure
-
-```
-output/
-└── example.com/
-    ├── index.md          # Root page
-    └── docs/
-        └── api/
-            └── index.md  # Nested page
-```
-
-Each markdown file includes YAML frontmatter:
-
-```yaml
----
-title: Example Domain
-url: https://example.com/
-date: 2026-03-07
-author: null
-excerpt: This domain is for use in documentation...
----
-
-# Example Domain
-
-Content here...
-```
-
-## CLI Options
+### CLI Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-u, --url` | **URL to scrape (required)** | - |
+| `-u, --url` | **URL to scrape (REQUIRED)** | - |
+| `-s, --selector` | CSS selector for content | `body` |
 | `-o, --output` | Output directory | `output` |
-| `-f, --format` | Output format | `markdown` |
-| `-s, --selector` | CSS selector | `body` |
-| `-v, --verbose` | Verbose logging | - |
+| `-f, --format` | Output format (markdown/json/text) | `markdown` |
+| `--download-images` | Download images to `output/images/` | - |
+| `--download-documents` | Download documents to `output/documents/` | - |
+| `--delay-ms` | Delay between requests (ms) | `1000` |
+| `--max-pages` | Maximum pages to scrape | `10` |
+| `-v, --verbose` | Increase verbosity | - |
 
-## Output Formats
+## 📁 Structure
 
-- **markdown** - Structured Markdown with frontmatter
-- **json** - JSON array with all metadata
-- **text** - Plain text content
+```
+rust-scraper/
+├── src/
+│   ├── lib.rs        # Library with tests
+│   ├── main.rs       # CLI entry point
+│   ├── scraper.rs    # Core scraping logic
+│   ├── config.rs     # Configuration & logging
+│   ├── downloader.rs # Asset download module
+│   └── detector.rs   # MIME type detection
+├── tests/
+│   └── integration_test.rs
+├── Cargo.toml
+├── README.md
+└── LICENSE
+```
 
-## Requirements
+## 🧪 Testing
 
-- Rust 1.70+ (edition 2021)
+```bash
+# Run all tests
+cargo test
 
-## License
+# Run with coverage
+cargo test -- --nocapture
 
-MIT
+# Run specific test
+cargo test test_validate_url
+```
+
+**Test Coverage**: 38 tests (30 unit + 8 integration)
+
+## 📋 Example Output
+
+### Input
+```bash
+cargo run --release -- --url "https://example.com" -o ./output
+```
+
+### Output (Markdown)
+```markdown
+# Example Domain
+
+This domain is for use in documentation examples without needing permission. Avoid use in operations. Learn more
+
+---
+
+*Source: [https://example.com/](https://example.com/)*
+```
+
+### Asset Downloads
+When `--download-images` or `--download-documents` is used:
+
+```
+output/
+├── example.com/
+│   └── index.md
+├── images/
+│   ├── 027e504eabfc.png
+│   ├── 0c2f4f0301fe.png
+│   └── e15cbdd2d653.svg
+└── documents/
+    └── 9870371a7a8c.pdf
+```
+
+## 🔄 Migration from v0.1.x
+
+**Breaking Change**: URL is now a required CLI argument
+
+```bash
+# v0.1.x (OLD - hardcoded URL)
+cargo run  # Used hardcoded URL
+
+# v0.2.0+ (NEW - URL required)
+cargo run -- --url "https://example.com"
+```
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## 📚 Documentation
+
+See the [doc/](doc/) folder for detailed documentation:
+- [doc/README.md](doc/README.md) - Quick start guide
+- [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) - Technical architecture
+- [doc/CLI.md](doc/CLI.md) - CLI reference
+- [doc/CONTRIBUTING.md](doc/CONTRIBUTING.md) - Contributing guide
