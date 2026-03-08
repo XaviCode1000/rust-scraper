@@ -193,6 +193,15 @@ pub struct Args {
     /// Verbosity level
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    // ========== FASE 3: Sitemap Support ==========
+    /// Use sitemap for URL discovery (auto-discovers from robots.txt if URL not provided)
+    #[arg(long)]
+    pub use_sitemap: bool,
+
+    /// Explicit sitemap URL (optional, auto-discovers if not provided)
+    #[arg(long, requires = "use_sitemap")]
+    pub sitemap_url: Option<String>,
 }
 
 /// Validate and parse URL using url crate (RFC 3986 compliant)
