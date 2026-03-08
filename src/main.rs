@@ -2,12 +2,32 @@
 //!
 //! Extracts clean, structured content from web pages using readability algorithm.
 //!
-//! FASE 3: Added sitemap support with --use-sitemap and --sitemap-url flags.
+//! # Architecture
+//!
+//! Following Clean Architecture with TUI support (FASE 4):
+//!
+//! ```text
+//! main.rs (Orchestrator)
+//!     │
+//!     ├─→ discover_urls_for_tui()     ← Application layer (pure)
+//!     │       ↓
+//!     │    [Vec<Url>]
+//!     │       ↓
+//!     ├─→ adapters::tui::run_selector() ← Adapter layer (UI)
+//!     │       ↓
+//!     │    [Vec<Url>] (selected)
+//!     │       ↓
+//!     └─→ scrape_urls_for_tui()       ← Application layer (pure)
+//! ```
+//!
+//! **Golden Rule:** Application layer NEVER imports ratatui/crossterm.
 
 use anyhow::Context;
+use clap::Parser;
 use rust_scraper::{
-    application::crawl_with_sitemap, create_http_client, save_results, scrape_with_config,
-    validate_and_parse_url, Args, CrawlerConfig, Parser, ScraperConfig, UserAgentCache,
+    adapters::tui,
+    application::{discover_urls_for_tui, scrape_urls_for_tui},
+    validate_and_parse_url, Args, CrawlerConfig, ScraperConfig, UserAgentCache,
 };
 use tracing::{info, warn};
 
@@ -24,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     };
     rust_scraper::config::init_logging(log_level);
 
-    info!("🚀 Rust Scraper v0.4.0 - Clean Architecture");
+    info!("🚀 Rust Scraper v0.4.0 - Clean Architecture + TUI");
     info!("📌 Target: {}", args.url);
     info!("📁 Output: {}", args.output.display());
 
@@ -41,12 +61,8 @@ async fn main() -> anyhow::Result<()> {
 
     info!("✅ URL validated: {}", parsed_url);
 
-    // 5. Create configured HTTP client (with retry + user-agent rotation)
-    // Note: Uses deprecated get_random_user_agent() for backward compatibility
-    let client = create_http_client()?;
-
-    // 6. Configure scraping with download options
-    let config = ScraperConfig {
+    // 5. Create scraper config
+    let scraper_config = ScraperConfig {
         download_images: args.download_images,
         download_documents: args.download_documents,
         output_dir: args.output.clone(),
@@ -54,66 +70,87 @@ async fn main() -> anyhow::Result<()> {
         scraper_concurrency: 3,                // HDD-aware: nproc - 1 for 4C CPU
     };
 
-    if config.download_images {
+    if scraper_config.download_images {
         info!("🖼️  Image download: ENABLED");
     }
-    if config.download_documents {
+    if scraper_config.download_documents {
         info!("📄 Document download: ENABLED");
     }
 
-    // 7. FASE 3: Sitemap-based URL discovery (optional)
-    let urls_to_scrape = if args.use_sitemap {
-        info!("🗺️  Sitemap mode: ENABLED");
-        info!("🔍 Discovering URLs from sitemap...");
+    // 6. Create crawler config for URL discovery using builder pattern
+    let user_agent = get_random_user_agent_from_pool(&user_agents);
+    let crawler_config = CrawlerConfig::builder(parsed_url.clone())
+        .max_depth(2)
+        .max_pages(args.max_pages)
+        .concurrency(3)
+        .delay_ms(args.delay_ms)
+        .user_agent(user_agent)
+        .timeout_secs(30)
+        .use_sitemap(args.use_sitemap)
+        .sitemap_url(args.sitemap_url.clone().unwrap_or_default())
+        .build();
 
-        // Use sitemap to discover URLs
-        let crawler_config = CrawlerConfig::new(parsed_url.clone());
-        let discovered =
-            crawl_with_sitemap(&args.url, args.sitemap_url.as_deref(), &crawler_config).await?;
+    // 7. FASE 4: TUI Interactive Mode (optional)
+    info!("🔍 Discovering URLs...");
+    let discovered_urls = discover_urls_for_tui(&args.url, &crawler_config)
+        .await
+        .context("URL discovery failed")?;
 
-        info!("✅ Found {} URLs from sitemap", discovered.len());
+    info!("✅ Found {} URLs", discovered_urls.len());
 
-        if discovered.is_empty() {
-            warn!("⚠️  No URLs found in sitemap, falling back to direct scraping");
-            vec![parsed_url.clone()]
-        } else {
-            discovered.into_iter().map(|d| d.url).collect()
+    if discovered_urls.is_empty() {
+        warn!("⚠️  No URLs discovered, nothing to scrape");
+        return Ok(());
+    }
+
+    // 8. Interactive selection (ONLY if --interactive flag)
+    let urls_to_scrape = if args.interactive {
+        info!("🎮 Starting interactive TUI selector...");
+        match tui::run_selector(&discovered_urls).await {
+            Ok(selected) => {
+                info!("✅ User selected {} URLs", selected.len());
+                if selected.is_empty() {
+                    info!("ℹ️  No URLs selected, exiting");
+                    return Ok(());
+                }
+                selected
+            }
+            Err(tui::TuiError::Interrupted) => {
+                info!("ℹ️  User interrupted TUI selector, exiting");
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("TUI error: {}", e));
+            }
         }
     } else {
-        // Direct scraping (legacy mode)
-        vec![parsed_url.clone()]
+        // Headless mode: scrape all discovered URLs
+        info!(
+            "📡 Headless mode: will scrape all {} URLs",
+            discovered_urls.len()
+        );
+        discovered_urls
     };
 
-    // 8. Execute scraping for each discovered URL
-    let mut all_results = Vec::new();
-
-    for url_to_scrape in &urls_to_scrape {
-        info!("📡 Scraping: {}", url_to_scrape);
-
-        let results = scrape_with_config(&client, url_to_scrape, &config)
-            .await
-            .context(format!("Scraping failed for {}", url_to_scrape))?;
-
-        if results.is_empty() {
-            warn!("⚠️  No content extracted from {}", url_to_scrape);
-        } else {
-            info!(
-                "✅ Scraping completed: {} elements extracted from {}",
-                results.len(),
-                url_to_scrape
-            );
-            all_results.extend(results);
-        }
-    }
+    // 9. Scrape selected URLs
+    info!("🕷️  Scraping {} URLs...", urls_to_scrape.len());
+    let all_results = scrape_urls_for_tui(&urls_to_scrape, &scraper_config)
+        .await
+        .context("Scraping failed")?;
 
     if all_results.is_empty() {
         warn!("⚠️  No content extracted from any URL");
         return Ok(());
     }
 
-    // 9. Save results
+    info!(
+        "✅ Scraping completed: {} elements extracted",
+        all_results.len()
+    );
+
+    // 10. Save results
     info!("💾 Saving results...");
-    save_results(&all_results, &args.output, &args.format)?;
+    rust_scraper::save_results(&all_results, &args.output, &args.format)?;
 
     // Summary of downloaded assets
     let total_assets: usize = all_results.iter().map(|r| r.assets.len()).sum();
@@ -129,4 +166,14 @@ async fn main() -> anyhow::Result<()> {
     info!("📈 Total URLs processed: {}", urls_to_scrape.len());
 
     Ok(())
+}
+
+/// Get random user agent from pool
+///
+/// Helper function to get a random user agent.
+fn get_random_user_agent_from_pool(user_agents: &[String]) -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let index = rng.gen_range(0..user_agents.len());
+    user_agents[index].clone()
 }

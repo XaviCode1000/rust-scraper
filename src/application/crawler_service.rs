@@ -27,7 +27,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-use crate::domain::{CrawlError, CrawlResult, CrawlerConfig, DiscoveredUrl};
+use crate::domain::{
+    CrawlError, CrawlResult, CrawlerConfig, DiscoveredUrl, ScrapedContent, ValidUrl,
+};
 
 use super::url_filter::is_allowed;
 use crate::infrastructure::crawler::{
@@ -37,8 +39,271 @@ use crate::infrastructure::crawler::{
 // FASE 3: Sitemap support
 use crate::infrastructure::crawler::sitemap_parser::{SitemapConfig, SitemapParser};
 
+// FASE 4: TUI support - re-exports
+use crate::error::{Result as ScraperResult, ScraperError};
+use crate::infrastructure::scraper::{fallback, readability};
+use crate::ScraperConfig;
+
 /// Type alias for the rate limiter used in crawling
 type CrawlRateLimiter = RateLimiter<NotKeyed, InMemoryState, QuantaClock>;
+
+// ============================================================================
+// FASE 4: TUI Support - Separated Discover/Scrape Use Cases
+// ============================================================================
+
+/// Discover URLs from a website without downloading content
+///
+/// This is the first step in the TUI workflow:
+/// 1. Discover all URLs from sitemap or DOM scraping
+/// 2. Return Vec<Url> for interactive selection
+/// 3. User selects which URLs to scrape
+///
+/// Following **own-borrow-over-clone**: Accepts `&str` not `&String`.
+/// Following **err-anyhow-for-applications**: Uses anyhow::Result.
+///
+/// # Arguments
+///
+/// * `base_url` - Base URL to discover from
+/// * `config` - Crawler configuration
+///
+/// # Returns
+///
+/// * `Ok(Vec<Url>)` - Discovered URLs (owned)
+/// * `Err(anyhow::Error)` - Error during discovery
+///
+/// # Examples
+///
+/// ```no_run
+/// use rust_scraper::{application::discover_urls_for_tui, domain::CrawlerConfig};
+/// use url::Url;
+///
+/// # #[tokio::main]
+/// # async fn main() -> anyhow::Result<()> {
+/// let seed = Url::parse("https://example.com")?;
+/// let config = CrawlerConfig::new(seed);
+///
+/// let urls = discover_urls_for_tui("https://example.com", &config).await?;
+/// println!("Found {} URLs", urls.len());
+/// # Ok(())
+/// # }
+/// ```
+pub async fn discover_urls_for_tui(
+    base_url: &str,
+    config: &CrawlerConfig,
+) -> anyhow::Result<Vec<Url>> {
+    info!("Discovering URLs from {}", base_url);
+
+    // If sitemap enabled, use sitemap (preferred)
+    if config.use_sitemap {
+        let discovered =
+            crawl_with_sitemap(base_url, config.sitemap_url.as_deref(), config).await?;
+        Ok(discovered.into_iter().map(|d| d.url).collect())
+    } else {
+        // DOM scraping - extract links from single page
+        let client = super::create_http_client()?;
+
+        info!("Fetching {} for link extraction", base_url);
+        let response = client
+            .get(base_url)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("HTTP error: {}", e))?;
+
+        let html = response
+            .text()
+            .await
+            .map_err(|e| anyhow::anyhow!("Network error: {}", e))?;
+
+        let base = Url::parse(base_url).map_err(|e| anyhow::anyhow!("Invalid URL: {}", e))?;
+
+        // Extract links
+        let links =
+            extract_links(&html, base_url).map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+
+        // Filter and normalize URLs
+        let mut urls = Vec::new();
+        for link in links {
+            let normalized = normalize_url(&link);
+            if let Ok(parsed_url) = Url::parse(&normalized) {
+                // Check if internal link
+                if let Some(seed_domain) = base.host_str() {
+                    if is_internal_link(&normalized, seed_domain) {
+                        // Check if allowed by filters
+                        if is_allowed(&normalized, config) {
+                            urls.push(parsed_url);
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("Discovered {} URLs from {}", urls.len(), base_url);
+        Ok(urls)
+    }
+}
+
+/// Scrape/download specific URLs
+///
+/// This is the second step in the TUI workflow:
+/// 1. User selects URLs via TUI
+/// 2. This function downloads and extracts content
+///
+/// Following **own-borrow-over-clone**: Accepts `&[Url]` not `&Vec<Url>`.
+/// Following **async-no-lock-across-await**: Uses stream with buffer_unordered.
+/// Following **err-anyhow-for-applications**: Uses anyhow::Result.
+///
+/// # Arguments
+///
+/// * `urls` - Slice of URLs to scrape (borrowed)
+/// * `config` - Scraper configuration
+///
+/// # Returns
+///
+/// * `Ok(Vec<ScrapedContent>)` - Scraped content from each URL
+/// * `Err(ScraperError)` - Error during scraping
+///
+/// # Examples
+///
+/// ```no_run
+/// use rust_scraper::{application::scrape_urls_for_tui, ScraperConfig};
+/// use url::Url;
+///
+/// # #[tokio::main]
+/// # async fn main() -> anyhow::Result<()> {
+/// let urls = vec![
+///     Url::parse("https://example.com/1")?,
+///     Url::parse("https://example.com/2")?,
+/// ];
+/// let config = ScraperConfig::default();
+/// let results = scrape_urls_for_tui(&urls, &config).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn scrape_urls_for_tui(
+    urls: &[Url],
+    config: &ScraperConfig,
+) -> ScraperResult<Vec<ScrapedContent>> {
+    use futures::stream::{self, StreamExt};
+
+    info!("Scraping {} URLs", urls.len());
+
+    let client = super::create_http_client()?;
+
+    // Stream processing with concurrency control
+    // Following async-no-lock-across-await: buffer_unordered handles concurrency
+    let results = stream::iter(urls)
+        .map(|url| async { scrape_single_url(&client, url, config).await })
+        .buffered(config.scraper_concurrency)
+        .collect::<Vec<_>>()
+        .await;
+
+    // Collect results, propagating first error if any
+    results.into_iter().collect()
+}
+
+/// Scrape a single URL
+///
+/// Helper function for scrape_urls_for_tui.
+async fn scrape_single_url(
+    client: &reqwest_middleware::ClientWithMiddleware,
+    url: &Url,
+    config: &ScraperConfig,
+) -> ScraperResult<ScrapedContent> {
+    debug!("Scraping: {}", url);
+
+    // Fetch HTML
+    let response = client
+        .get(url.as_str())
+        .send()
+        .await
+        .map_err(|e| ScraperError::Middleware(e.to_string()))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ScraperError::http(status, url.as_str()));
+    }
+
+    let html = response
+        .text()
+        .await
+        .map_err(|e| ScraperError::Middleware(e.to_string()))?;
+
+    // Try Readability first, fallback to plain text extraction
+    match readability::parse(&html, Some(url.as_str())) {
+        Ok(article) => {
+            let assets = download_assets_if_enabled(&html, url, config).await?;
+
+            Ok(ScrapedContent {
+                title: article.title,
+                content: article.text_content,
+                url: ValidUrl::new(url.clone()),
+                excerpt: article.excerpt,
+                author: article.byline,
+                date: article.published_time,
+                html: Some(html),
+                assets,
+            })
+        }
+        Err(e) => {
+            warn!("⚠️  Readability failed for {}: {}", url, e);
+            let fallback_content = fallback::extract_text(&html);
+            let assets = download_assets_if_enabled(&html, url, config).await?;
+
+            Ok(ScrapedContent {
+                title: url
+                    .host_str()
+                    .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {}", url)))?
+                    .to_string(),
+                content: fallback_content,
+                url: ValidUrl::new(url.clone()),
+                excerpt: None,
+                author: None,
+                date: None,
+                html: Some(html),
+                assets,
+            })
+        }
+    }
+}
+
+/// Download assets if enabled in config
+///
+/// Helper function to conditionally download assets.
+#[cfg(any(feature = "images", feature = "documents"))]
+async fn download_assets_if_enabled(
+    html: &str,
+    url: &Url,
+    config: &ScraperConfig,
+) -> ScraperResult<Vec<crate::domain::DownloadedAsset>> {
+    if config.has_downloads() {
+        use crate::infrastructure::scraper::asset_download::download_assets;
+
+        download_assets(
+            html,
+            url,
+            &super::create_http_client().map_err(|e| ScraperError::Middleware(e.to_string()))?,
+            &config.output_dir,
+            config.max_file_size,
+        )
+        .await
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Download assets stub when features are disabled
+#[cfg(not(any(feature = "images", feature = "documents")))]
+async fn download_assets_if_enabled(
+    _html: &str,
+    _url: &Url,
+    _config: &ScraperConfig,
+) -> ScraperResult<Vec<crate::domain::DownloadedAsset>> {
+    Ok(Vec::new())
+}
+
+// ============================================================================
+// Legacy Crawl Functions (kept for backward compatibility)
+// ============================================================================
 
 /// Crawl a website starting from the seed URL
 ///
@@ -294,6 +559,7 @@ fn handle_crawl_result(
 ///
 /// * `Ok(Vec<DiscoveredUrl>)` - Discovered URLs
 /// * `Err(CrawlError)` - Error during discovery
+#[deprecated(since = "0.4.0", note = "Use discover_urls_for_tui instead")]
 pub async fn discover_urls(
     url: &str,
     depth: usize,

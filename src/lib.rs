@@ -38,9 +38,9 @@ pub use domain::{
 // Application layer — Use cases
 pub mod application;
 pub use application::{
-    crawl_site, create_http_client, discover_urls, extract_domain, fetch_sitemap, is_allowed,
-    is_excluded, is_internal_link, matches_pattern, scrape_multiple_with_limit, scrape_with_config,
-    scrape_with_readability,
+    crawl_site, create_http_client, discover_urls, discover_urls_for_tui, extract_domain,
+    fetch_sitemap, is_allowed, is_excluded, is_internal_link, matches_pattern,
+    scrape_multiple_with_limit, scrape_urls_for_tui, scrape_with_config, scrape_with_readability,
 };
 
 // Infrastructure layer — Implementations (public for testing)
@@ -202,6 +202,11 @@ pub struct Args {
     /// Explicit sitemap URL (optional, auto-discovers if not provided)
     #[arg(long, requires = "use_sitemap")]
     pub sitemap_url: Option<String>,
+
+    // ========== FASE 4: TUI Interactive Mode ==========
+    /// Interactive mode with TUI URL selector
+    #[arg(long)]
+    pub interactive: bool,
 }
 
 /// Validate and parse URL using url crate (RFC 3986 compliant)

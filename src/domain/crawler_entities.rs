@@ -99,6 +99,10 @@ pub struct CrawlerConfig {
     pub user_agent: String,
     /// Timeout for each request in seconds
     pub timeout_secs: u64,
+    /// Use sitemap for URL discovery (FASE 3)
+    pub use_sitemap: bool,
+    /// Explicit sitemap URL (auto-discovers if None)
+    pub sitemap_url: Option<String>,
 }
 
 impl CrawlerConfig {
@@ -123,6 +127,8 @@ impl CrawlerConfig {
             delay_ms: 500,  // Hardware-aware: 500ms for HDD
             user_agent: "rust-scraper/0.3.0 (Web Crawler)".to_string(),
             timeout_secs: 30,
+            use_sitemap: false,
+            sitemap_url: None,
         }
     }
 
@@ -154,6 +160,8 @@ impl CrawlerConfig {
 #[derive(Debug)]
 #[must_use]
 pub struct CrawlerConfigBuilder {
+    use_sitemap: bool,
+    sitemap_url: Option<String>,
     seed_url: Url,
     max_depth: u8,
     max_pages: usize,
@@ -179,6 +187,8 @@ impl CrawlerConfigBuilder {
             delay_ms: 500,
             user_agent: "rust-scraper/0.3.0 (Web Crawler)".to_string(),
             timeout_secs: 30,
+            use_sitemap: false,
+            sitemap_url: None,
         }
     }
 
@@ -252,6 +262,20 @@ impl CrawlerConfigBuilder {
         self
     }
 
+    /// Set use_sitemap flag (FASE 3)
+    #[must_use]
+    pub fn use_sitemap(mut self, use_sitemap: bool) -> Self {
+        self.use_sitemap = use_sitemap;
+        self
+    }
+
+    /// Set explicit sitemap URL (FASE 3)
+    #[must_use]
+    pub fn sitemap_url(mut self, url: impl Into<String>) -> Self {
+        self.sitemap_url = Some(url.into());
+        self
+    }
+
     /// Build the configuration
     #[must_use]
     pub fn build(self) -> CrawlerConfig {
@@ -265,6 +289,8 @@ impl CrawlerConfigBuilder {
             delay_ms: self.delay_ms,
             user_agent: self.user_agent,
             timeout_secs: self.timeout_secs,
+            use_sitemap: self.use_sitemap,
+            sitemap_url: self.sitemap_url,
         }
     }
 }
@@ -332,6 +358,10 @@ pub enum CrawlError {
         message: String,
         status_code: Option<u16>,
     },
+
+    /// HTTP error (status code or request failure)
+    #[error("HTTP error: {0}")]
+    Http(String),
 
     /// URL parsing error
     #[error("invalid URL: {0}")]
