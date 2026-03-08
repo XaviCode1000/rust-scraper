@@ -19,7 +19,10 @@ clap = { version = "4", features = ["derive"] }
 # HTTP & Networking - Reqwest con retry y tls
 # Nota: rustls-tls-native-roots usa certificados del sistema (/etc/ssl/certs)
 # Si falla SSL, actualizar certificados: sudo pacman -Sy ca-certificates
-reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli"] }
+reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "gzip", "brotli", "stream", "json"] }
+
+# Bytes type for streaming
+bytes = "1"
 
 # Retry middleware for reqwest (TASK-01)
 reqwest-middleware = "0.4"
@@ -76,17 +79,37 @@ sha2 = "0.10"
 # Error handling
 thiserror = "2"
 
-# Lazy statics (FIX-01 - eliminar unwraps)
-once_cell = "1"
-
 # Random for user agent rotation (TASK-05)
 rand = "0.8"
+
+# Cache directory management (TASK-001: User-Agent lazy update)
+dirs = "5"
 
 # Walking directories for tests
 walkdir = "2"
 
 # MIME type detection (optional - for image/document detection)
 mimetype-detector = { version = "0.3", optional = true }
+
+# Rate limiting (hardware-aware para HDD) - FASE 1 Web Crawler
+governor = "0.6"
+
+# Concurrent data structures - FASE 1 Web Crawler
+dashmap = "6"
+
+# TUI (preparar para Fase 2) - FASE 1 Web Crawler
+ratatui = "0.29"
+crossterm = "0.28"
+
+# XML parsing (preparar para Fase 3) - FASE 1 Web Crawler
+quick-xml = "0.37"
+flate2 = "1"
+
+# CPU detection for hardware-aware concurrency
+num_cpus = "1"
+
+# UUID for temp file generation (production-ready streaming)
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 mockall = "0.12"

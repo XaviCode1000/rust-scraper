@@ -33,7 +33,7 @@ const TIMEOUT_SECS: u64 = 30;
 /// ```
 pub fn create_http_client() -> Result<ClientWithMiddleware> {
     let base_client = Client::builder()
-        .user_agent(user_agent::random_user_agent())
+        .user_agent(user_agent::get_random_user_agent())
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .gzip(true)
         .brotli(true)

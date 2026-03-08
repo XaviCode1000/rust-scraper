@@ -7,9 +7,24 @@
 //!
 //! This follows the type-no-stringly principle - instead of passing raw Strings
 //! where a domain or path is expected, we use newtypes that guarantee validity.
+//!
+//! # Security
+//!
+//! Includes Windows reserved names check to prevent crashes on Windows systems.
+//! See: <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>
 
 use std::path::PathBuf;
 use thiserror::Error;
+
+/// Windows reserved device names (case-insensitive)
+/// https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+///
+/// These names cannot be used as file names on Windows, regardless of extension.
+/// Attempting to create files with these names will crash on Windows.
+const WINDOWS_RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
 
 /// Domain extracted from URL, validated and sanitized.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -94,6 +109,11 @@ impl UrlPath {
     }
 
     /// Get just the LAST component as filename (or index.md for root/trailing slash)
+    ///
+    /// # Security
+    ///
+    /// Checks Windows reserved names (CON, PRN, AUX, etc.) and appends `_safe` suffix
+    /// to prevent crashes on Windows systems.
     pub fn to_safe_filename(&self) -> String {
         if self.is_root || self.ends_with_slash {
             return "index.md".to_string();
@@ -101,7 +121,19 @@ impl UrlPath {
         let path_trimmed = self.raw.trim_start_matches('/');
         let last_component = path_trimmed.rsplit('/').next().unwrap_or(path_trimmed);
         let sanitized = Self::sanitize_path_segment(last_component);
-        format!("{}.md", sanitized)
+
+        // Check Windows reserved names (case-insensitive)
+        let upper = sanitized.to_uppercase();
+        let is_reserved = WINDOWS_RESERVED.iter().any(|&r| r == upper);
+
+        let final_name = if is_reserved {
+            // Append suffix to avoid collision
+            format!("{}_safe", sanitized)
+        } else {
+            sanitized
+        };
+
+        format!("{}.md", final_name)
     }
 
     /// Get directory part (everything except last component)
@@ -329,5 +361,96 @@ mod tests {
     fn test_output_path_images_root() {
         let output = OutputPath::from_url("https://example.com/").unwrap();
         assert_eq!(output.images_relative_path(), "images/");
+    }
+
+    // ========================================================================
+    // TASK-002: Windows Reserved Names Tests
+    // ========================================================================
+
+    #[test]
+    fn test_windows_reserved_con() {
+        let url = UrlPath::from_url_path("/CON");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "CON_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_prn() {
+        let url = UrlPath::from_url_path("/PRN");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "PRN_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_aux() {
+        let url = UrlPath::from_url_path("/AUX");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "AUX_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_nul() {
+        let url = UrlPath::from_url_path("/NUL");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "NUL_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_com1() {
+        let url = UrlPath::from_url_path("/COM1");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "COM1_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_com9() {
+        let url = UrlPath::from_url_path("/COM9");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "COM9_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_lpt1() {
+        let url = UrlPath::from_url_path("/LPT1");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "LPT1_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_lpt9() {
+        let url = UrlPath::from_url_path("/LPT9");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "LPT9_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_case_insensitive() {
+        // Should be case-insensitive
+        let url = UrlPath::from_url_path("/con");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "con_safe.md");
+
+        let url2 = UrlPath::from_url_path("/Con");
+        let filename2 = url2.to_safe_filename();
+        assert_eq!(filename2, "Con_safe.md");
+    }
+
+    #[test]
+    fn test_windows_reserved_nested_path() {
+        // Last component is CON
+        let url = UrlPath::from_url_path("/docs/page/CON");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "CON_safe.md");
+    }
+
+    #[test]
+    fn test_non_reserved_names_unchanged() {
+        let url = UrlPath::from_url_path("/docs");
+        let filename = url.to_safe_filename();
+        assert_eq!(filename, "docs.md");
+
+        let url2 = UrlPath::from_url_path("/config");
+        let filename2 = url2.to_safe_filename();
+        assert_eq!(filename2, "config.md");
     }
 }

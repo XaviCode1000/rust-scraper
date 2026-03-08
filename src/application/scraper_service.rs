@@ -5,6 +5,11 @@
 //! 2. Extract content using Readability or fallback
 //! 3. Download assets if configured
 //! 4. Return structured ScrapedContent
+//!
+//! # Rules Applied
+//!
+//! - **config-externalize**: Concurrency is configurable via ScraperConfig
+//! - **async-concurrency-limit**: Uses buffer_unordered for concurrency control
 
 use crate::domain::{DownloadedAsset, ScrapedContent, ValidUrl};
 use crate::error::{Result, ScraperError};
@@ -12,10 +17,6 @@ use crate::ScraperConfig;
 use futures::stream::{self, StreamExt};
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, info, warn};
-
-/// Concurrency limit for HDD-constrained systems (4C/8GB RAM)
-/// Following rust-skills: async-concurrency-limit
-const CONCURRENCY_LIMIT: usize = 3;
 
 /// Scrape a URL using Readability algorithm for clean content extraction
 ///
@@ -134,6 +135,9 @@ pub async fn scrape_with_config(
 /// - HDD thrashing (for systems with mechanical drives)
 /// - Anti-bot detection (DDoS-like patterns)
 ///
+/// Following **config-externalize**: Concurrency is configurable via ScraperConfig.
+/// Following **async-concurrency-limit**: Uses buffer_unordered for concurrency control.
+///
 /// # Arguments
 /// * `client` - HTTP client with retry middleware
 /// * `urls` - URLs to scrape
@@ -156,7 +160,7 @@ pub async fn scrape_multiple_with_limit(
     info!(
         "🌐 Scraping {} URLs with concurrency limit {}",
         urls.len(),
-        CONCURRENCY_LIMIT
+        config.scraper_concurrency
     );
 
     let tasks = urls.iter().map(|url| {
@@ -166,7 +170,7 @@ pub async fn scrape_multiple_with_limit(
     });
 
     let results: Vec<Result<Vec<ScrapedContent>>> = stream::iter(tasks)
-        .buffer_unordered(CONCURRENCY_LIMIT)
+        .buffer_unordered(config.scraper_concurrency)
         .collect()
         .await;
 
@@ -227,8 +231,14 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrency_limit_is_set() {
-        // Verify concurrency limit is appropriate for HDD systems
-        assert_eq!(CONCURRENCY_LIMIT, 3);
+    fn test_scraper_config_concurrency_default() {
+        let config = ScraperConfig::default();
+        assert_eq!(config.scraper_concurrency, 3);
+    }
+
+    #[test]
+    fn test_scraper_config_concurrency_custom() {
+        let config = ScraperConfig::default().with_scraper_concurrency(5);
+        assert_eq!(config.scraper_concurrency, 5);
     }
 }

@@ -30,12 +30,17 @@ pub mod error;
 
 // Domain layer — Core business entities
 pub mod domain;
-pub use domain::{DownloadedAsset, ScrapedContent, ValidUrl};
+pub use domain::{
+    ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
+    DownloadedAsset, ScrapedContent, ValidUrl,
+};
 
 // Application layer — Use cases
 pub mod application;
 pub use application::{
-    create_http_client, scrape_multiple_with_limit, scrape_with_config, scrape_with_readability,
+    crawl_site, create_http_client, discover_urls, extract_domain, fetch_sitemap, is_allowed,
+    is_excluded, is_internal_link, matches_pattern, scrape_multiple_with_limit, scrape_with_config,
+    scrape_with_readability,
 };
 
 // Infrastructure layer — Implementations (public for testing)
@@ -49,6 +54,7 @@ pub mod extractor;
 pub mod url_path;
 pub mod user_agent;
 pub use url_path::{Domain, OutputPath, UrlPath};
+pub use user_agent::{get_random_user_agent_from_pool, UserAgentCache};
 
 // CLI types
 pub use clap::{Parser, ValueEnum};
@@ -66,7 +72,10 @@ pub enum OutputFormat {
 }
 
 /// Configuration for asset downloading
-#[derive(Debug, Clone, Default)]
+///
+/// Following **config-externalize**: All concurrency settings are configurable.
+/// Following **async-concurrency-limit**: Default is HDD-aware (3 for 4C CPU).
+#[derive(Debug, Clone)]
 pub struct ScraperConfig {
     /// Enable image downloading
     pub download_images: bool,
@@ -76,6 +85,21 @@ pub struct ScraperConfig {
     pub output_dir: std::path::PathBuf,
     /// Maximum file size in bytes (default: 50MB)
     pub max_file_size: Option<u64>,
+    /// Maximum concurrent scrapers (default: 3 for HDD-aware on 4C CPU)
+    /// Following rust-skills: config-externalize, async-concurrency-limit
+    pub scraper_concurrency: usize,
+}
+
+impl Default for ScraperConfig {
+    fn default() -> Self {
+        Self {
+            download_images: false,
+            download_documents: false,
+            output_dir: std::path::PathBuf::from("output"),
+            max_file_size: Some(50 * 1024 * 1024), // 50MB default
+            scraper_concurrency: 3,                // HDD-aware: nproc - 1 for 4C CPU
+        }
+    }
 }
 
 impl ScraperConfig {
@@ -103,6 +127,23 @@ impl ScraperConfig {
     #[must_use]
     pub fn with_output_dir(mut self, dir: std::path::PathBuf) -> Self {
         self.output_dir = dir;
+        self
+    }
+
+    /// Set scraper concurrency limit
+    ///
+    /// # Arguments
+    ///
+    /// * `concurrency` - Maximum concurrent scrapers
+    ///
+    /// # Recommendations
+    ///
+    /// - **HDD**: 3 (default) — avoids disk thrashing
+    /// - **SSD**: 5-8 — faster random I/O
+    /// - **NVMe**: 10+ — very high IOPS
+    #[must_use]
+    pub fn with_scraper_concurrency(mut self, concurrency: usize) -> Self {
+        self.scraper_concurrency = concurrency;
         self
     }
 
@@ -154,14 +195,24 @@ pub struct Args {
     pub verbose: u8,
 }
 
-/// Validate and parse a URL
+/// Validate and parse URL using url crate (RFC 3986 compliant)
 ///
 /// # Arguments
+///
 /// * `url` - URL string to validate
 ///
 /// # Returns
+///
 /// * `Ok(url::Url)` - Validated and parsed URL
 /// * `Err(ScraperError::InvalidUrl)` - Invalid URL
+///
+/// # Errors
+///
+/// Returns error if:
+/// - URL is empty
+/// - URL has invalid format
+/// - URL scheme is not http or https
+/// - URL has no host
 ///
 /// # Examples
 ///
@@ -179,14 +230,21 @@ pub fn validate_and_parse_url(url: &str) -> Result<url::Url> {
         return Err(ScraperError::invalid_url("URL cannot be empty"));
     }
 
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(ScraperError::invalid_url(
-            "URL must start with http:// or https://",
-        ));
-    }
+    // Url::parse automatically trims whitespace and handles case-insensitive schemes
+    // Following rust-skills: url-no-string-split (don't use starts_with for URLs)
+    let parsed = url::Url::parse(url.trim())
+        .map_err(|e| ScraperError::invalid_url(format!("Failed to parse URL '{}': {}", url, e)))?;
 
-    let parsed = url::Url::parse(url)
-        .map_err(|e| ScraperError::invalid_url(format!("Failed to parse URL: {}", e)))?;
+    // Check scheme (case-insensitive, already lowercased by Url::parse)
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(ScraperError::invalid_url(format!(
+                "URL must use http or https scheme, got '{}'",
+                scheme
+            )))
+        }
+    }
 
     if parsed.host_str().is_none() {
         return Err(ScraperError::invalid_url("URL must have a valid host"));
@@ -208,6 +266,7 @@ mod tests {
         assert!(!config.download_images);
         assert!(!config.download_documents);
         assert!(!config.has_downloads());
+        assert_eq!(config.scraper_concurrency, 3);
     }
 
     #[test]
@@ -225,6 +284,12 @@ mod tests {
     }
 
     #[test]
+    fn test_scraper_config_with_concurrency() {
+        let config = ScraperConfig::default().with_scraper_concurrency(5);
+        assert_eq!(config.scraper_concurrency, 5);
+    }
+
+    #[test]
     fn test_validate_and_parse_url_success() {
         let url = validate_and_parse_url("https://example.com");
         assert!(url.is_ok());
@@ -239,6 +304,77 @@ mod tests {
     #[test]
     fn test_validate_and_parse_url_invalid_scheme() {
         let result = validate_and_parse_url("ftp://example.com");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    // ========================================================================
+    // TASK-003: URL Validation Robusta Tests
+    // ========================================================================
+
+    #[test]
+    fn test_url_validation_with_spaces() {
+        // Url::parse trims whitespace automatically
+        let url = validate_and_parse_url(" https://example.com ").unwrap();
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_case_insensitive() {
+        // Scheme is case-insensitive
+        let url = validate_and_parse_url("HTTP://EXAMPLE.COM").unwrap();
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_https_uppercase() {
+        let url = validate_and_parse_url("HTTPS://example.com").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_mixed_case() {
+        let url = validate_and_parse_url("HtTpS://Example.COM").unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_url_validation_with_leading_spaces() {
+        let url = validate_and_parse_url("   https://example.com").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_with_trailing_spaces() {
+        let url = validate_and_parse_url("https://example.com   ").unwrap();
+        assert_eq!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn test_url_validation_invalid_scheme_ftp() {
+        let result = validate_and_parse_url("ftp://example.com");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    #[test]
+    fn test_url_validation_invalid_scheme_file() {
+        let result = validate_and_parse_url("file:///etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("http or https"));
+    }
+
+    #[test]
+    fn test_url_validation_no_scheme() {
+        let result = validate_and_parse_url("example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_url_validation_malformed() {
+        let result = validate_and_parse_url("not-a-valid-url-at-all");
         assert!(result.is_err());
     }
 }

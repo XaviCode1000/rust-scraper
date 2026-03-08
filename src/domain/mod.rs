@@ -3,8 +3,13 @@
 //! Following Clean Architecture: no dependencies on infrastructure.
 //! This layer contains the business logic that doesn't depend on external frameworks.
 
+pub mod crawler_entities;
 pub mod entities;
 pub mod value_objects;
 
+pub use crawler_entities::{
+    matches_pattern, ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder,
+    DiscoveredUrl,
+};
 pub use entities::{DownloadedAsset, ScrapedContent};
 pub use value_objects::ValidUrl;
