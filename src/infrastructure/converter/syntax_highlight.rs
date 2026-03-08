@@ -1,17 +1,17 @@
 //! Syntax highlighting for code blocks
 //!
 //! Uses syntect crate for syntax highlighting with the base16-ocean.dark theme.
-//! Compiled once at startup using once_cell::Lazy.
+//! Compiled once at startup using LazyLock.
 
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 use syntect::highlighting::ThemeSet;
 use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
 
 /// Regex for finding code blocks: ```language\ncode\n```
 /// Compiled once at startup (err-no-unwrap-prod)
-static CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| {
+static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"```(\w*)\n([\s\S]*?)```").expect("BUG: invalid regex for code blocks")
 });
 

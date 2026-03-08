@@ -30,12 +30,17 @@ pub mod error;
 
 // Domain layer — Core business entities
 pub mod domain;
-pub use domain::{DownloadedAsset, ScrapedContent, ValidUrl};
+pub use domain::{
+    ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
+    DownloadedAsset, ScrapedContent, ValidUrl,
+};
 
 // Application layer — Use cases
 pub mod application;
 pub use application::{
-    create_http_client, scrape_multiple_with_limit, scrape_with_config, scrape_with_readability,
+    crawl_site, create_http_client, discover_urls, extract_domain, fetch_sitemap, is_allowed,
+    is_excluded, is_internal_link, matches_pattern, scrape_multiple_with_limit, scrape_with_config,
+    scrape_with_readability,
 };
 
 // Infrastructure layer — Implementations (public for testing)
