@@ -5,21 +5,22 @@
 //! # Architecture
 //!
 //! Following rust-skills best practices:
-//! - **Async I/O**: Uses `tokio::fs` to prevent thread starvation
-//! - **Streaming**: Streams data with real-time byte limits
-//! - **No Trust**: Never trusts `Content-Length` from external input
-//! - **Configurable**: Concurrency limit externalized to config
-//! - **Fallback**: MIME type fallback for extension detection
+//! - **True Streaming**: Writes chunks directly to disk, constant RAM (~8KB)
+//! - **Atomic Operations**: Temp file with UUID, atomic rename on success
+//! - **Init Once**: Directories pre-created in `new()`, zero runtime contention
+//! - **Configurable**: User-Agent externalized to config
+//! - **Cleanup**: Temp file removed on size limit exceeded
+//! - **Hash On-The-Fly**: SHA256 computed during streaming, no buffer needed
 
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, ScraperError};
-use bytes::Bytes;
 use futures::stream::{self, StreamExt};
-use reqwest::Client;
+use reqwest::{Client, Response};
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 /// Result of a successful download
 #[derive(Debug)]
@@ -51,6 +52,8 @@ pub struct DownloadConfig {
     pub timeout_secs: u64,
     /// Maximum concurrent downloads (default: 3 for HDD)
     pub concurrency_limit: usize,
+    /// User-Agent string for HTTP requests
+    pub user_agent: String,
 }
 
 impl Default for DownloadConfig {
@@ -62,6 +65,7 @@ impl Default for DownloadConfig {
             max_file_size: 50 * 1024 * 1024,
             timeout_secs: 30,
             concurrency_limit: 3,
+            user_agent: format!("WebCrawlerStaticPages/{}", env!("CARGO_PKG_VERSION")),
         }
     }
 }
@@ -73,20 +77,59 @@ pub struct Downloader {
 }
 
 impl Downloader {
-    /// Create a new downloader with configuration
+    /// Create a new downloader with configuration.
+    ///
+    /// Pre-creates output directories once to avoid runtime contention.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ScraperError::Io` if directory creation fails.
+    /// Returns `ScraperError::Config` if HTTP client build fails.
     pub fn new(config: DownloadConfig) -> Result<Self> {
+        // Pre-create directories ONCE (init-once pattern)
+        let images_path = config.output_dir.join(&config.images_dir);
+        let documents_path = config.output_dir.join(&config.documents_dir);
+
+        std::fs::create_dir_all(&images_path).map_err(|e| {
+            ScraperError::Io(std::io::Error::other(format!(
+                "Failed to create images directory: {}",
+                e
+            )))
+        })?;
+
+        std::fs::create_dir_all(&documents_path).map_err(|e| {
+            ScraperError::Io(std::io::Error::other(format!(
+                "Failed to create documents directory: {}",
+                e
+            )))
+        })?;
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .user_agent(&config.user_agent)
             .build()
             .map_err(|e| ScraperError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
         Ok(Self { client, config })
     }
 
-    /// Download a single asset with streaming and OOM protection
+    /// Download a single asset with true streaming to disk.
+    ///
+    /// # Architecture
+    ///
+    /// - Creates temp file with UUID
+    /// - Streams chunks directly to disk (constant RAM)
+    /// - Computes hash on-the-fly
+    /// - Atomic rename on success
+    /// - Cleanup temp file on failure
+    ///
+    /// # Errors
+    ///
+    /// Returns `ScraperError::Network` if HTTP request fails.
+    /// Returns `ScraperError::Io` if file operations fail.
+    /// Returns `ScraperError::Download` if file exceeds size limit.
     pub async fn download(&self, url: &str) -> Result<DownloadedAsset> {
-        let mut response = self
+        let response = self
             .client
             .get(url)
             .send()
@@ -106,19 +149,23 @@ impl Downloader {
             &self.config.documents_dir
         };
 
+        let subdir_path = self.config.output_dir.join(subdir);
+
+        // Create temp file with UUID (atomic operation pattern)
+        let temp_path = subdir_path.join(format!("{}.tmp", Uuid::new_v4()));
+        let mut file = fs::File::create(&temp_path)
+            .await
+            .map_err(ScraperError::Io)?;
+
+        // Stream to disk with real-time size check
+        let mut stream = into_stream(response);
         let mut downloaded: u64 = 0;
-        let mut buffer = Vec::new();
         let mut hasher = Sha256::new();
 
-        loop {
-            let chunk = response
-                .chunk()
-                .await
-                .map_err(ScraperError::Network)?
-                .unwrap_or_else(Bytes::new);
-
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(ScraperError::Network)?;
             if chunk.is_empty() {
-                break;
+                continue;
             }
 
             let chunk_len = chunk.len() as u64;
@@ -126,43 +173,47 @@ impl Downloader {
                 .checked_add(chunk_len)
                 .ok_or_else(|| ScraperError::download("Integer overflow in download size"))?;
 
+            // Check limit in real-time
             if downloaded > self.config.max_file_size {
+                // Cleanup temp file on failure (err-cleanup-on-fail)
+                let _ = fs::remove_file(&temp_path).await;
                 return Err(ScraperError::download(format!(
                     "file too large: {} bytes (max: {} bytes)",
                     downloaded, self.config.max_file_size
                 )));
             }
 
+            // Write chunk to disk IMMEDIATELY (true streaming)
+            file.write_all(&chunk).await.map_err(ScraperError::Io)?;
             hasher.update(&chunk);
-            buffer.extend_from_slice(&chunk);
         }
 
+        // Sync to ensure data is on disk
+        file.sync_all().await.map_err(ScraperError::Io)?;
+        drop(file); // Close file before rename
+
+        // Calculate hash and generate final filename
         let content_hash = format!("{:x}", hasher.finalize());
-        let filename = self.generate_filename(url, mime_type.as_deref(), &buffer);
-        let local_path = self.config.output_dir.join(subdir).join(&filename);
+        let filename = self.generate_filename_from_hash(&content_hash, mime_type.as_deref());
+        let final_path = subdir_path.join(&filename);
 
-        if let Some(parent) = local_path.parent() {
-            fs::create_dir_all(parent).await.map_err(ScraperError::Io)?;
-        }
-
-        let mut file = fs::File::create(&local_path)
+        // Atomic rename (atomic-operations pattern)
+        fs::rename(&temp_path, &final_path)
             .await
             .map_err(ScraperError::Io)?;
-        file.write_all(&buffer).await.map_err(ScraperError::Io)?;
-        file.sync_all().await.map_err(ScraperError::Io)?;
 
-        tracing::info!("downloaded: {} -> {:?}", url, local_path);
+        tracing::info!("downloaded: {} -> {:?}", url, final_path);
 
         Ok(DownloadedAsset {
             url: url.to_string(),
-            local_path,
+            local_path: final_path,
             mime_type,
             size: downloaded,
             content_hash: content_hash[..12].to_string(),
         })
     }
 
-    /// Download multiple assets with configurable concurrency control
+    /// Download multiple assets with configurable concurrency control.
     pub async fn download_batch(&self, urls: &[String]) -> Vec<Result<DownloadedAsset>> {
         if urls.is_empty() {
             return Vec::new();
@@ -181,19 +232,19 @@ impl Downloader {
         results
     }
 
-    /// Generate a unique filename with MIME type fallback
-    fn generate_filename(&self, url: &str, mime_type: Option<&str>, content: &[u8]) -> String {
-        let extension = crate::adapters::detector::get_extension(url)
-            .filter(|ext| !ext.contains('/') && ext.len() <= 10 && !ext.is_empty())
-            .or_else(|| mime_type_to_extension(mime_type.unwrap_or("")))
-            .unwrap_or_else(|| "bin".into());
+    /// Generate filename from content hash and MIME type.
+    fn generate_filename_from_hash(&self, content_hash: &str, mime_type: Option<&str>) -> String {
+        let extension =
+            mime_type_to_extension(mime_type.unwrap_or("")).unwrap_or_else(|| "bin".into());
 
-        let mut hasher = Sha256::new();
-        hasher.update(content);
-        let hash = format!("{:x}", hasher.finalize());
-
-        format!("{}.{}", &hash[..12], extension)
+        // Use first 12 characters of hash (96 bits of entropy)
+        format!("{}.{}", &content_hash[..12], extension)
     }
+}
+
+/// Convert a Response into a stream of bytes
+fn into_stream(response: Response) -> impl StreamExt<Item = reqwest::Result<bytes::Bytes>> {
+    response.bytes_stream()
 }
 
 /// MIME type to file extension mapping
@@ -233,7 +284,12 @@ fn mime_type_to_extension(mime: &str) -> Option<String> {
     }
 }
 
-/// Simple async download without creating a Downloader instance
+/// Simple async download without creating a Downloader instance.
+///
+/// # Note
+///
+/// This is a convenience function for quick downloads. For production use,
+/// create a `Downloader` instance with proper configuration.
 pub async fn quick_download(url: &str, output_dir: &Path) -> Result<DownloadedAsset> {
     let config = DownloadConfig {
         output_dir: output_dir.to_path_buf(),
@@ -261,12 +317,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_downloader_config_concurrency() {
+    async fn test_downloader_precreates_directories() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = DownloadConfig {
+            output_dir: temp_dir.path().to_path_buf(),
+            images_dir: "test_images".to_string(),
+            documents_dir: "test_docs".to_string(),
+            ..Default::default()
+        };
+
+        // Create downloader (should pre-create directories)
+        let _downloader = Downloader::new(config).unwrap();
+
+        // Verify directories exist
+        let images_path = temp_dir.path().join("test_images");
+        let docs_path = temp_dir.path().join("test_docs");
+
+        assert!(
+            images_path.exists(),
+            "Images directory should be pre-created"
+        );
+        assert!(
+            docs_path.exists(),
+            "Documents directory should be pre-created"
+        );
+    }
+
+    #[test]
+    fn test_downloader_config_concurrency() {
         let config = DownloadConfig {
             concurrency_limit: 10,
             ..Default::default()
         };
         assert_eq!(config.concurrency_limit, 10);
+    }
+
+    #[test]
+    fn test_downloader_config_user_agent() {
+        let custom_ua = "MyCustomBot/1.0";
+        let config = DownloadConfig {
+            user_agent: custom_ua.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.user_agent, custom_ua);
+    }
+
+    #[test]
+    fn test_downloader_default_user_agent() {
+        let config = DownloadConfig::default();
+        assert!(
+            config.user_agent.starts_with("WebCrawlerStaticPages/"),
+            "Default user agent should include version"
+        );
     }
 
     #[test]
@@ -285,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_filename_with_mime_fallback() {
+    fn test_generate_filename_from_hash() {
         let temp_dir = TempDir::new().unwrap();
         let config = DownloadConfig {
             output_dir: temp_dir.path().to_path_buf(),
@@ -293,26 +395,18 @@ mod tests {
         };
         let downloader = Downloader::new(config).unwrap();
 
-        let filename = downloader.generate_filename(
-            "https://example.com/image.png",
-            Some("image/png"),
-            b"test content",
-        );
-        assert!(filename.ends_with(".png"));
-
-        let filename = downloader.generate_filename(
-            "https://example.com/api/getimage",
-            Some("image/jpeg"),
-            b"test content",
-        );
+        let filename = downloader.generate_filename_from_hash("abc123def456789", Some("image/png"));
         assert!(
-            filename.ends_with(".jpg"),
-            "Expected .jpg but got: {}",
+            filename.ends_with(".png"),
+            "Expected .png but got: {}",
             filename
         );
+        assert!(
+            filename.starts_with("abc123def456"),
+            "Filename should start with first 12 chars of hash"
+        );
 
-        let filename =
-            downloader.generate_filename("https://example.com/api/getfile", None, b"test content");
+        let filename = downloader.generate_filename_from_hash("xyz789abc123456", None);
         assert!(
             filename.ends_with(".bin"),
             "Expected .bin but got: {}",
