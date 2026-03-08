@@ -6,6 +6,7 @@ pub mod config;
 pub mod error;
 pub mod scraper;
 pub mod url_path;
+pub mod user_agent;
 
 // Asset detection and download modules
 pub mod detector;

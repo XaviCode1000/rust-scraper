@@ -79,6 +79,9 @@ thiserror = "2"
 # Lazy statics (FIX-01 - eliminar unwraps)
 once_cell = "1"
 
+# Random for user agent rotation (TASK-05)
+rand = "0.8"
+
 # Walking directories for tests
 walkdir = "2"
 

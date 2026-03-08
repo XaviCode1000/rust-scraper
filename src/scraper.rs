@@ -28,14 +28,14 @@ use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
 use tracing::{debug, info, warn};
 
+use crate::user_agent;
+
 // Regex para code blocks - compilado una sola vez (err-no-unwrap-prod)
 static CODE_BLOCK_RE: Lazy<regex::Regex> = Lazy::new(|| {
     regex::Regex::new(r"```(\w*)\n([\s\S]*?)```").expect("BUG: invalid regex for code blocks")
 });
 
-#[allow(dead_code)]
-/// HTTP Client configuration
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+/// Timeout for HTTP requests
 const TIMEOUT_SECS: u64 = 30;
 
 /// Validated URL newtype - guarantees URL is valid at type level
@@ -119,16 +119,18 @@ pub struct ScrapedContent {
     pub assets: Vec<DownloadedAsset>,
 }
 
-/// Create configured HTTP client with retry middleware (TASK-01)
+/// Create configured HTTP client with retry middleware (TASK-01) and user-agent rotation (TASK-05)
 ///
 /// Uses exponential backoff for transient failures:
 /// - 3 retries by default
 /// - Exponential backoff: 100ms → 200ms → 400ms
 /// - Retries on: 5xx errors, timeouts, connection errors
+///
+/// Also rotates user agents to avoid anti-bot detection.
 pub fn create_http_client() -> Result<ClientWithMiddleware> {
-    // Create base reqwest client
+    // Create base reqwest client with random user agent
     let base_client = Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(user_agent::random_user_agent())
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .gzip(true) // Most modern sites use gzip
         .brotli(true)
