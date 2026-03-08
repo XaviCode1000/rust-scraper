@@ -18,6 +18,8 @@ use futures::stream::{self, StreamExt};
 use html_to_markdown_rs::{convert, ConversionOptions, HeadingStyle};
 use once_cell::sync::Lazy;
 use reqwest::Client;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -117,15 +119,31 @@ pub struct ScrapedContent {
     pub assets: Vec<DownloadedAsset>,
 }
 
-/// Create configured HTTP client with best practices
-pub fn create_http_client() -> Result<Client> {
-    Client::builder()
+/// Create configured HTTP client with retry middleware (TASK-01)
+///
+/// Uses exponential backoff for transient failures:
+/// - 3 retries by default
+/// - Exponential backoff: 100ms → 200ms → 400ms
+/// - Retries on: 5xx errors, timeouts, connection errors
+pub fn create_http_client() -> Result<ClientWithMiddleware> {
+    // Create base reqwest client
+    let base_client = Client::builder()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(TIMEOUT_SECS))
         .gzip(true) // Most modern sites use gzip
         .brotli(true)
         .build()
-        .map_err(|e| ScraperError::Config(format!("Failed to create HTTP client: {}", e)))
+        .map_err(|e| ScraperError::Config(format!("Failed to create HTTP client: {}", e)))?;
+
+    // Configure exponential backoff retry policy
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+
+    // Build client with retry middleware
+    let client = ClientBuilder::new(base_client)
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
+
+    Ok(client)
 }
 
 /// Scrape a URL using Readability algorithm for clean content extraction
@@ -138,7 +156,7 @@ pub fn create_http_client() -> Result<Client> {
 /// - Footer content
 /// - Scripts and styles
 pub async fn scrape_with_readability(
-    client: &Client,
+    client: &ClientWithMiddleware,
     url: &url::Url,
 ) -> Result<Vec<ScrapedContent>> {
     scrape_with_config(client, url, &crate::ScraperConfig::default()).await
@@ -147,14 +165,14 @@ pub async fn scrape_with_readability(
 /// Scrape a URL with asset downloading configuration
 ///
 /// # Arguments
-/// * `client` - HTTP client
+/// * `client` - HTTP client (with retry middleware)
 /// * `url` - URL to scrape
 /// * `config` - Scraper configuration with download options
 ///
 /// # Returns
 /// * `Vec<ScrapedContent>` - Scraped content with downloaded assets
 pub async fn scrape_with_config(
-    client: &Client,
+    client: &ClientWithMiddleware,
     url: &url::Url,
     config: &crate::ScraperConfig,
 ) -> Result<Vec<ScrapedContent>> {
@@ -162,12 +180,13 @@ pub async fn scrape_with_config(
 
     info!("🌐 Fetching: {}", url);
 
-    // Fetch HTML
-    let response = client
-        .get(url.as_str())
-        .send()
-        .await
-        .map_err(ScraperError::Network)?;
+    // Fetch HTML - send() returns Result<reqwest::Response, reqwest_middleware::Error>
+    let response = match client.get(url.as_str()).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            return Err(ScraperError::Middleware(e.to_string()));
+        }
+    };
 
     // Check status
     let status = response.status();
@@ -175,7 +194,7 @@ pub async fn scrape_with_config(
         return Err(ScraperError::http(status, url.as_str()));
     }
 
-    // Get HTML content
+    // Get HTML content - text() returns Result<String, reqwest::Error>
     let html = response.text().await.map_err(ScraperError::Network)?;
 
     debug!("📄 Downloaded {} bytes from {}", html.len(), url);
@@ -261,7 +280,7 @@ const CONCURRENCY_LIMIT: usize = 3;
 /// # Returns
 /// * `Vec<ScrapedContent>` - All scraped content from all URLs
 pub async fn scrape_multiple_with_limit(
-    client: &Client,
+    client: &ClientWithMiddleware,
     urls: &[url::Url],
     config: &crate::ScraperConfig,
 ) -> Result<Vec<ScrapedContent>> {

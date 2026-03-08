@@ -38,6 +38,10 @@ pub enum ScraperError {
     #[error("Error de red: {0}")]
     Network(#[from] reqwest::Error),
 
+    /// Middleware error (from reqwest-middleware, e.g., retry failures)
+    #[error("Error de middleware: {0}")]
+    Middleware(String),
+
     /// Serialization/Deserialization error (JSON, YAML, etc.)
     #[error("Error de serialización: {0}")]
     Serialization(#[from] serde_json::Error),
