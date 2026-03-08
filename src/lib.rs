@@ -15,8 +15,8 @@ pub mod extractor;
 pub use clap::{Parser, ValueEnum};
 pub use error::{Result, ScraperError};
 pub use scraper::{
-    create_http_client, save_results, scrape_with_config, scrape_with_readability, DownloadedAsset,
-    ScrapedContent, ValidUrl,
+    create_http_client, save_results, scrape_multiple_with_limit, scrape_with_config,
+    scrape_with_readability, DownloadedAsset, ScrapedContent, ValidUrl,
 };
 pub use std::path::PathBuf;
 pub use url_path::{Domain, OutputPath, UrlPath};

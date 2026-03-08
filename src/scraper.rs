@@ -14,6 +14,7 @@
 use crate::error::{Result, ScraperError};
 use crate::url_path::OutputPath;
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use html_to_markdown_rs::{convert, ConversionOptions, HeadingStyle};
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -239,6 +240,72 @@ pub async fn scrape_with_config(
     }
 
     Ok(results)
+}
+
+/// Concurrency limit for HDD-constrained systems (4C/8GB RAM)
+/// Matches hardware: Intel i5-4590, 8GB RAM, HDD
+const CONCURRENCY_LIMIT: usize = 3;
+
+/// Scrape multiple URLs with concurrency control
+///
+/// Limits concurrent requests to prevent:
+/// - FD (file descriptor) exhaustion
+/// - HDD thrashing
+/// - Cloudflare/anti-bot detection
+///
+/// # Arguments
+/// * `client` - HTTP client
+/// * `urls` - URLs to scrape
+/// * `config` - Scraper configuration
+///
+/// # Returns
+/// * `Vec<ScrapedContent>` - All scraped content from all URLs
+pub async fn scrape_multiple_with_limit(
+    client: &Client,
+    urls: &[url::Url],
+    config: &crate::ScraperConfig,
+) -> Result<Vec<ScrapedContent>> {
+    if urls.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    info!(
+        "🌐 Scraping {} URLs with concurrency limit {}",
+        urls.len(),
+        CONCURRENCY_LIMIT
+    );
+
+    // Create tasks for each URL
+    let tasks = urls.iter().map(|url| {
+        let client = client.clone();
+        let config = config.clone();
+        async move { scrape_with_config(&client, url, &config).await }
+    });
+
+    // Execute with bounded concurrency using buffer_unordered
+    let results: Vec<Result<Vec<ScrapedContent>>> = stream::iter(tasks)
+        .buffer_unordered(CONCURRENCY_LIMIT)
+        .collect()
+        .await;
+
+    // Collect all successful results, log failures
+    let mut all_content = Vec::new();
+    for result in results {
+        match result {
+            Ok(contents) => all_content.extend(contents),
+            Err(e) => {
+                warn!("⚠️  Failed to scrape URL: {}", e);
+            }
+        }
+    }
+
+    info!(
+        "✅ Scraped {} pages from {} URLs",
+        all_content.len(),
+        urls.len()
+    );
+
+    Ok(all_content)
 }
 
 /// Download assets (images and documents) from HTML

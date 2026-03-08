@@ -5,8 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{Result, ScraperError};
+use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
+
+/// Concurrency limit for downloads (HDD-constrained system)
+const DOWNLOAD_CONCURRENCY_LIMIT: usize = 3;
 
 /// Result of a successful download
 #[derive(Debug)]
@@ -128,14 +132,28 @@ impl Downloader {
         })
     }
 
-    /// Download multiple assets
+    /// Download multiple assets with concurrency control
+    ///
+    /// Limits concurrent downloads to prevent:
+    /// - FD exhaustion
+    /// - HDD thrashing
+    /// - Server overload/ban
     pub async fn download_batch(&self, urls: &[String]) -> Vec<Result<DownloadedAsset>> {
-        let mut results = Vec::new();
-
-        for url in urls {
-            let result = self.download(url).await;
-            results.push(result);
+        if urls.is_empty() {
+            return Vec::new();
         }
+
+        // Create tasks for each URL
+        let tasks = urls.iter().map(|url| {
+            let url = url.clone();
+            async move { self.download(&url).await }
+        });
+
+        // Execute with bounded concurrency
+        let results: Vec<Result<DownloadedAsset>> = stream::iter(tasks)
+            .buffer_unordered(DOWNLOAD_CONCURRENCY_LIMIT)
+            .collect()
+            .await;
 
         results
     }
