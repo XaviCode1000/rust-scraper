@@ -73,6 +73,10 @@ fn test_args_has_required_fields() {
         download_images: false,
         download_documents: false,
         verbose: 2,
+        concurrency: rust_scraper::ConcurrencyConfig::default(),
+        use_sitemap: false,
+        sitemap_url: None,
+        interactive: false,
     };
 
     assert_eq!(args.url, "https://example.com");

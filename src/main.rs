@@ -27,7 +27,7 @@ use clap::Parser;
 use rust_scraper::{
     adapters::tui,
     application::{discover_urls_for_tui, scrape_urls_for_tui},
-    validate_and_parse_url, Args, CrawlerConfig, ScraperConfig, UserAgentCache,
+    validate_and_parse_url, Args, ConcurrencyConfig, CrawlerConfig, ScraperConfig, UserAgentCache,
 };
 use tracing::{info, warn};
 
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         download_documents: args.download_documents,
         output_dir: args.output.clone(),
         max_file_size: Some(50 * 1024 * 1024), // 50MB default
-        scraper_concurrency: 3,                // HDD-aware: nproc - 1 for 4C CPU
+        scraper_concurrency: args.concurrency.resolve(), // Auto-detected or explicit
     };
 
     if scraper_config.download_images {
@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let crawler_config = CrawlerConfig::builder(parsed_url.clone())
         .max_depth(2)
         .max_pages(args.max_pages)
-        .concurrency(3)
+        .concurrency(args.concurrency.resolve()) // Auto-detected or explicit
         .delay_ms(args.delay_ms)
         .user_agent(user_agent)
         .timeout_secs(30)

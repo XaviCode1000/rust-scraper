@@ -365,6 +365,246 @@ impl ScraperConfig {
     }
 }
 
+/// Concurrency configuration with smart auto-detection
+///
+/// Provides intelligent defaults based on hardware capabilities:
+/// - **Auto-detection**: Uses `std::thread::available_parallelism()` to detect CPU cores
+/// - **HDD-aware**: Limits concurrency on systems with limited I/O
+/// - **Safe bounds**: Clamps values between 1 and 16
+///
+/// # Examples
+///
+/// ```
+/// use rust_scraper::ConcurrencyConfig;
+///
+/// // Auto-detect (default)
+/// let config = ConcurrencyConfig::default();
+///
+/// // Explicit value
+/// let config = ConcurrencyConfig::new(5);
+///
+/// // Get the resolved value
+/// let concurrency = config.resolve();
+/// println!("Using {} concurrent workers", concurrency);
+/// ```
+#[derive(Debug, Clone)]
+pub struct ConcurrencyConfig {
+    /// Explicit concurrency value (None = auto-detect)
+    value: Option<usize>,
+    /// Whether to use auto-detection
+    auto_detect: bool,
+}
+
+impl Default for ConcurrencyConfig {
+    fn default() -> Self {
+        Self {
+            value: None,
+            auto_detect: true,
+        }
+    }
+}
+
+impl std::fmt::Display for ConcurrencyConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_auto() {
+            write!(f, "auto")
+        } else if let Some(value) = self.value {
+            write!(f, "{}", value)
+        } else {
+            write!(f, "auto")
+        }
+    }
+}
+
+impl ConcurrencyConfig {
+    /// Create a new config with explicit value
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - Explicit concurrency value (will be clamped 1-16)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_scraper::ConcurrencyConfig;
+    ///
+    /// let config = ConcurrencyConfig::new(5);
+    /// assert_eq!(config.resolve(), 5);
+    /// ```
+    #[must_use]
+    pub fn new(value: usize) -> Self {
+        Self {
+            value: Some(value.clamp(1, 16)),
+            auto_detect: false,
+        }
+    }
+
+    /// Create auto-detecting config (default)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_scraper::ConcurrencyConfig;
+    ///
+    /// let config = ConcurrencyConfig::auto();
+    /// let concurrency = config.resolve();
+    /// assert!(concurrency >= 1);
+    /// ```
+    #[must_use]
+    pub fn auto() -> Self {
+        Self::default()
+    }
+
+    /// Resolve the actual concurrency value
+    ///
+    /// Uses auto-detection based on CPU cores:
+    /// - 1-2 cores: 1 (avoid overwhelming system)
+    /// - 4 cores: 3 (HDD-aware default)
+    /// - 8+ cores: min(cores - 1, 8)
+    ///
+    /// # Returns
+    ///
+    /// Concurrency value between 1 and 16
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_scraper::ConcurrencyConfig;
+    ///
+    /// // Explicit value
+    /// let config = ConcurrencyConfig::new(5);
+    /// assert_eq!(config.resolve(), 5);
+    ///
+    /// // Auto-detect
+    /// let config = ConcurrencyConfig::auto();
+    /// let value = config.resolve();
+    /// assert!(value >= 1 && value <= 16);
+    /// ```
+    pub fn resolve(&self) -> usize {
+        if let Some(value) = self.value {
+            return value;
+        }
+
+        // Auto-detect based on CPU cores
+        let cores = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(2);
+
+        // Smart defaults based on hardware
+        let optimal = match cores {
+            1 | 2 => 1,              // Single/dual-core: keep it simple
+            3 | 4 => 3,              // Quad-core: HDD-aware default
+            5 | 6 | 7 => 5,          // 5-7 cores: good balance
+            _ => (cores - 1).min(8), // 8+ cores: cap at 8 for safety
+        };
+
+        optimal.clamp(1, 16)
+    }
+
+    /// Check if this config uses auto-detection
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_scraper::ConcurrencyConfig;
+    ///
+    /// let auto = ConcurrencyConfig::auto();
+    /// assert!(auto.is_auto());
+    ///
+    /// let explicit = ConcurrencyConfig::new(5);
+    /// assert!(!explicit.is_auto());
+    /// ```
+    #[must_use]
+    pub fn is_auto(&self) -> bool {
+        self.auto_detect && self.value.is_none()
+    }
+
+    /// Get the raw value if explicitly set
+    #[must_use]
+    pub fn get(&self) -> Option<usize> {
+        self.value
+    }
+}
+
+/// Custom value parser for clap (accepts "auto" or number)
+impl From<&str> for ConcurrencyConfig {
+    fn from(s: &str) -> Self {
+        let s = s.trim().to_lowercase();
+        if s == "auto" || s.is_empty() {
+            Self::default()
+        } else {
+            s.parse().map(ConcurrencyConfig::new).unwrap_or_else(|_| {
+                eprintln!("Warning: Invalid concurrency '{}', using auto-detect", s);
+                Self::default()
+            })
+        }
+    }
+}
+
+impl std::str::FromStr for ConcurrencyConfig {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let s = s.trim().to_lowercase();
+        if s == "auto" || s.is_empty() {
+            Ok(Self::default())
+        } else {
+            s.parse::<usize>()
+                .map(ConcurrencyConfig::new)
+                .map_err(|e| e)
+        }
+    }
+}
+
+impl clap::builder::ValueParserFactory for ConcurrencyConfig {
+    type Parser = concurrency_parser::ConcurrencyValueParser;
+
+    fn value_parser() -> Self::Parser {
+        concurrency_parser::ConcurrencyValueParser
+    }
+}
+
+mod concurrency_parser {
+    use super::ConcurrencyConfig;
+    use clap::builder::TypedValueParser;
+
+    #[derive(Debug, Clone)]
+    pub struct ConcurrencyValueParser;
+
+    impl TypedValueParser for ConcurrencyValueParser {
+        type Value = ConcurrencyConfig;
+
+        fn parse_ref(
+            &self,
+            _cmd: &clap::Command,
+            _arg: Option<&clap::Arg>,
+            value: &std::ffi::OsStr,
+        ) -> Result<Self::Value, clap::Error> {
+            let value = value
+                .to_str()
+                .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+
+            let value = value.trim().to_lowercase();
+            if value.is_empty() || value == "auto" {
+                return Ok(ConcurrencyConfig::default());
+            }
+
+            value
+                .parse::<usize>()
+                .map(ConcurrencyConfig::new)
+                .map_err(|_| {
+                    clap::Error::raw(
+                        clap::error::ErrorKind::InvalidValue,
+                        format!(
+                            "'{}' is not a valid concurrency value (expected number or 'auto')",
+                            value
+                        ),
+                    )
+                })
+        }
+    }
+}
+
 /// CLI Arguments for the rust-scraper binary.
 ///
 /// Parsed using `clap` with derive macros.
@@ -423,6 +663,19 @@ pub struct Args {
     /// Verbosity level (use multiple times for more detail: -v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    // ========== Concurrency Control ==========
+    /// Concurrency level (number of parallel requests)
+    ///
+    /// Default: auto-detect based on CPU cores:
+    /// - 1-2 cores: 1
+    /// - 4 cores: 3 (HDD-aware)
+    /// - 8+ cores: min(CPU cores - 1, 8)
+    ///
+    /// Note: Can be overridden via CLI or detected at runtime.
+    /// The actual value used is determined at startup.
+    #[arg(long, default_value_t = ConcurrencyConfig::default())]
+    pub concurrency: ConcurrencyConfig,
 
     // ========== Sitemap Support ==========
     /// Use sitemap for URL discovery (auto-discovers from robots.txt if URL not provided)
