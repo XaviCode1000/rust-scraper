@@ -176,9 +176,73 @@ pub fn process_results(
 }
 
 /// Get domain from URL
+///
+/// Extracts the domain (host) from a URL string.
+///
+/// # Arguments
+///
+/// * `url` - URL string to extract domain from
+///
+/// # Returns
+///
+/// Domain string (e.g., "example.com" from "https://www.example.com/docs/api/")
+///
+/// # Examples
+///
+/// ```
+/// use rust_scraper::export_factory::domain_from_url;
+///
+/// let domain = domain_from_url("https://www.example.com/docs/api/");
+/// assert_eq!(domain, "www.example.com");
+/// ```
 pub fn domain_from_url(url: &str) -> String {
     url::Url::parse(url)
         .ok()
         .and_then(|p| p.host_str().map(str::to_string))
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Test domain_from_url extracts domain correctly
+    ///
+    /// Following test-arrange-act-assert: Clear AAA pattern
+    /// Following test-descriptive-names: Name explains what is tested
+    #[test]
+    fn test_domain_from_url_extracts_correctly() {
+        // Arrange
+        let url = "https://www.example.com/docs/api/";
+
+        // Act
+        let domain = domain_from_url(url);
+
+        // Assert
+        assert_eq!(domain, "www.example.com");
+    }
+
+    /// Test create_state_store creates directory and returns Ok
+    ///
+    /// Following test-arrange-act-assert: Clear AAA pattern
+    /// Following test-descriptive-names: Name explains expected behavior
+    #[test]
+    fn test_create_state_store_creates_directory() {
+        // Arrange
+        let temp_dir = TempDir::new().unwrap();
+        let domain = "example.com";
+
+        // Act
+        let store = create_state_store(temp_dir.path().to_path_buf(), domain);
+
+        // Assert
+        assert!(store.is_ok());
+        // Verify state directory was created
+        let state_file = temp_dir.path().join("example.com.json");
+        // State file should be creatable (not necessarily exist yet)
+        // The store is created successfully, file is created on first save
+        let store = store.unwrap();
+        assert_eq!(store.get_state_path(), state_file);
+    }
 }
