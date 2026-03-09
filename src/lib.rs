@@ -152,9 +152,9 @@ pub use domain::{
 // Application layer — Use cases (orchestration)
 pub mod application;
 pub use application::{
-    crawl_site, create_http_client, discover_urls_for_tui, extract_domain, is_allowed, is_excluded,
-    is_internal_link, matches_pattern, scrape_multiple_with_limit, scrape_urls_for_tui,
-    scrape_with_config, scrape_with_readability,
+    crawl_site, crawl_with_sitemap, create_http_client, discover_urls_for_tui, extract_domain,
+    is_allowed, is_excluded, is_internal_link, matches_pattern, scrape_multiple_with_limit,
+    scrape_urls_for_tui, scrape_with_config, scrape_with_readability,
 };
 
 // Infrastructure layer — Implementations (technical details)

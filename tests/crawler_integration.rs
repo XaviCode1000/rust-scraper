@@ -7,8 +7,8 @@
 //! (Tests are ignored by default to avoid network calls in CI)
 
 use rust_scraper::{
-    crawl_site, discover_urls, fetch_sitemap, is_allowed, is_excluded, is_internal_link,
-    matches_pattern, CrawlerConfig,
+    crawl_site, discover_urls_for_tui, is_allowed, is_excluded, is_internal_link, matches_pattern,
+    CrawlerConfig,
 };
 use url::Url;
 
@@ -106,7 +106,9 @@ async fn test_discover_urls() {
     let seed = Url::parse("https://example.com").unwrap();
     let config = CrawlerConfig::new(seed);
 
-    let urls = discover_urls("https://example.com", 0, &config)
+    // FIX: Use discover_urls_for_tui instead of deprecated discover_urls
+    // Note: discover_urls_for_tui doesn't take depth parameter
+    let urls: Vec<_> = discover_urls_for_tui("https://example.com", &config)
         .await
         .unwrap();
 
@@ -120,12 +122,18 @@ async fn test_discover_urls() {
 /// This test is ignored by default to avoid network calls.
 #[tokio::test]
 #[ignore]
-async fn test_fetch_sitemap() {
+async fn test_crawl_with_sitemap() {
+    use rust_scraper::crawl_with_sitemap;
+
     // Try with a site known to have a sitemap
-    let urls = fetch_sitemap("https://example.com").await.unwrap();
+    let seed = Url::parse("https://example.com").unwrap();
+    let config = CrawlerConfig::new(seed);
+    let urls: Vec<_> = crawl_with_sitemap("https://example.com", None, &config)
+        .await
+        .unwrap();
 
     // May be empty if no sitemap exists
-    println!("Found {} URLs in sitemap", urls.len());
+    println!("Found {} URLs from sitemap", urls.len());
 }
 
 /// Test URL filtering with config
