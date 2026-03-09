@@ -3,9 +3,9 @@
 **Production-ready web scraper with Clean Architecture, TUI selector, and sitemap support.**
 
 [![Build Status](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions)
-[![Tests](https://img.shields.io/badge/tests-198%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
+[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.80%2B-orange)](https://www.rust-lang.org)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
 
 ## ✨ Features
@@ -114,6 +114,66 @@ cargo install rust_scraper
   --verbose
 ```
 
+### RAG Export Pipeline (JSONL Format)
+
+Export content in JSON Lines format, optimized for RAG (Retrieval-Augmented Generation) pipelines.
+
+```bash
+# Export to JSONL (one JSON object per line)
+./target/release/rust_scraper --url https://example.com --export-format jsonl --output ./rag_data
+
+# Resume interrupted scraping (skip already processed URLs)
+./target/release/rust_scraper --url https://example.com --export-format jsonl --output ./rag_data --resume
+
+# Custom state directory (isolate state per project)
+./target/release/rust_scraper --url https://example.com --export-format jsonl --output ./rag_data --state-dir ./state --resume
+```
+
+#### JSONL Schema
+
+Each line is a valid JSON object with the following structure:
+
+```json
+{
+  "id": "uuid-v4",
+  "url": "https://example.com/page",
+  "title": "Page Title",
+  "content": "Extracted content...",
+  "metadata": {
+    "domain": "example.com",
+    "excerpt": "Meta description or excerpt"
+  },
+  "timestamp": "2026-03-09T10:00:00Z"
+}
+```
+
+#### State Management
+
+- **Location**: `~/.cache/rust-scraper/state/<domain>.json`
+- **Tracks**: Processed URLs, timestamps, status
+- **Atomic saves**: Write to tmp + rename (crash-safe)
+- **Resume mode**: `--resume` flag enables state tracking
+
+#### RAG Integration
+
+JSONL format is compatible with:
+- **Qdrant**: Load via Python SDK
+- **Weaviate**: Batch import
+- **Pinecone**: Upsert from JSONL
+- **LangChain**: `JSONLoader` for document loading
+
+```python
+# Example: Load JSONL with LangChain
+from langchain.document_loaders import JSONLoader
+
+loader = JSONLoader(
+    file_path='./rag_data/export.jsonl',
+    jq_schema='.content',
+    text_content=False
+)
+documents = loader.load()
+```
+
 ### Get Help
 
 ```bash
@@ -139,7 +199,7 @@ cargo test -- --nocapture
 cargo test test_validate_and_parse_url
 ```
 
-**Tests:** 198 passing ✅
+**Tests:** 216 passing ✅
 
 ## 🏗️ Architecture
 
@@ -161,7 +221,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 ### Requirements
 
-- Rust 1.75+
+- Rust 1.80+
 - Cargo
 
 ### Build
@@ -212,9 +272,9 @@ at your option.
 ## 📊 Stats
 
 - **Lines of Code:** ~4000+
-- **Tests:** 198 passing
+- **Tests:** 216 passing
 - **Coverage:** High (state-based testing)
-- **MSRV:** 1.75.0
+- **MSRV:** 1.80.0
 
 ## 🗺️ Roadmap
 
