@@ -78,13 +78,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Check if CARGO_REGISTRY_TOKEN secret exists
+  check-token:
+    runs-on: ubuntu-latest
+    needs: release
+    outputs:
+      has-token: ${{ steps.check.outputs.has-token }}
+    steps:
+      - id: check
+        env:
+          TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: echo "has-token=${{ env.TOKEN != '' }}" >> $GITHUB_OUTPUT
+
   # Publish to crates.io (optional - requires CARGO_REGISTRY_TOKEN secret)
   publish:
     runs-on: ubuntu-latest
-    needs: release
-    env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-    if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+    needs: check-token
+    if: ${{ needs.check-token.outputs.has-token == 'true' }}
 
     steps:
       - uses: actions/checkout@v4
