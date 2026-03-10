@@ -63,9 +63,7 @@ use crate::infrastructure::ai::model_cache::{
     default_cache_dir, CacheConfig, ModelCache, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO,
 };
 use crate::infrastructure::ai::model_downloader::ModelDownloader;
-use crate::infrastructure::ai::{
-    HtmlChunker, InferenceEngine, MiniLmTokenizer, RelevanceScorer,
-};
+use crate::infrastructure::ai::{HtmlChunker, InferenceEngine, MiniLmTokenizer, RelevanceScorer};
 
 /// Model configuration
 ///
@@ -108,7 +106,7 @@ impl Default for ModelConfig {
             cache_dir: default_cache_dir(),
             auto_download: true,
             offline_mode: false,
-            max_tokens: 512, // all-MiniLM-L6-v2 limit
+            max_tokens: 512,          // all-MiniLM-L6-v2 limit
             relevance_threshold: 0.3, // Moderate relevance threshold
         }
     }
@@ -320,7 +318,7 @@ impl SemanticCleanerImpl {
                         std::io::ErrorKind::Other,
                         format!("Failed to load inference engine: {}", e),
                     ))
-                })?
+                })?,
         );
 
         // Load tokenizer
@@ -328,9 +326,7 @@ impl SemanticCleanerImpl {
         let tokenizer = if tokenizer_path.exists() {
             MiniLmTokenizer::from_file(&tokenizer_path)
                 .await
-                .map_err(|e| {
-                    SemanticError::Tokenize(format!("Failed to load tokenizer: {}", e))
-                })?
+                .map_err(|e| SemanticError::Tokenize(format!("Failed to load tokenizer: {}", e)))?
         } else {
             return Err(SemanticError::Tokenize(
                 "Tokenizer not found in cache. Run model download first.".to_string(),
@@ -412,10 +408,10 @@ impl SemanticCleaner for SemanticCleanerImpl {
 
         // Step 1: Semantic chunking (uses arena internally)
         // Following `own-borrow-over-clone`: borrow html, don't clone
-        let chunks = self.chunker.chunk(html)
-            .map_err(|e| SemanticError::Tokenize(
-                format!("Chunking failed: {}", e)
-            ))?;
+        let chunks = self
+            .chunker
+            .chunk(html)
+            .map_err(|e| SemanticError::Tokenize(format!("Chunking failed: {}", e)))?;
 
         if chunks.is_empty() {
             debug!("No chunks produced from HTML");
@@ -428,10 +424,9 @@ impl SemanticCleaner for SemanticCleanerImpl {
         // Pre-allocate with capacity following `mem-with-capacity`
         let mut token_buffers = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
-            let tokens = self.tokenizer.tokenize(&chunk.content)
-                .map_err(|e| SemanticError::Tokenize(
-                    format!("Tokenization failed for chunk: {}", e)
-                ))?;
+            let tokens = self.tokenizer.tokenize(&chunk.content).map_err(|e| {
+                SemanticError::Tokenize(format!("Tokenization failed for chunk: {}", e))
+            })?;
 
             // Validate token count
             if tokens.len() > self.config.max_tokens {
@@ -455,12 +450,14 @@ impl SemanticCleaner for SemanticCleanerImpl {
         // Following `async-spawn-blocking`: InferenceEngine already uses spawn_blocking internally
         // Following `anti-lock-across-await`: No locks held across await points
         let embeddings = try_join_all(
-            token_buffers.iter()
-                .map(|tokens| self.inference_engine.run_inference(tokens))
-        ).await
-        .map_err(|e| SemanticError::Inference(
-            format!("Concurrent embedding generation failed: {}", e)
-        ))?;
+            token_buffers
+                .iter()
+                .map(|tokens| self.inference_engine.run_inference(tokens)),
+        )
+        .await
+        .map_err(|e| {
+            SemanticError::Inference(format!("Concurrent embedding generation failed: {}", e))
+        })?;
 
         debug!(
             embeddings_generated = embeddings.len(),
@@ -480,10 +477,7 @@ impl SemanticCleaner for SemanticCleanerImpl {
             "Step 4: Relevance filtering complete"
         );
 
-        info!(
-            total_chunks = filtered.len(),
-            "Full RAG pipeline complete"
-        );
+        info!(total_chunks = filtered.len(), "Full RAG pipeline complete");
 
         Ok(filtered)
     }
@@ -531,10 +525,9 @@ impl SemanticCleanerImpl {
 
         // Use first embedding as reference (simple strategy)
         // In production, this could be a query vector or domain-specific reference
-        let reference = embeddings.first()
-            .ok_or_else(|| SemanticError::Inference(
-                "No embeddings available for relevance scoring".to_string()
-            ))?;
+        let reference = embeddings.first().ok_or_else(|| {
+            SemanticError::Inference("No embeddings available for relevance scoring".to_string())
+        })?;
 
         // Filter using scorer
         let filtered = self.scorer.filter(&chunk_embedding_pairs, Some(reference));

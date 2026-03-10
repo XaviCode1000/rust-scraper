@@ -121,9 +121,11 @@ impl RelevanceScorer {
     /// Panics if no reference is provided and none is stored
     #[must_use]
     pub fn score(&self, embedding: &[f32], reference: Option<&[f32]>) -> f32 {
-        let reference = reference.or_else(|| self.reference.as_deref()).unwrap_or_else(|| {
-            panic!("No reference embedding provided or stored");
-        });
+        let reference = reference
+            .or_else(|| self.reference.as_deref())
+            .unwrap_or_else(|| {
+                panic!("No reference embedding provided or stored");
+            });
 
         cosine_similarity(embedding, reference)
     }
@@ -215,7 +217,10 @@ impl RelevanceScorer {
     ///
     /// Vector of relevant chunks, or empty vec if no reference stored
     #[must_use]
-    pub fn filter_stored(&self, chunks: &[(crate::domain::DocumentChunk, Vec<f32>)]) -> Vec<crate::domain::DocumentChunk> {
+    pub fn filter_stored(
+        &self,
+        chunks: &[(crate::domain::DocumentChunk, Vec<f32>)],
+    ) -> Vec<crate::domain::DocumentChunk> {
         if self.reference.is_none() {
             return Vec::new();
         }

@@ -146,12 +146,12 @@ pub mod error;
 
 // Domain layer — Core business entities (pure, no dependencies)
 pub mod domain;
+#[cfg(feature = "ai")]
+pub use domain::semantic_cleaner::SemanticCleaner;
 pub use domain::{
     ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
     DownloadedAsset, ExportFormat, ScrapedContent, ValidUrl,
 };
-#[cfg(feature = "ai")]
-pub use domain::semantic_cleaner::SemanticCleaner;
 #[cfg(feature = "ai")]
 pub use error::SemanticError;
 

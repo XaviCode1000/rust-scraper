@@ -163,9 +163,7 @@ impl CacheConfig {
 pub fn default_cache_dir() -> PathBuf {
     // Try to use dirs crate for XDG-compliant paths
     if let Some(cache_base) = dirs::cache_dir() {
-        cache_base
-            .join(CACHE_DIR_NAME)
-            .join(AI_MODELS_SUBDIR)
+        cache_base.join(CACHE_DIR_NAME).join(AI_MODELS_SUBDIR)
     } else {
         // Fallback to current directory
         PathBuf::from("./.cache/ai_models")
@@ -257,10 +255,12 @@ impl ModelCache {
     pub async fn ensure_cache_dir(&self) -> Result<(), SemanticError> {
         fs::create_dir_all(&self.config.cache_dir)
             .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create cache directory: {}", e),
-            )))?;
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create cache directory: {}", e),
+                ))
+            })?;
 
         debug!(
             path = ?self.config.cache_dir,
@@ -345,25 +345,24 @@ impl ModelCache {
             .unwrap_or_else(|| DEFAULT_MODEL_SHA256.to_string());
 
         // Compute actual hash
-        let file = File::open(&model_path)
-            .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let file = File::open(&model_path).await.map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to open model file: {}", e),
-            )))?;
+            ))
+        })?;
 
         let mut reader = BufReader::new(file);
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; 8192]; // 8KB buffer for streaming hash
 
         loop {
-            let bytes_read = reader
-                .read(&mut buffer)
-                .await
-                .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+            let bytes_read = reader.read(&mut buffer).await.map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("Failed to read model file: {}", e),
-                )))?;
+                ))
+            })?;
 
             if bytes_read == 0 {
                 break;
@@ -430,20 +429,16 @@ impl ModelCache {
         }
 
         // Get file modification time
-        let metadata = fs::metadata(&model_path)
-            .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let metadata = fs::metadata(&model_path).await.map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to read model metadata: {}", e),
-            )))?;
+            ))
+        })?;
 
-        let modified = metadata
-            .modified()
-            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
 
-        let age = modified
-            .elapsed()
-            .unwrap_or(Duration::ZERO);
+        let age = modified.elapsed().unwrap_or(Duration::ZERO);
 
         let ttl = Duration::from_secs(ttl_days * 24 * 60 * 60);
 
@@ -500,10 +495,12 @@ impl ModelCache {
 
         fs::remove_dir_all(&self.config.cache_dir)
             .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to clear cache: {}", e),
-            )))?;
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to clear cache: {}", e),
+                ))
+            })?;
 
         info!(
             path = ?self.config.cache_dir,
@@ -540,28 +537,25 @@ impl ModelCache {
         }
 
         let mut total_size = 0u64;
-        let mut entries = fs::read_dir(&self.config.cache_dir)
-            .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let mut entries = fs::read_dir(&self.config.cache_dir).await.map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to read cache directory: {}", e),
-            )))?;
+            ))
+        })?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to read directory entry: {}", e),
-            )))?
-        {
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+            ))
+        })? {
+            let metadata = entry.metadata().await.map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("Failed to read entry metadata: {}", e),
-                )))?;
+                ))
+            })?;
 
             if metadata.is_file() {
                 total_size += metadata.len();
@@ -634,9 +628,7 @@ mod tests {
 
         // Create a dummy file
         fs::create_dir_all(&cache_dir).await.unwrap();
-        File::create(cache_dir.join("model.onnx"))
-            .await
-            .unwrap();
+        File::create(cache_dir.join("model.onnx")).await.unwrap();
 
         // Should return true now
         assert!(cache.is_model_cached("model.onnx"));

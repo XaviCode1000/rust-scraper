@@ -297,9 +297,10 @@ fn test_semantic_error_variants() {
 fn test_scraper_error_from_semantic_error() {
     use rust_scraper::ScraperError;
 
-    let semantic_err = SemanticError::ModelLoad(
-        std::io::Error::new(std::io::ErrorKind::NotFound, "model missing")
-    );
+    let semantic_err = SemanticError::ModelLoad(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "model missing",
+    ));
 
     let scraper_err: ScraperError = semantic_err.into();
     assert!(scraper_err.to_string().contains("limpieza semántica"));
@@ -838,7 +839,11 @@ async fn test_semantic_cleaner_full_pipeline() {
         let chunks = cleaner.clean(html).await;
 
         // Pipeline should succeed
-        assert!(chunks.is_ok(), "Pipeline should succeed: {:?}", chunks.err());
+        assert!(
+            chunks.is_ok(),
+            "Pipeline should succeed: {:?}",
+            chunks.err()
+        );
 
         let chunks = chunks.unwrap();
 
@@ -892,7 +897,11 @@ async fn test_semantic_cleaner_long_content() {
 
         let chunks = cleaner.clean(html).await;
 
-        assert!(chunks.is_ok(), "Pipeline should succeed: {:?}", chunks.err());
+        assert!(
+            chunks.is_ok(),
+            "Pipeline should succeed: {:?}",
+            chunks.err()
+        );
 
         let chunks = chunks.unwrap();
         eprintln!("Generated {} chunks from long content", chunks.len());
@@ -1012,8 +1021,7 @@ async fn test_error_chunk_too_large() {
                 eprintln!("Content split into {} chunks", chunks.len());
                 // Verify chunks are reasonable size (max_chunk_size is 512, so *4 = 2048 chars safe zone)
                 for chunk in &chunks {
-                    assert!(chunk.content.len() <= 2048,
-                        "Chunk content too large");
+                    assert!(chunk.content.len() <= 2048, "Chunk content too large");
                 }
             }
             Err(SemanticError::ChunkTooLarge { .. }) => {
@@ -1099,7 +1107,10 @@ async fn test_pipeline_html_only() {
 
         assert!(chunks.is_ok(), "HTML-only input should not fail");
         let chunks = chunks.unwrap();
-        assert!(chunks.is_empty(), "HTML-only input should produce no chunks");
+        assert!(
+            chunks.is_empty(),
+            "HTML-only input should produce no chunks"
+        );
     } else {
         eprintln!("SKIP: cleaner creation failed");
     }

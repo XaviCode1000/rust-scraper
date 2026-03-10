@@ -146,22 +146,24 @@ impl ModelDownloader {
             })?;
 
         // Build API and download
-        let api = ApiBuilder::new().build().map_err(|e| SemanticError::Download {
-            repo: self.repo.clone(),
-            cause: format!("Failed to build API client: {}", e),
-        })?;
-
-        let repo = Repo::new(self.repo.clone(), RepoType::Model);
-        
-        // Download the file - returns PathBuf to cached location
-        let downloaded_path = api
-            .repo(repo)
-            .download(&self.file)
-            .await
+        let api = ApiBuilder::new()
+            .build()
             .map_err(|e| SemanticError::Download {
                 repo: self.repo.clone(),
-                cause: format!("HuggingFace API error: {}", e),
+                cause: format!("Failed to build API client: {}", e),
             })?;
+
+        let repo = Repo::new(self.repo.clone(), RepoType::Model);
+
+        // Download the file - returns PathBuf to cached location
+        let downloaded_path =
+            api.repo(repo)
+                .download(&self.file)
+                .await
+                .map_err(|e| SemanticError::Download {
+                    repo: self.repo.clone(),
+                    cause: format!("HuggingFace API error: {}", e),
+                })?;
 
         // Read and validate SHA256 if provided
         if let Some(ref expected_sha) = self.sha256 {

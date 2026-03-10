@@ -122,7 +122,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 #[must_use]
 pub fn dot_product_scalar(a: &[f32], b: &[f32]) -> f32 {
     let len = a.len().min(b.len());
-    a[..len].iter().zip(b[..len].iter()).map(|(&x, &y)| x * y).sum()
+    a[..len]
+        .iter()
+        .zip(b[..len].iter())
+        .map(|(&x, &y)| x * y)
+        .sum()
 }
 
 /// Normalize a vector to unit length
@@ -302,8 +306,8 @@ mod tests {
     fn test_batch_cosine_similarity() {
         let query = vec![1.0f32, 0.0, 0.0, 0.0];
         let candidates = vec![
-            vec![1.0f32, 0.0, 0.0, 0.0], // identical
-            vec![0.0f32, 1.0, 0.0, 0.0], // orthogonal
+            vec![1.0f32, 0.0, 0.0, 0.0],  // identical
+            vec![0.0f32, 1.0, 0.0, 0.0],  // orthogonal
             vec![-1.0f32, 0.0, 0.0, 0.0], // opposite
         ];
         let scores = batch_cosine_similarity(&query, &candidates);

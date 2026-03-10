@@ -30,8 +30,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tract_onnx::prelude::*;
 use tracing::debug;
+use tract_onnx::prelude::*;
 
 use crate::error::SemanticError;
 
@@ -117,38 +117,40 @@ impl InferenceEngine {
         debug!(path = ?model_path, "Loading ONNX model");
 
         // Read model bytes (async I/O)
-        let model_data = tokio::fs::read(model_path)
-            .await
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let model_data = tokio::fs::read(model_path).await.map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to read model file: {}", e),
-            )))?;
+            ))
+        })?;
 
         // Build tract model from bytes using model_for_read
         // Note: model_for_read takes a mutable reader, so we use a slice
         let model = tract_onnx::onnx()
             .model_for_read(&mut &model_data[..])
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to parse ONNX model: {}", e),
-            )))?;
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to parse ONNX model: {}", e),
+                ))
+            })?;
 
         // Optimize the model graph (operator fusion, constant folding, etc.)
-        let optimized = model
-            .into_optimized()
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let optimized = model.into_optimized().map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to optimize model: {}", e),
-            )))?;
+            ))
+        })?;
 
         // Build executable plan (TypedSimplePlan<TypedModel>)
         // This is the correct method - into_runnable() returns the plan
-        let plan = optimized
-            .into_runnable()
-            .map_err(|e| SemanticError::ModelLoad(std::io::Error::new(
+        let plan = optimized.into_runnable().map_err(|e| {
+            SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to create runnable plan: {}", e),
-            )))?;
+            ))
+        })?;
 
         // Wrap in Arc for thread-safe sharing
         let session = Arc::new(plan);
@@ -201,9 +203,8 @@ impl InferenceEngine {
         let result = tokio::task::spawn_blocking(move || {
             // Create input tensor: shape [1, sequence_length] with i64 data
             // Using Tensor::from_shape which takes shape slice and data slice
-            let input_tensor =
-                Tensor::from_shape(&[1, tokens.len()], &tokens)
-                    .map_err(|e| SemanticError::Inference(format!("Failed to create tensor: {}", e)))?;
+            let input_tensor = Tensor::from_shape(&[1, tokens.len()], &tokens)
+                .map_err(|e| SemanticError::Inference(format!("Failed to create tensor: {}", e)))?;
 
             // Create state for the plan
             // Pass the Arc directly (not &Arc) - TypedSimpleState::new takes P: Borrow<SimplePlan>

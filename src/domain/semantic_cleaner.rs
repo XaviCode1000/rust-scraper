@@ -168,7 +168,7 @@ mod tests {
         // If this compiles, the seal is working
         // External crates cannot implement SemanticCleaner
         fn _assert_sealed<T: SemanticCleaner>(_cleaner: T) {}
-        
+
         // This test just needs to compile - no runtime assertions needed
     }
 }

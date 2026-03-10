@@ -193,7 +193,7 @@ impl HtmlChunker {
 
             let chunk = DocumentChunk {
                 id: Uuid::new_v4(),
-                url: String::new(), // To be filled by caller
+                url: String::new(),   // To be filled by caller
                 title: String::new(), // To be filled by caller
                 content: trimmed.to_string(),
                 metadata: std::collections::HashMap::new(),
