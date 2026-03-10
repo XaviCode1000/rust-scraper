@@ -126,10 +126,10 @@ impl StateStore {
         }
 
         // Read and parse JSON file
-        let content = fs::read_to_string(&path).map_err(|e| ScraperError::Io(e))?; // IO error when reading file
+        let content = fs::read_to_string(&path).map_err(ScraperError::Io)?; // IO error when reading file
 
         let state: ExportState =
-            serde_json::from_str(&content).map_err(|e| ScraperError::Serialization(e))?; // Serialization error when parsing JSON
+            serde_json::from_str(&content).map_err(ScraperError::Serialization)?; // Serialization error when parsing JSON
 
         debug!(
             "Loaded state for domain {}: {} URLs processed",
@@ -170,25 +170,23 @@ impl StateStore {
 
         // Ensure directory exists
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| ScraperError::Io(e))?; // IO error when creating directories
+            fs::create_dir_all(parent).map_err(ScraperError::Io)?; // IO error when creating directories
         }
 
         // Serialize to JSON
-        let json =
-            serde_json::to_string_pretty(state).map_err(|e| ScraperError::Serialization(e))?; // Serialization error
+        let json = serde_json::to_string_pretty(state).map_err(ScraperError::Serialization)?; // Serialization error
 
         // Write to file atomically
         // Following **mem-with-capacity**: Pre-allocate file
         let mut temp_path = path.clone();
         temp_path.set_extension("tmp");
 
-        let mut file = fs::File::create(&temp_path).map_err(|e| ScraperError::Io(e))?; // IO error when creating file
+        let mut file = fs::File::create(&temp_path).map_err(ScraperError::Io)?; // IO error when creating file
 
-        file.write_all(json.as_bytes())
-            .map_err(|e| ScraperError::Io(e))?; // IO error when writing to file
+        file.write_all(json.as_bytes()).map_err(ScraperError::Io)?; // IO error when writing to file
 
         // Atomic rename
-        fs::rename(&temp_path, &path).map_err(|e| ScraperError::Io(e))?; // IO error when moving file
+        fs::rename(&temp_path, &path).map_err(ScraperError::Io)?; // IO error when moving file
 
         debug!(
             "Saved state for domain {}: {} URLs processed",

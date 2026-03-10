@@ -91,7 +91,6 @@ impl Default for SitemapConfig {
 
 impl SitemapConfig {
     /// Create new config builder
-    #[must_use]
     pub fn builder() -> SitemapConfigBuilder {
         SitemapConfigBuilder::default()
     }
@@ -110,21 +109,18 @@ pub struct SitemapConfigBuilder {
 
 impl SitemapConfigBuilder {
     /// Enable or disable gzip decompression
-    #[must_use]
     pub fn gzip_enabled(mut self, enabled: bool) -> Self {
         self.gzip_enabled = enabled;
         self
     }
 
     /// Set maximum recursion depth for sitemap indexes
-    #[must_use]
     pub fn max_depth(mut self, depth: u8) -> Self {
         self.max_depth = depth;
         self
     }
 
     /// Set concurrency level for parallel sitemap parsing
-    #[must_use]
     pub fn concurrency(mut self, count: usize) -> Self {
         self.concurrency = count;
         self

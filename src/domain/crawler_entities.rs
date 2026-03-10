@@ -16,9 +16,10 @@ use thiserror::Error;
 use url::Url;
 
 /// Content type discovered during crawling
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ContentType {
     /// HTML page
+    #[default]
     Html,
     /// XML document (including sitemaps)
     Xml,
@@ -26,12 +27,6 @@ pub enum ContentType {
     Text,
     /// Unknown or other content type
     Other,
-}
-
-impl Default for ContentType {
-    fn default() -> Self {
-        Self::Html
-    }
 }
 
 /// A discovered URL during crawling
@@ -109,13 +104,11 @@ impl CrawlerConfig {
     /// Create a new config with seed URL
     ///
     /// Following **api-builder**: Returns builder for fluent configuration.
-    #[must_use]
     pub fn builder(seed_url: Url) -> CrawlerConfigBuilder {
         CrawlerConfigBuilder::new(seed_url)
     }
 
     /// Create a new config with default values
-    #[must_use]
     pub fn new(seed_url: Url) -> Self {
         Self {
             seed_url,
@@ -175,7 +168,6 @@ pub struct CrawlerConfigBuilder {
 
 impl CrawlerConfigBuilder {
     /// Create a new builder with seed URL
-    #[must_use]
     pub fn new(seed_url: Url) -> Self {
         Self {
             seed_url,
@@ -193,90 +185,77 @@ impl CrawlerConfigBuilder {
     }
 
     /// Set maximum crawl depth
-    #[must_use]
     pub fn max_depth(mut self, depth: u8) -> Self {
         self.max_depth = depth;
         self
     }
 
     /// Set maximum number of pages
-    #[must_use]
     pub fn max_pages(mut self, pages: usize) -> Self {
         self.max_pages = pages;
         self
     }
 
     /// Add an include pattern
-    #[must_use]
     pub fn include_pattern(mut self, pattern: impl Into<String>) -> Self {
         self.include_patterns.push(pattern.into());
         self
     }
 
     /// Add multiple include patterns
-    #[must_use]
     pub fn include_patterns(mut self, patterns: Vec<String>) -> Self {
         self.include_patterns.extend(patterns);
         self
     }
 
     /// Add an exclude pattern
-    #[must_use]
     pub fn exclude_pattern(mut self, pattern: impl Into<String>) -> Self {
         self.exclude_patterns.push(pattern.into());
         self
     }
 
     /// Add multiple exclude patterns
-    #[must_use]
     pub fn exclude_patterns(mut self, patterns: Vec<String>) -> Self {
         self.exclude_patterns.extend(patterns);
         self
     }
 
     /// Set concurrency level
-    #[must_use]
     pub fn concurrency(mut self, level: usize) -> Self {
         self.concurrency = level;
         self
     }
 
     /// Set delay between requests in milliseconds
-    #[must_use]
     pub fn delay_ms(mut self, ms: u64) -> Self {
         self.delay_ms = ms;
         self
     }
 
     /// Set user agent string
-    #[must_use]
     pub fn user_agent(mut self, ua: impl Into<String>) -> Self {
         self.user_agent = ua.into();
         self
     }
 
     /// Set request timeout in seconds
-    #[must_use]
     pub fn timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self
     }
 
     /// Set use_sitemap flag (FASE 3)
-    #[must_use]
     pub fn use_sitemap(mut self, use_sitemap: bool) -> Self {
         self.use_sitemap = use_sitemap;
         self
     }
 
     /// Set explicit sitemap URL (FASE 3)
-    #[must_use]
     pub fn sitemap_url(mut self, url: impl Into<String>) -> Self {
         self.sitemap_url = Some(url.into());
         self
     }
 
-    /// Build the configuration
     #[must_use]
     pub fn build(self) -> CrawlerConfig {
         CrawlerConfig {
@@ -312,7 +291,6 @@ pub struct CrawlResult {
 
 impl CrawlResult {
     /// Create a new crawl result
-    #[must_use]
     pub fn new(urls: Vec<DiscoveredUrl>, total_pages: usize, errors: usize) -> Self {
         Self {
             urls,
@@ -322,7 +300,6 @@ impl CrawlResult {
     }
 
     /// Create an empty crawl result
-    #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }

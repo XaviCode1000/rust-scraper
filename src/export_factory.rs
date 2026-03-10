@@ -133,8 +133,12 @@ pub fn process_results(
     let mut processed_urls = Vec::new();
 
     // Load or create export state if resume mode is enabled
-    let mut export_state = if resume_mode && state_store.is_some() {
-        Some(state_store.unwrap().load_or_default()?)
+    let mut export_state = if resume_mode {
+        if let Some(store) = state_store {
+            Some(store.load_or_default()?)
+        } else {
+            None
+        }
     } else {
         None
     };

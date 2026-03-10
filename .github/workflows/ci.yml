@@ -28,6 +28,22 @@ jobs:
       - name: Build Release
         run: cargo build --release --verbose
 
+      - name: Export Failure Context
+        if: failure()
+        run: |
+          mkdir -p .github/outputs
+          echo "### ❌ Fallo en Job: Build" >> .github/outputs/error_log.md
+          echo '```' >> .github/outputs/error_log.md
+          cargo build --verbose 2>&1 | tail -n 50 >> .github/outputs/error_log.md || true
+          echo '```' >> .github/outputs/error_log.md
+
+      - name: Upload Error Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-error-log
+          path: .github/outputs/error_log.md
+
   # Test
   test:
     runs-on: ubuntu-latest
@@ -47,6 +63,22 @@ jobs:
       - name: Run Tests (Release)
         run: cargo test --release --verbose
 
+      - name: Export Failure Context
+        if: failure()
+        run: |
+          mkdir -p .github/outputs
+          echo "### ❌ Fallo en Job: Test" >> .github/outputs/error_log.md
+          echo '```' >> .github/outputs/error_log.md
+          cargo test --verbose 2>&1 | tail -n 50 >> .github/outputs/error_log.md || true
+          echo '```' >> .github/outputs/error_log.md
+
+      - name: Upload Error Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-error-log
+          path: .github/outputs/error_log.md
+
   # Clippy - Deny correctness, warn on style/perf
   clippy:
     runs-on: ubuntu-latest
@@ -64,6 +96,22 @@ jobs:
 
       - name: Run Clippy (deny correctness, suspicious, unused)
         run: cargo clippy -- -D clippy::correctness -D clippy::suspicious -D clippy::unused -W clippy::perf -W clippy::style
+
+      - name: Export Failure Context
+        if: failure()
+        run: |
+          mkdir -p .github/outputs
+          echo "### ❌ Fallo en Job: Clippy" >> .github/outputs/error_log.md
+          echo '```' >> .github/outputs/error_log.md
+          cargo clippy 2>&1 | tail -n 50 >> .github/outputs/error_log.md || true
+          echo '```' >> .github/outputs/error_log.md
+
+      - name: Upload Error Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-error-log
+          path: .github/outputs/error_log.md
 
   # Format
   fmt:

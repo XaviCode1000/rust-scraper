@@ -857,7 +857,7 @@ fn parse_sitemap(xml_content: &str) -> Result<Vec<String>, CrawlError> {
             }
             Ok(Event::CData(ref e)) if in_loc => {
                 // Handle CDATA sections - BytesCData derefs to [u8]
-                let url = String::from_utf8_lossy(&e).trim().to_string();
+                let url = String::from_utf8_lossy(e).trim().to_string();
                 if !url.is_empty() {
                     urls.push(url);
                 }

@@ -173,30 +173,33 @@ async fn main() -> anyhow::Result<()> {
     // 9b. Filter already processed URLs (if resume mode)
     // FIX Bug #2: Filter BEFORE scraping, not after
     // Following own-borrow-over-clone: use &str for URL checks
-    let urls_to_scrape = if args.resume && state_store.is_some() {
-        let store = state_store.as_ref().unwrap();
-        let state = store.load_or_default()?;
+    let urls_to_scrape = if args.resume {
+        if let Some(store) = state_store.as_ref() {
+            let state = store.load_or_default()?;
 
-        let original_count = urls_to_scrape.len();
-        let filtered: Vec<_> = urls_to_scrape
-            .into_iter()
-            .filter(|url| {
-                let should_skip = store.is_processed(&state, url.as_str());
-                if should_skip {
-                    info!("⏭️  Skipping already processed: {}", url);
-                }
-                !should_skip
-            })
-            .collect();
+            let original_count = urls_to_scrape.len();
+            let filtered: Vec<_> = urls_to_scrape
+                .into_iter()
+                .filter(|url| {
+                    let should_skip = store.is_processed(&state, url.as_str());
+                    if should_skip {
+                        info!("⏭️  Skipping already processed: {}", url);
+                    }
+                    !should_skip
+                })
+                .collect();
 
-        let skipped_count = original_count - filtered.len();
-        info!(
-            "🔄 Resume mode: {} URLs already processed, {} new URLs to scrape",
-            skipped_count,
-            filtered.len()
-        );
+            let skipped_count = original_count - filtered.len();
+            info!(
+                "🔄 Resume mode: {} URLs already processed, {} new URLs to scrape",
+                skipped_count,
+                filtered.len()
+            );
 
-        filtered
+            filtered
+        } else {
+            urls_to_scrape
+        }
     } else {
         urls_to_scrape
     };

@@ -513,7 +513,7 @@ impl ConcurrencyConfig {
         let optimal = match cores {
             1 | 2 => 1,              // Single/dual-core: keep it simple
             3 | 4 => 3,              // Quad-core: HDD-aware default
-            5 | 6 | 7 => 5,          // 5-7 cores: good balance
+            5..=7 => 5,              // 5-7 cores: good balance
             _ => (cores - 1).min(8), // 8+ cores: cap at 8 for safety
         };
 
@@ -568,9 +568,7 @@ impl std::str::FromStr for ConcurrencyConfig {
         if s == "auto" || s.is_empty() {
             Ok(Self::default())
         } else {
-            s.parse::<usize>()
-                .map(ConcurrencyConfig::new)
-                .map_err(|e| e)
+            s.parse::<usize>().map(ConcurrencyConfig::new)
         }
     }
 }
