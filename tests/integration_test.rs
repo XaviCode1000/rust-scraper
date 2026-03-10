@@ -6,11 +6,10 @@
 //! Run with features: cargo test --test integration --features images,documents
 
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_readability, DownloadedAsset, OutputFormat,
-    ScrapedContent, ScraperConfig, ValidUrl,
+    create_http_client, save_results, scrape_with_readability, DownloadedAsset, ScrapedContent,
+    ValidUrl,
 };
 use tempfile::TempDir;
-use walkdir::WalkDir;
 
 // ============================================================================
 // Integration Tests: Full scraping pipeline
@@ -60,14 +59,14 @@ fn test_output_format_display() {
 fn test_args_has_required_fields() {
     // Test that Args struct has the expected fields (without Default)
     use rust_scraper::Args;
-    use rust_scraper::OutputFormat;
+    use rust_scraper::ExportFormat;
 
     // Create Args with all required fields
     let args = Args {
         url: "https://example.com".to_string(),
         selector: "article".to_string(),
         output: std::path::PathBuf::from("custom_output"),
-        format: OutputFormat::Text,
+        export_format: ExportFormat::Text,
         delay_ms: 500,
         max_pages: 5,
         download_images: false,
@@ -77,11 +76,13 @@ fn test_args_has_required_fields() {
         use_sitemap: false,
         sitemap_url: None,
         interactive: false,
+        resume: false,
+        state_dir: None,
     };
 
     assert_eq!(args.url, "https://example.com");
     assert_eq!(args.selector, "article");
-    assert_eq!(args.format, OutputFormat::Text);
+    assert_eq!(args.export_format, ExportFormat::Text);
     assert_eq!(args.delay_ms, 500);
     assert_eq!(args.max_pages, 5);
     assert_eq!(args.verbose, 2);
