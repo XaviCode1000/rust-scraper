@@ -18,6 +18,15 @@ images = ["dep:mimetype-detector"]
 documents = ["dep:mimetype-detector"]
 full = ["images", "documents", "zvec"]
 zvec = ["dep:zvec-sys"]
+# AI-powered semantic cleaning (Module 5 + Module 7)
+ai = [
+    "dep:tract-onnx",
+    "dep:tokenizers",
+    "dep:hf-hub",
+    "dep:memmap2",
+    "dep:ndarray",
+    "dep:async-trait",
+]
 
 [dependencies]
 # CLI - Argument parsing obligatorio
@@ -124,6 +133,22 @@ num_cpus = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
+
+# ============================================================================
+# AI/ML Dependencies (feature-gated: --features ai)
+# ============================================================================
+# ONNX runtime for model inference
+tract-onnx = { version = "0.21", optional = true }
+# Tokenizer for sentence-transformers
+tokenizers = { version = "0.21", optional = true }
+# HuggingFace Hub for model downloads
+hf-hub = { version = "0.5", features = ["tokio"], optional = true }
+# Memory-mapped file loading (zero-copy for HDD optimization)
+memmap2 = { version = "0.9", optional = true }
+# Multi-dimensional arrays for embeddings
+ndarray = { version = "0.16", optional = true }
+# Async trait support for dyn-compatible traits
+async-trait = { version = "0.1", optional = true }
 
 [dev-dependencies]
 mockall = "0.12"

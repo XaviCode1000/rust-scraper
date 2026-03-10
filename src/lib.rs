@@ -150,6 +150,10 @@ pub use domain::{
     ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
     DownloadedAsset, ExportFormat, ScrapedContent, ValidUrl,
 };
+#[cfg(feature = "ai")]
+pub use domain::semantic_cleaner::SemanticCleaner;
+#[cfg(feature = "ai")]
+pub use error::SemanticError;
 
 // Application layer — Use cases (orchestration)
 pub mod application;
