@@ -1,11 +1,12 @@
-//! AI module — Model download, caching, inference, and semantic chunking
+//! AI module — Full RAG Pipeline Integration (Phase 2 + Phase 3)
 //!
-//! This module provides AI-powered semantic cleaning capabilities:
+//! This module provides AI-powered semantic cleaning capabilities with full pipeline integration:
 //! - Automatic model download from HuggingFace Hub
 //! - Cache management with SHA256 validation
 //! - Memory-mapped model loading (zero-copy for HDD optimization)
-//! - ONNX inference for embedding generation
-//! - Semantic chunking with SIMD-accelerated cosine similarity
+//! - ONNX inference for embedding generation (Phase 2)
+//! - Semantic chunking with arena allocator (Phase 3)
+//! - SIMD-accelerated cosine similarity filtering (Phase 3)
 //!
 //! # Architecture
 //!
@@ -13,9 +14,17 @@
 //! trait defined in the domain layer.
 //!
 //! ```text
-//! domain::semantic_cleaner::SemanticCleaner (trait)
-//!     ↑ (implemented by)
-//! infrastructure::ai::SemanticCleanerImpl (concrete implementation)
+//! HTML Input
+//!     ↓
+//! [Chunker] Split into semantic chunks (arena allocator)
+//!     ↓
+//! [Tokenizer] Convert each chunk to token IDs
+//!     ↓
+//! [InferenceEngine] Generate embeddings (spawn_blocking, concurrent)
+//!     ↓
+//! [RelevanceScorer] Filter by threshold (SIMD cosine similarity)
+//!     ↓
+//! Vec<DocumentChunk> Output
 //! ```
 //!
 //! # Features
@@ -34,6 +43,14 @@
 //! - **Size**: ~90MB
 //! - **Max Tokens**: 512 per chunk
 //! - **Cache Location**: `~/.cache/rust-scraper/ai_models/`
+//!
+//! # Rust-Skills Applied
+//!
+//! - [`async-join-parallel`](crate::rust_skills::async_join_parallel): Concurrent embedding generation
+//! - [`mem-reuse-collections`](crate::rust_skills::mem_reuse_collections): Buffer reuse
+//! - [`own-borrow-over-clone`](crate::rust_skills::own_borrow_over_clone): Borrow over clone
+//! - [`async-spawn-blocking`](crate::rust_skills::async_spawn_blocking): CPU-intensive inference
+//! - [`opt-simd-portable`](crate::rust_skills::opt_simd_portable): SIMD cosine similarity
 //!
 //! # Examples
 //!
@@ -97,6 +114,9 @@ pub use model_downloader::{DownloadProgress, ModelDownloader};
 
 #[cfg(feature = "ai")]
 pub use semantic_cleaner_impl::{ModelConfig, SemanticCleanerImpl};
+
+#[cfg(feature = "ai")]
+pub(crate) use semantic_cleaner_impl::create_semantic_cleaner;
 
 #[cfg(feature = "ai")]
 pub use inference_engine::InferenceEngine;
