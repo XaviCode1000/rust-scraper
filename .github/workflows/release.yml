@@ -30,6 +30,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
