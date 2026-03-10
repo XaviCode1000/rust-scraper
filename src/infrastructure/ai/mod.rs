@@ -61,6 +61,12 @@ pub mod model_downloader;
 #[cfg(feature = "ai")]
 pub mod semantic_cleaner_impl;
 
+#[cfg(feature = "ai")]
+pub mod inference_engine;
+
+#[cfg(feature = "ai")]
+pub mod tokenizer;
+
 // Re-exports for convenience
 #[cfg(feature = "ai")]
 pub use model_cache::{CacheConfig, ModelCache};
@@ -70,3 +76,9 @@ pub use model_downloader::{DownloadProgress, ModelDownloader};
 
 #[cfg(feature = "ai")]
 pub use semantic_cleaner_impl::{ModelConfig, SemanticCleanerImpl};
+
+#[cfg(feature = "ai")]
+pub use inference_engine::InferenceEngine;
+
+#[cfg(feature = "ai")]
+pub use tokenizer::{MiniLmTokenizer, TokenBatch, DEFAULT_MAX_LENGTH};

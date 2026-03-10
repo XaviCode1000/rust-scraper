@@ -127,8 +127,9 @@ pub enum SemanticError {
     /// - Input text contains invalid UTF-8
     /// - Text exceeds model's maximum token limit
     /// - Special characters break tokenizer
+    /// - Tokenizer file not found
     #[error("Error tokenizando texto: {0}")]
-    Tokenize(#[from] tokenizers::Error),
+    Tokenize(String),
 
     /// ONNX inference failed
     ///
@@ -136,11 +137,9 @@ pub enum SemanticError {
     /// - Model graph execution failed
     /// - Input tensor shape mismatch
     /// - Output tensor extraction failed
-    #[error("Error ejecutando inferencia ONNX: {e}")]
-    Inference {
-        /// The underlying tract error
-        e: tract_onnx::prelude::TractError,
-    },
+    /// - Tensor creation failed
+    #[error("Error ejecutando inferencia ONNX: {0}")]
+    Inference(String),
 
     /// Content chunk exceeds model's token limit
     ///

@@ -20,7 +20,7 @@ use rust_scraper::infrastructure::ai::model_cache::{
     default_cache_dir, CacheConfig, ModelCache, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO,
 };
 use rust_scraper::infrastructure::ai::model_downloader::ModelDownloader;
-use rust_scraper::infrastructure::ai::ModelConfig;
+use rust_scraper::infrastructure::ai::{InferenceEngine, ModelConfig};
 use rust_scraper::SemanticCleaner;
 use rust_scraper::SemanticError;
 
@@ -93,13 +93,13 @@ async fn test_model_download_structure() {
 #[test]
 fn test_model_config_defaults() {
     let config = ModelConfig::default();
-    
+
     assert_eq!(config.repo, DEFAULT_MODEL_REPO);
     assert_eq!(config.model_file, DEFAULT_MODEL_FILE);
     assert!(config.auto_download);
     assert!(!config.offline_mode);
     assert_eq!(config.max_tokens, 512);
-    
+
     // Verify cache_dir ends with ai_models
     assert!(config.cache_dir.to_string_lossy().contains("ai_models"));
 }
@@ -108,7 +108,7 @@ fn test_model_config_defaults() {
 #[test]
 fn test_model_config_builder() {
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     let config = ModelConfig::new()
         .with_repo("test/repo")
         .with_file("test.onnx")
@@ -116,7 +116,7 @@ fn test_model_config_builder() {
         .with_auto_download(false)
         .with_offline_mode(true)
         .with_max_tokens(256);
-    
+
     assert_eq!(config.repo, "test/repo");
     assert_eq!(config.model_file, "test.onnx");
     assert_eq!(config.cache_dir, temp_dir.path());
@@ -153,7 +153,7 @@ fn test_document_chunk_creation() {
         timestamp: chrono::Utc::now(),
         embeddings: None,
     };
-    
+
     assert_eq!(chunk.url, "https://example.com");
     assert_eq!(chunk.title, "Test Page");
     assert_eq!(chunk.content, "Test content");
@@ -164,10 +164,10 @@ fn test_document_chunk_creation() {
 #[test]
 fn test_default_cache_dir() {
     let cache_dir = default_cache_dir();
-    
+
     // Should end with ai_models
     assert!(cache_dir.to_string_lossy().ends_with("ai_models"));
-    
+
     // Should contain rust-scraper
     assert!(cache_dir.to_string_lossy().contains("rust-scraper"));
 }
@@ -177,19 +177,19 @@ fn test_default_cache_dir() {
 async fn test_model_cache_is_cached() {
     let temp_dir = tempfile::tempdir().unwrap();
     let cache_dir = temp_dir.path().join("test_cache");
-    
+
     let config = CacheConfig::new().with_cache_dir(cache_dir.clone());
     let cache = ModelCache::new(config);
-    
+
     // Should return false for non-existent file
     assert!(!cache.is_model_cached("model.onnx"));
-    
+
     // Create a dummy file
     tokio::fs::create_dir_all(&cache_dir).await.unwrap();
     tokio::fs::File::create(cache_dir.join("model.onnx"))
         .await
         .unwrap();
-    
+
     // Should return true now
     assert!(cache.is_model_cached("model.onnx"));
 }
@@ -199,10 +199,10 @@ async fn test_model_cache_is_cached() {
 fn test_model_cache_model_path() {
     let temp_dir = tempfile::tempdir().unwrap();
     let cache_dir = temp_dir.path().join("test_cache");
-    
+
     let config = CacheConfig::new().with_cache_dir(cache_dir.clone());
     let cache = ModelCache::new(config);
-    
+
     let model_path = cache.model_path("model.onnx");
     assert_eq!(model_path, cache_dir.join("model.onnx"));
 }
@@ -211,7 +211,7 @@ fn test_model_cache_model_path() {
 #[test]
 fn test_download_progress_calculations() {
     use rust_scraper::infrastructure::ai::DownloadProgress;
-    
+
     // Test percentage calculation
     let progress = DownloadProgress {
         downloaded: 50,
@@ -219,10 +219,10 @@ fn test_download_progress_calculations() {
         speed: None,
         eta_seconds: None,
     };
-    
+
     assert_eq!(progress.percentage(), Some(50.0));
     assert!(!progress.is_complete());
-    
+
     // Test complete download
     let progress = DownloadProgress {
         downloaded: 100,
@@ -230,10 +230,10 @@ fn test_download_progress_calculations() {
         speed: None,
         eta_seconds: None,
     };
-    
+
     assert_eq!(progress.percentage(), Some(100.0));
     assert!(progress.is_complete());
-    
+
     // Test no total
     let progress = DownloadProgress {
         downloaded: 50,
@@ -241,7 +241,7 @@ fn test_download_progress_calculations() {
         speed: None,
         eta_seconds: None,
     };
-    
+
     assert!(progress.percentage().is_none());
     assert!(!progress.is_complete());
 }
@@ -253,7 +253,7 @@ fn test_semantic_error_variants() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
     let err = SemanticError::ModelLoad(io_err);
     assert!(err.to_string().contains("cargando modelo"));
-    
+
     // Test ChunkTooLarge error
     let err = SemanticError::ChunkTooLarge {
         chunk_id: "chunk-1".to_string(),
@@ -262,7 +262,7 @@ fn test_semantic_error_variants() {
     };
     assert!(err.to_string().contains("chunk-1"));
     assert!(err.to_string().contains("600 > 512"));
-    
+
     // Test Download error
     let err = SemanticError::Download {
         repo: "test/repo".to_string(),
@@ -270,7 +270,7 @@ fn test_semantic_error_variants() {
     };
     assert!(err.to_string().contains("test/repo"));
     assert!(err.to_string().contains("network error"));
-    
+
     // Test CacheValidation error
     let err = SemanticError::CacheValidation {
         repo: "test/repo".to_string(),
@@ -279,7 +279,7 @@ fn test_semantic_error_variants() {
     };
     assert!(err.to_string().contains("abc123"));
     assert!(err.to_string().contains("def456"));
-    
+
     // Test OfflineMode error
     let err = SemanticError::OfflineMode {
         repo: "test/repo".to_string(),
@@ -292,11 +292,84 @@ fn test_semantic_error_variants() {
 #[test]
 fn test_scraper_error_from_semantic_error() {
     use rust_scraper::ScraperError;
-    
+
     let semantic_err = SemanticError::ModelLoad(
         std::io::Error::new(std::io::ErrorKind::NotFound, "model missing")
     );
-    
+
     let scraper_err: ScraperError = semantic_err.into();
     assert!(scraper_err.to_string().contains("limpieza semántica"));
+}
+
+// ============================================================================
+// InferenceEngine Tests (NEW - Phase 2)
+// ============================================================================
+
+/// Test that InferenceEngine type exists and compiles
+///
+/// This is a compile-time check - if this compiles, the type exists
+/// with the correct structure and API.
+#[test]
+fn test_inference_engine_type_exists() {
+    // This is a compile-time check
+    // If this compiles, the type exists with the correct structure
+    fn _assert_type_exists(_engine: InferenceEngine) {}
+}
+
+/// Test that InferenceEngine is Send + Sync (thread-safe)
+///
+/// This is critical for using InferenceEngine in async contexts
+/// with tokio::spawn and across thread boundaries.
+///
+/// Following `own-arc-shared` and `async-spawn-blocking` rules,
+/// InferenceEngine must be Send + Sync to work with Arc and spawn_blocking.
+#[test]
+fn test_inference_engine_is_send_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<InferenceEngine>();
+    assert_sync::<InferenceEngine>();
+}
+
+/// Test that InferenceEngine is Clone (cheap Arc clone)
+///
+/// InferenceEngine wraps Arc<RunnableModel>, so cloning is cheap
+/// (just increments atomic counter) and safe for concurrent use.
+#[test]
+fn test_inference_engine_is_clone() {
+    fn assert_clone<T: Clone>() {}
+    assert_clone::<InferenceEngine>();
+}
+
+/// Test that TokenBatch can be created
+///
+/// Verifies the token batch structure for batch inference.
+#[test]
+fn test_token_batch_creation() {
+    use rust_scraper::infrastructure::ai::tokenizer::TokenBatch;
+
+    let batch = TokenBatch::new(
+        vec![vec![1, 2, 3], vec![4, 5, 6]],
+        vec![vec![1, 1, 1], vec![1, 1, 1]],
+        vec![vec![0, 0, 0], vec![0, 0, 0]],
+    );
+
+    assert_eq!(batch.len(), 2);
+    assert_eq!(batch.sequence_length(), 3);
+    assert!(!batch.is_empty());
+}
+
+/// Test tokenizer type traits
+///
+/// Verifies that MiniLmTokenizer has the correct Send/Sync properties.
+#[test]
+fn test_tokenizer_type_traits() {
+    use rust_scraper::infrastructure::ai::tokenizer::MiniLmTokenizer;
+
+    fn assert_send<T: Send>() {}
+
+    // MiniLmTokenizer should be Send (can be moved between threads)
+    // but not necessarily Sync (internal state may not be thread-safe)
+    assert_send::<MiniLmTokenizer>();
 }
