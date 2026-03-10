@@ -1,10 +1,11 @@
-//! AI module — Model download, caching, and inference
+//! AI module — Model download, caching, inference, and semantic chunking
 //!
 //! This module provides AI-powered semantic cleaning capabilities:
 //! - Automatic model download from HuggingFace Hub
 //! - Cache management with SHA256 validation
 //! - Memory-mapped model loading (zero-copy for HDD optimization)
 //! - ONNX inference for embedding generation
+//! - Semantic chunking with SIMD-accelerated cosine similarity
 //!
 //! # Architecture
 //!
@@ -52,6 +53,7 @@
 //! # }
 //! ```
 
+// Core AI infrastructure (Modules 1-2)
 #[cfg(feature = "ai")]
 pub mod model_cache;
 
@@ -67,7 +69,26 @@ pub mod inference_engine;
 #[cfg(feature = "ai")]
 pub mod tokenizer;
 
-// Re-exports for convenience
+// Semantic Chunking (Modules 3-4)
+#[cfg(feature = "ai")]
+pub mod chunk_id;
+
+#[cfg(feature = "ai")]
+pub mod sentence;
+
+#[cfg(feature = "ai")]
+pub mod chunker;
+
+#[cfg(feature = "ai")]
+pub mod embedding_ops;
+
+#[cfg(feature = "ai")]
+pub mod relevance_scorer;
+
+#[cfg(feature = "ai")]
+pub mod threshold_config;
+
+// Re-exports for convenience (Modules 1-2)
 #[cfg(feature = "ai")]
 pub use model_cache::{CacheConfig, ModelCache};
 
@@ -82,3 +103,19 @@ pub use inference_engine::InferenceEngine;
 
 #[cfg(feature = "ai")]
 pub use tokenizer::{MiniLmTokenizer, TokenBatch, DEFAULT_MAX_LENGTH};
+
+// Re-exports for Semantic Chunking (Modules 3-4)
+#[cfg(feature = "ai")]
+pub use chunk_id::ChunkId;
+
+#[cfg(feature = "ai")]
+pub use sentence::SentenceSplitter;
+
+#[cfg(feature = "ai")]
+pub use chunker::HtmlChunker;
+
+#[cfg(feature = "ai")]
+pub use relevance_scorer::RelevanceScorer;
+
+#[cfg(feature = "ai")]
+pub use threshold_config::ThresholdConfig;

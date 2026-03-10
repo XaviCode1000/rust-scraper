@@ -373,3 +373,382 @@ fn test_tokenizer_type_traits() {
     // but not necessarily Sync (internal state may not be thread-safe)
     assert_send::<MiniLmTokenizer>();
 }
+
+// ============================================================================
+// Module 3 Tests: Semantic Chunking (ChunkId, Sentence, Chunker)
+// ============================================================================
+
+/// Test that ChunkId type exists and compiles
+#[test]
+fn test_chunk_id_type_exists() {
+    use rust_scraper::infrastructure::ai::ChunkId;
+
+    fn _assert_type_exists(_id: ChunkId) {}
+}
+
+/// Test ChunkId creation and display
+#[test]
+fn test_chunk_id_display() {
+    use rust_scraper::infrastructure::ai::ChunkId;
+
+    let id = ChunkId(42);
+    assert_eq!(format!("{}", id), "chunk-42");
+}
+
+/// Test ChunkId inner value access
+#[test]
+fn test_chunk_id_inner() {
+    use rust_scraper::infrastructure::ai::ChunkId;
+
+    let id = ChunkId::new(123);
+    assert_eq!(id.inner(), 123);
+}
+
+/// Test ChunkId equality
+#[test]
+fn test_chunk_id_equality() {
+    use rust_scraper::infrastructure::ai::ChunkId;
+
+    let id1 = ChunkId(42);
+    let id2 = ChunkId(42);
+    let id3 = ChunkId(43);
+
+    assert_eq!(id1, id2);
+    assert_ne!(id1, id3);
+}
+
+/// Test that SentenceSplitter type exists
+#[test]
+fn test_sentence_splitter_type_exists() {
+    use rust_scraper::infrastructure::ai::SentenceSplitter;
+
+    fn _assert_type_exists(_splitter: SentenceSplitter) {}
+}
+
+/// Test sentence splitter basic functionality
+#[test]
+fn test_sentence_splitter_basic() {
+    use rust_scraper::infrastructure::ai::SentenceSplitter;
+
+    let splitter = SentenceSplitter;
+    let sentences = splitter.split("Hello world. How are you?");
+    assert!(sentences.len() >= 2);
+}
+
+/// Test sentence splitter count
+#[test]
+fn test_sentence_splitter_count() {
+    use rust_scraper::infrastructure::ai::SentenceSplitter;
+
+    let splitter = SentenceSplitter;
+    let count = splitter.count("One. Two. Three.");
+    assert_eq!(count, 3);
+}
+
+/// Test sentence splitter trimmed output
+#[test]
+fn test_sentence_splitter_trimmed() {
+    use rust_scraper::infrastructure::ai::SentenceSplitter;
+
+    let splitter = SentenceSplitter;
+    let sentences = splitter.split_trimmed("  First.  Second.  Third.  ");
+    assert_eq!(sentences.len(), 3);
+    assert_eq!(sentences[0], "First.");
+}
+
+/// Test that HtmlChunker type exists
+#[test]
+fn test_chunker_type_exists() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    fn _assert_type_exists(_chunker: HtmlChunker) {}
+}
+
+/// Test chunker creation with defaults
+#[test]
+fn test_chunker_creation() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    let chunker = HtmlChunker::new();
+    assert!(chunker.min_chunk_size() > 0);
+    assert!(chunker.max_chunk_size() > 0);
+    assert!(chunker.similarity_threshold() > 0.0);
+    assert!(chunker.similarity_threshold() <= 1.0);
+}
+
+/// Test chunker builder pattern
+#[test]
+fn test_chunker_builder_pattern() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    let chunker = HtmlChunker::new()
+        .with_min_chunk_size(80)
+        .with_max_chunk_size(400)
+        .with_similarity_threshold(0.6);
+
+    assert_eq!(chunker.min_chunk_size(), 80);
+    assert_eq!(chunker.max_chunk_size(), 400);
+    assert_eq!(chunker.similarity_threshold(), 0.6);
+}
+
+/// Test chunker with custom config
+#[test]
+fn test_chunker_with_config() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    let chunker = HtmlChunker::with_config(50, 300, 0.7);
+    assert_eq!(chunker.min_chunk_size(), 50);
+    assert_eq!(chunker.max_chunk_size(), 300);
+    assert_eq!(chunker.similarity_threshold(), 0.7);
+}
+
+/// Test chunker basic HTML processing
+#[test]
+fn test_chunker_basic_html() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    let chunker = HtmlChunker::new();
+    let html = "<p>This is a paragraph with enough text to meet the minimum chunk size requirement for testing purposes.</p>";
+    let result = chunker.chunk(html);
+    assert!(result.is_ok());
+}
+
+/// Test chunker empty HTML
+#[test]
+fn test_chunker_empty_html() {
+    use rust_scraper::infrastructure::ai::HtmlChunker;
+
+    let chunker = HtmlChunker::new();
+    let html = "";
+    let result = chunker.chunk(html);
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty());
+}
+
+// ============================================================================
+// Module 4 Tests: Embedding Operations, Relevance Scorer, Threshold Config
+// ============================================================================
+
+/// Test cosine similarity with identical vectors
+#[test]
+fn test_cosine_similarity_identical() {
+    use rust_scraper::infrastructure::ai::embedding_ops::cosine_similarity;
+
+    // Use a normalized vector (magnitude = 1.0)
+    // 1/sqrt(8) ≈ 0.3536 for 8-dimensional unit vector
+    let normalization = 1.0f32 / 8.0f32.sqrt();
+    let vec = vec![normalization; 8];
+    let sim = cosine_similarity(&vec, &vec);
+    assert!((sim - 1.0).abs() < 0.001, "Expected ~1.0, got {}", sim);
+}
+
+/// Test cosine similarity with orthogonal vectors
+#[test]
+fn test_cosine_similarity_orthogonal() {
+    use rust_scraper::infrastructure::ai::embedding_ops::cosine_similarity;
+
+    let a = vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let b = vec![0.0f32, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let sim = cosine_similarity(&a, &b);
+    assert!(sim.abs() < 0.001, "Expected ~0.0, got {}", sim);
+}
+
+/// Test cosine similarity with opposite vectors
+#[test]
+fn test_cosine_similarity_opposite() {
+    use rust_scraper::infrastructure::ai::embedding_ops::cosine_similarity;
+
+    let a = vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let b = vec![-1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let sim = cosine_similarity(&a, &b);
+    assert!((sim + 1.0).abs() < 0.001, "Expected ~-1.0, got {}", sim);
+}
+
+/// Test cosine similarity with empty vectors
+#[test]
+fn test_cosine_similarity_empty() {
+    use rust_scraper::infrastructure::ai::embedding_ops::cosine_similarity;
+
+    let a: Vec<f32> = vec![];
+    let b: Vec<f32> = vec![];
+    let sim = cosine_similarity(&a, &b);
+    assert_eq!(sim, 0.0);
+}
+
+/// Test dot product scalar fallback
+#[test]
+fn test_dot_product_scalar() {
+    use rust_scraper::infrastructure::ai::embedding_ops::dot_product_scalar;
+
+    let a = vec![1.0f32, 2.0, 3.0];
+    let b = vec![4.0f32, 5.0, 6.0];
+    let dot = dot_product_scalar(&a, &b);
+    assert_eq!(dot, 32.0); // 1*4 + 2*5 + 3*6 = 32
+}
+
+/// Test vector normalization
+#[test]
+fn test_normalize() {
+    use rust_scraper::infrastructure::ai::embedding_ops::normalize;
+
+    let v = vec![3.0f32, 4.0];
+    let normalized = normalize(&v);
+    let magnitude: f32 = normalized.iter().map(|&x| x * x).sum::<f32>().sqrt();
+    assert!((magnitude - 1.0).abs() < 0.001);
+}
+
+/// Test Euclidean distance
+#[test]
+fn test_euclidean_distance() {
+    use rust_scraper::infrastructure::ai::embedding_ops::euclidean_distance;
+
+    let a = vec![0.0f32, 0.0];
+    let b = vec![3.0f32, 4.0];
+    let dist = euclidean_distance(&a, &b);
+    assert!((dist - 5.0).abs() < 0.001); // 3-4-5 triangle
+}
+
+/// Test that RelevanceScorer type exists
+#[test]
+fn test_relevance_scorer_type_exists() {
+    use rust_scraper::infrastructure::ai::RelevanceScorer;
+
+    fn _assert_type_exists(_scorer: RelevanceScorer) {}
+}
+
+/// Test relevance scorer creation
+#[test]
+fn test_relevance_scorer_creation() {
+    use rust_scraper::infrastructure::ai::RelevanceScorer;
+
+    let scorer = RelevanceScorer::new(0.3);
+    assert_eq!(scorer.threshold(), 0.3);
+}
+
+/// Test relevance scorer with reference
+#[test]
+fn test_relevance_scorer_with_reference() {
+    use rust_scraper::infrastructure::ai::RelevanceScorer;
+
+    let reference = vec![0.5f32; 8];
+    let scorer = RelevanceScorer::with_reference(0.5, reference.clone());
+    assert_eq!(scorer.threshold(), 0.5);
+    assert_eq!(scorer.reference(), Some(reference.as_slice()));
+}
+
+/// Test relevance scorer threshold validation
+#[test]
+#[should_panic(expected = "Threshold must be between")]
+fn test_relevance_scorer_invalid_threshold() {
+    use rust_scraper::infrastructure::ai::RelevanceScorer;
+
+    let _ = RelevanceScorer::new(1.5);
+}
+
+/// Test relevance scorer meets_threshold
+#[test]
+fn test_relevance_scorer_meets_threshold() {
+    use rust_scraper::infrastructure::ai::RelevanceScorer;
+
+    let scorer = RelevanceScorer::new(0.5);
+    assert!(scorer.meets_threshold(0.6));
+    assert!(scorer.meets_threshold(0.5));
+    assert!(!scorer.meets_threshold(0.4));
+}
+
+/// Test that ThresholdConfig type exists
+#[test]
+fn test_threshold_config_type_exists() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    fn _assert_type_exists(_config: ThresholdConfig) {}
+}
+
+/// Test threshold config default values
+#[test]
+fn test_threshold_config_defaults() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::new();
+    assert_eq!(config.min_threshold(), 0.0);
+    assert_eq!(config.max_threshold(), 1.0);
+    assert_eq!(config.default_threshold(), 0.3);
+}
+
+/// Test threshold config builder pattern
+#[test]
+fn test_threshold_config_builder() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::new()
+        .with_min_threshold(0.2)
+        .with_max_threshold(0.8)
+        .with_default_threshold(0.5)
+        .build();
+
+    assert_eq!(config.min_threshold(), 0.2);
+    assert_eq!(config.max_threshold(), 0.8);
+    assert_eq!(config.default_threshold(), 0.5);
+}
+
+/// Test threshold config is_valid
+#[test]
+fn test_threshold_config_is_valid() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::new()
+        .with_min_threshold(0.2)
+        .with_max_threshold(0.8)
+        .build();
+
+    assert!(config.is_valid(0.5));
+    assert!(!config.is_valid(0.1));
+}
+
+/// Test threshold config clamp
+#[test]
+fn test_threshold_config_clamp() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::new()
+        .with_min_threshold(0.2)
+        .with_max_threshold(0.8)
+        .build();
+
+    assert_eq!(config.clamp(0.1), 0.2);
+    assert_eq!(config.clamp(0.5), 0.5);
+    assert_eq!(config.clamp(0.9), 0.8);
+}
+
+/// Test threshold config strict preset
+#[test]
+fn test_threshold_config_strict() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::strict();
+    assert_eq!(config.min_threshold(), 0.5);
+    assert_eq!(config.max_threshold(), 1.0);
+    assert_eq!(config.default_threshold(), 0.7);
+}
+
+/// Test threshold config lenient preset
+#[test]
+fn test_threshold_config_lenient() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::lenient();
+    assert_eq!(config.min_threshold(), 0.0);
+    assert_eq!(config.max_threshold(), 0.5);
+    assert_eq!(config.default_threshold(), 0.2);
+}
+
+/// Test threshold config balanced preset
+#[test]
+fn test_threshold_config_balanced() {
+    use rust_scraper::infrastructure::ai::ThresholdConfig;
+
+    let config = ThresholdConfig::balanced();
+    assert_eq!(config.min_threshold(), 0.1);
+    assert_eq!(config.max_threshold(), 0.9);
+    assert_eq!(config.default_threshold(), 0.4);
+}
