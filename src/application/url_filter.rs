@@ -68,8 +68,15 @@ pub fn matches_pattern(url: &str, pattern: &str) -> bool {
 /// ```
 /// use rust_scraper::application::url_filter::is_excluded;
 ///
-/// let patterns = vec!["*.evil.com".to_string(), "*.malicious.com".to_string()];
+/// // To exclude both root domain AND subdomains, need both patterns
+/// let patterns = vec![
+///     "evil.com".to_string(),
+///     "*.evil.com".to_string(),
+///     "malicious.com".to_string(),
+///     "*.malicious.com".to_string(),
+/// ];
 /// assert!(is_excluded("https://evil.com/page", &patterns));
+/// assert!(is_excluded("https://blog.evil.com/admin", &patterns));
 /// assert!(!is_excluded("https://example.com/page", &patterns));
 /// ```
 #[inline]
@@ -99,12 +106,18 @@ pub fn is_excluded(url: &str, patterns: &[String]) -> bool {
 ///
 /// let seed = Url::parse("https://example.com").unwrap();
 /// let config = CrawlerConfig::builder(seed)
+///     // Match both root domain AND subdomains
+///     .include_pattern("example.com".to_string())
 ///     .include_pattern("*.example.com/*".to_string())
+///     // Exclude both root domain AND subdomains
+///     .exclude_pattern("evil.com".to_string())
 ///     .exclude_pattern("*.evil.com".to_string())
 ///     .build();
 ///
 /// assert!(is_allowed("https://example.com/page", &config));
+/// assert!(is_allowed("https://blog.example.com/post", &config));
 /// assert!(!is_allowed("https://evil.com/page", &config));
+/// assert!(!is_allowed("https://blog.evil.com/admin", &config));
 /// assert!(!is_allowed("https://other.com/page", &config));
 /// ```
 #[inline]
@@ -228,18 +241,26 @@ mod tests {
     #[test]
     fn test_is_excluded() {
         // SSRF-safe: patterns match HOSTS only
+        // *.domain matches subdomains ONLY, not root domain
+        // To exclude both root domain AND subdomains, need both patterns
         let patterns = vec![
+            "evil.com".to_string(),
             "*.evil.com".to_string(),
+            "malicious.com".to_string(),
             "*.malicious.com".to_string(),
             "*.example.com".to_string(), // Exclude all example.com subdomains
         ];
 
+        // Root domains match
         assert!(is_excluded("https://evil.com/page", &patterns));
-        assert!(is_excluded("https://blog.evil.com/admin", &patterns));
         assert!(is_excluded("https://malicious.com/data", &patterns));
+
+        // Subdomains match
+        assert!(is_excluded("https://blog.evil.com/admin", &patterns));
         assert!(is_excluded("https://blog.example.com/login", &patterns));
-        // example.com matches *.example.com pattern (host-only matching)
-        assert!(is_excluded("https://example.com/public/page", &patterns));
+
+        // example.com does NOT match *.example.com (needs subdomain)
+        assert!(!is_excluded("https://example.com/public/page", &patterns));
         assert!(!is_excluded("https://good.com/page", &patterns));
     }
 
@@ -248,13 +269,17 @@ mod tests {
         let seed = Url::parse("https://example.com").unwrap();
 
         // Config with include and exclude patterns (HOSTS only)
+        // To match both root domain AND subdomains, need both patterns
         let config = CrawlerConfig::builder(seed)
+            .include_pattern("example.com".to_string())
             .include_pattern("*.example.com/*".to_string())
             .exclude_pattern("*.evil.com".to_string())
             .build();
 
-        // Allowed: matches include, doesn't match exclude
+        // Allowed: matches include (root domain), doesn't match exclude
         assert!(is_allowed("https://example.com/page", &config));
+
+        // Allowed: matches include (subdomain), doesn't match exclude
         assert!(is_allowed("https://blog.example.com/post", &config));
 
         // Denied: matches exclude
@@ -279,11 +304,15 @@ mod tests {
     fn test_is_allowed_include_only() {
         let seed = Url::parse("https://example.com").unwrap();
         let config = CrawlerConfig::builder(seed)
+            // Match both root domain AND subdomains
+            .include_pattern("example.com".to_string())
             .include_pattern("*.example.com/*".to_string())
             .build();
 
-        // Matches include pattern
+        // Matches include pattern (root domain)
         assert!(is_allowed("https://example.com/page", &config));
+
+        // Matches include pattern (subdomain)
         assert!(is_allowed("https://blog.example.com/post", &config));
 
         // Doesn't match include pattern
@@ -294,6 +323,8 @@ mod tests {
     fn test_is_allowed_exclude_only() {
         let seed = Url::parse("https://example.com").unwrap();
         let config = CrawlerConfig::builder(seed)
+            // Exclude both root domain AND subdomains
+            .exclude_pattern("evil.com".to_string())
             .exclude_pattern("*.evil.com".to_string())
             .build();
 
@@ -301,8 +332,10 @@ mod tests {
         assert!(is_allowed("https://example.com/page", &config));
         assert!(is_allowed("https://example.com/public/page", &config));
 
-        // Matches exclude pattern
+        // Matches exclude pattern (root domain)
         assert!(!is_allowed("https://evil.com/page", &config));
+
+        // Matches exclude pattern (subdomain)
         assert!(!is_allowed("https://blog.evil.com/admin", &config));
     }
 
@@ -367,21 +400,29 @@ mod tests {
         let seed = Url::parse("https://example.com").unwrap();
 
         // Multiple include patterns (HOSTS only)
+        // To match both root domain AND subdomains, need both patterns
         let config = CrawlerConfig::builder(seed)
+            .include_pattern("blog.example.com".to_string())
             .include_pattern("*.blog.example.com/*".to_string())
+            .include_pattern("docs.example.com".to_string())
             .include_pattern("*.docs.example.com/*".to_string())
+            .exclude_pattern("draft.example.com".to_string())
             .exclude_pattern("*.draft.example.com".to_string())
             .build();
 
-        // Allowed: matches blog include
+        // Allowed: matches blog include (root domain)
         assert!(is_allowed("https://blog.example.com/post-1", &config));
+
+        // Allowed: matches blog include (subdomain)
         assert!(is_allowed("https://my.blog.example.com/post-1", &config));
 
-        // Allowed: matches docs include
+        // Allowed: matches docs include (root domain)
         assert!(is_allowed("https://docs.example.com/guide", &config));
 
-        // Denied: matches exclude
+        // Denied: matches exclude (root domain)
         assert!(!is_allowed("https://draft.example.com/post", &config));
+
+        // Denied: matches exclude (subdomain)
         assert!(!is_allowed("https://my.draft.example.com/guide", &config));
 
         // Denied: doesn't match any include

@@ -459,18 +459,20 @@ pub fn matches_pattern(url_str: &str, pattern: &str) -> bool {
 
     // Compare HOSTS only (NOT raw URL strings)
     match pattern {
-        // *.example.com/* → match domain
+        // *.example.com/* → match subdomain ONLY (not root domain)
         p if p.starts_with("*.") && p.ends_with("*") => {
             let domain = &p[2..p.len() - 1]; // "example.com/"
             let domain = domain.trim_end_matches('/');
-            host == domain || host.ends_with(&format!(".{}", domain))
+            // Must be a subdomain, NOT the root domain itself
+            host.ends_with(&format!(".{}", domain))
         }
-        // *.example.com → match domain
+        // *.example.com → match subdomain ONLY (not root domain)
         p if p.starts_with("*.") => {
             let domain = &p[2..];
-            host == domain || host.ends_with(&format!(".{}", domain))
+            // Must be a subdomain, NOT the root domain itself
+            host.ends_with(&format!(".{}", domain))
         }
-        // Exact host match
+        // Exact host match (no wildcard)
         p => host == p,
     }
 }
@@ -665,9 +667,10 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_with_port() {
-        // URLs con puertos DEBEN funcionar
+        // URLs with ports should work
+        // Note: example.com:8080 does NOT match *.example.com/* (needs subdomain)
         assert!(matches_pattern(
-            "https://example.com:8080/path",
+            "https://blog.example.com:8080/path",
             "*.example.com/*"
         ));
 
@@ -728,10 +731,18 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_prefix_wildcard() {
-        // After SSRF fix, patterns like "https://example.com/admin/*" are not supported
-        // because we compare HOSTS only, not full URLs with paths.
-        // Use "*.example.com/*" for domain+path matching instead.
+        // After SSRF fix, *.example.com/* matches SUBDOMAINS only, not root domain
+        // Use "example.com/*" pattern to match the root domain itself
         assert!(matches_pattern(
+            "https://blog.example.com/admin/users",
+            "*.example.com/*"
+        ));
+        assert!(matches_pattern(
+            "https://admin.example.com/users",
+            "*.example.com/*"
+        ));
+        // Root domain does NOT match *.example.com/*
+        assert!(!matches_pattern(
             "https://example.com/admin/users",
             "*.example.com/*"
         ));
@@ -739,9 +750,18 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_slash_wildcard() {
-        // */admin/* should match any URL containing /admin/ in path
-        // Note: Now compares hosts only, so these tests need host matching
+        // *.example.com/* matches any subdomain of example.com
+        // Note: Compares HOSTS only, path is not considered
         assert!(matches_pattern(
+            "https://blog.example.com/admin/users",
+            "*.example.com/*"
+        ));
+        assert!(matches_pattern(
+            "https://admin.example.com/users",
+            "*.example.com/*"
+        ));
+        // Root domain does NOT match *.example.com/*
+        assert!(!matches_pattern(
             "https://example.com/admin/users",
             "*.example.com/*"
         ));

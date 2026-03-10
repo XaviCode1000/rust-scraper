@@ -44,15 +44,21 @@ fn test_matches_pattern_prefix_wildcard() {
         "https://admin.example.com/users",
         "*.example.com/*"
     ));
+    // Different domain should not match
     assert!(!matches_pattern(
         "https://other.com/page",
+        "*.example.com/*"
+    ));
+    // example.com itself should NOT match *.example.com/* (needs subdomain)
+    assert!(!matches_pattern(
+        "https://example.com/admin/users",
         "*.example.com/*"
     ));
 }
 
 #[test]
 fn test_is_excluded() {
-    // Note: Patterns match HOSTS, not paths
+    // Note: Patterns match HOSTS, not paths (SSRF-safe design)
     // Use domain-based patterns for exclusion
     let patterns = vec![
         "*.admin.com".to_string(),
@@ -60,10 +66,17 @@ fn test_is_excluded() {
         "*.example.com".to_string(), // Exclude all example.com subdomains
     ];
 
+    // Should be excluded: matches domain patterns
     assert!(is_excluded("https://admin.admin.com/page", &patterns));
     assert!(is_excluded("https://private.private.com/data", &patterns));
     assert!(is_excluded("https://blog.example.com/login", &patterns));
+
+    // Should NOT be excluded: different domain
     assert!(!is_excluded("https://public.com/page", &patterns));
+
+    // Note: example.com (no subdomain) does NOT match *.example.com
+    // This is intentional - use "example.com" pattern to match the root domain
+    assert!(!is_excluded("https://example.com/admin/users", &patterns));
 }
 
 #[test]
@@ -146,25 +159,36 @@ fn test_is_allowed_complex() {
     let seed = Url::parse("https://example.com").unwrap();
 
     // Config with include and exclude patterns
-    // Note: Patterns match HOSTS, not paths
+    // Note: Patterns match HOSTS (SSRF-safe), not paths
+    // *.domain = subdomains ONLY, domain = exact host
     let config = CrawlerConfig::builder(seed)
+        // Include blog.example.com AND its subdomains
+        .include_pattern("blog.example.com".to_string())
         .include_pattern("*.blog.example.com".to_string())
+        // Include docs.example.com AND its subdomains
+        .include_pattern("docs.example.com".to_string())
         .include_pattern("*.docs.example.com".to_string())
+        // Exclude draft.example.com AND its subdomains
+        .exclude_pattern("draft.example.com".to_string())
         .exclude_pattern("*.draft.example.com".to_string())
         .build();
 
-    // Allowed: matches blog include
+    // Allowed: matches blog include (exact host)
     assert!(is_allowed("https://blog.example.com/post", &config));
+
+    // Allowed: matches blog include (subdomain)
     assert!(is_allowed("https://news.blog.example.com/article", &config));
 
-    // Allowed: matches docs include
+    // Allowed: matches docs include (exact host)
     assert!(is_allowed("https://docs.example.com/guide", &config));
 
-    // Denied: matches draft exclude
+    // Denied: matches draft exclude (exact host)
     assert!(!is_allowed("https://draft.example.com/post", &config));
+
+    // Denied: matches draft exclude (subdomain)
     assert!(!is_allowed("https://test.draft.example.com/guide", &config));
 
-    // Denied: doesn't match any include
+    // Denied: doesn't match any include pattern
     assert!(!is_allowed("https://example.com/shop/products", &config));
     assert!(!is_allowed("https://admin.example.com/users", &config));
 }
