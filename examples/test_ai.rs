@@ -1,4 +1,5 @@
 //! Quick test of AI pipeline
+use rust_scraper::domain::DocumentChunk;
 use rust_scraper::infrastructure::ai::{ModelConfig, SemanticCleanerImpl};
 use rust_scraper::SemanticCleaner;
 
@@ -39,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
     println!("📄 HTML length: {} chars", html.len());
 
     println!("🔄 Cleaning HTML...");
-    let chunks = cleaner.clean(html).await?;
+    let chunks: Vec<DocumentChunk> = cleaner.clean(html).await?;
 
     println!("✅ Generated {} chunks", chunks.len());
 
