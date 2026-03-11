@@ -139,7 +139,8 @@ async fn download_single_asset(
     hasher.update(&bytes);
     let hash = format!("{:x}", hasher.finalize());
 
-    let extension = crate::adapters::detector::mime::get_extension(url).unwrap_or_else(|| "bin".to_string());
+    let extension =
+        crate::adapters::detector::mime::get_extension(url).unwrap_or_else(|| "bin".to_string());
     let filename = format!("{}.{}", &hash[..12], extension);
 
     let subdir = if asset_type == "image" {

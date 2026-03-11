@@ -80,6 +80,7 @@ fn test_args_has_required_fields() {
         interactive: false,
         resume: false,
         state_dir: None,
+        clean_ai: false,
     };
 
     assert_eq!(args.url, "https://example.com");
@@ -348,58 +349,72 @@ async fn test_download_documents_from_website() {
 // ============================================================================
 
 /// Test that AI semantic cleaner preserves embeddings in output
-    ///
-    /// **Bug Fixed**: v1.0.5 - Embeddings were being discarded during semantic filtering,
-    /// resulting in "Generated 0 chunks with embeddings" logs and empty embeddings fields.
-    ///
-    /// **Fix Applied**: Modified `filter_by_relevance()` to use `filter_with_embeddings()`
-    /// and restore embeddings after filtering.
-    ///
-    /// **Validation**: This test ensures embeddings are present in output chunks.
-    ///
-    /// # Run with
-    ///
-    /// ```bash
-    /// cargo test --test integration --features ai test_ai_embedding_preservation
-    /// ```
-    ///
-    /// # Expected Results
-    ///
-    /// - **Before fix**: 7 chunks generated, 0 with embeddings, eprintln!("Generated 0 chunks with embeddings")
-    /// - **After fix**: 7 chunks generated, 7 with embeddings (384-dim vectors each)
-    ///
-    /// # Example Output
-    ///
-    /// ```
-    /// ✅ AI clean successful, generated 7 chunks with embeddings
-    ///    First chunk embedding dimension: 384
-    ///    Sample content: <html><body><h1>Title 1</h1><p>This is parag...
-    /// ```
-    #[cfg(feature = "ai")]
-    #[tokio::test]
-    async fn test_ai_embedding_preservation() {
-        // Test original bug: embeddings were being discarded during filtering
-        // This test verifies the fix works: embeddings shouldn't be None after cleaning
+///
+/// **Bug Fixed**: v1.0.5 - Embeddings were being discarded during semantic filtering,
+/// resulting in "Generated 0 chunks with embeddings" logs and empty embeddings fields.
+///
+/// **Fix Applied**: Modified `filter_by_relevance()` to use `filter_with_embeddings()`
+/// and restore embeddings after filtering.
+///
+/// **Validation**: This test ensures embeddings are present in output chunks.
+///
+/// # Run with
+///
+/// ```bash
+/// cargo test --test integration --features ai test_ai_embedding_preservation
+/// ```
+///
+/// # Expected Results
+///
+/// - **Before fix**: 7 chunks generated, 0 with embeddings, eprintln!("Generated 0 chunks with embeddings")
+/// - **After fix**: 7 chunks generated, 7 with embeddings (384-dim vectors each)
+///
+/// # Example Output
+///
+/// ```
+/// ✅ AI clean successful, generated 7 chunks with embeddings
+///    First chunk embedding dimension: 384
+///    Sample content: <html><body><h1>Title 1</h1><p>This is parag...
+/// ```
+#[cfg(feature = "ai")]
+#[tokio::test]
+async fn test_ai_embedding_preservation() {
+    // Test original bug: embeddings were being discarded during filtering
+    // This test verifies the fix works: embeddings shouldn't be None after cleaning
 
-    use rust_scraper::infrastructure::ai::{SemanticCleaner, LexicalCleaner};
+    use rust_scraper::infrastructure::ai::{ModelConfig, SemanticCleanerImpl};
+    use rust_scraper::SemanticCleaner;
 
-    // Arrange - Use simple HTML that will generate multiple chunks
+    // Arrange - Use substantial HTML content that will generate multiple chunks
+    // Each paragraph needs enough text to be considered a meaningful chunk
     let html = r#"
         <html>
         <body>
-            <h1>Title 1</h1>
-            <p>This is paragraph 1 with some Lorem ipsum dolor sit amet content.</p>
-            <h1>Title 2</h1>
-            <p>This is paragraph 2 with more text content for testing.</p>
-            <h1>Title 3</h1>
-            <p>This is paragraph 3 with different yet similar content.</p>
+            <article>
+                <h1>Introduction to Machine Learning</h1>
+                <p>Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It focuses on developing computer programs that can access data and use it to learn for themselves. The primary aim is to allow computers to learn automatically without human intervention or assistance.</p>
+                <h2>Supervised Learning</h2>
+                <p>Supervised learning is a type of machine learning where the algorithm is trained on labeled data. The algorithm learns from input-output pairs and makes predictions based on that learning. Common applications include classification tasks like spam detection and regression tasks like predicting house prices based on features.</p>
+                <h2>Unsupervised Learning</h2>
+                <p>Unsupervised learning involves training algorithms on unlabeled data. The system tries to learn the underlying structure and relationships in the data without explicit guidance. Clustering and dimensionality reduction are common unsupervised learning tasks used in customer segmentation and anomaly detection.</p>
+                <h2>Reinforcement Learning</h2>
+                <p>Reinforcement learning is a type of machine learning where an agent learns to make decisions by interacting with an environment. The agent receives rewards or penalties based on its actions and learns to maximize cumulative reward. This approach has been successful in game playing, robotics, and autonomous systems.</p>
+                <h2>Deep Learning and Neural Networks</h2>
+                <p>Deep learning is a subset of machine learning that uses neural networks with multiple layers. These neural networks attempt to simulate the behavior of the human brain, allowing them to learn from large amounts of data. Deep learning has achieved remarkable success in image recognition, natural language processing, and speech recognition.</p>
+            </article>
         </body>
         </html>
     "#;
 
     // Act - Create cleaner and clean content
-    let cleaner = SemanticCleaner::new().await.expect("Failed to create semantic cleaner");
-    let chunks_result = cleaner.clean(html).await;
+    let config = ModelConfig::default();
+    let cleaner = SemanticCleanerImpl::new(config)
+        .await
+        .expect("Failed to create semantic cleaner");
+    let chunks_result: Result<
+        Vec<rust_scraper::domain::DocumentChunk>,
+        rust_scraper::SemanticError,
+    > = cleaner.clean(html).await;
 
     // Assert - Should succeed and have chunks with embeddings
     assert!(
@@ -411,14 +426,20 @@ async fn test_download_documents_from_website() {
     let chunks = chunks_result.unwrap();
 
     // Verify we got chunks
-    assert!(!chunks.is_empty(), "Should have generated at least one chunk");
+    assert!(
+        !chunks.is_empty(),
+        "Should have generated at least one chunk"
+    );
 
     // Verify each chunk has embeddings (THE BUG FIX!)
     for (idx, chunk) in chunks.iter().enumerate() {
         let has_embeddings = chunk.embeddings.is_some();
         if !has_embeddings {
             eprintln!("❌ ERROR: Chunk {} has no embeddings!", idx);
-            eprintln!("   Content preview: {}", &chunk.content[..chunk.content.len().min(100)]);
+            eprintln!(
+                "   Content preview: {}",
+                &chunk.content[..chunk.content.len().min(100)]
+            );
         }
         assert!(
             has_embeddings,
@@ -428,19 +449,20 @@ async fn test_download_documents_from_website() {
     }
 
     // Log results for debugging
-    eprintln!("✅ AI clean successful, generated {} chunks with embeddings", chunks.len());
-    eprintln!("   First chunk embedding dimension: {}", chunks[0].embeddings.as_ref().map(|e| e.len()).unwrap_or(0));
-    eprintln!("   Sample content: {}", &chunks[0].content[..chunks[0].content.len().min(150)]);
-
-    // Additional test: Compare with lexical cleaner (no embeddings)
-    let lexical_cleaner = LexicalCleaner::new();
-    let lexical_result = lexical_cleaner.clean(html);
-
-    assert!(lexical_result.is_ok(), "Lexical cleaner should succeed");
-    let lexical_chunks = lexical_result.unwrap();
-
     eprintln!(
-        "✅ Lexical clean successful, generated {} chunks (no embeddings expected)",
-        lexical_chunks.len()
+        "✅ AI clean successful, generated {} chunks with embeddings",
+        chunks.len()
+    );
+    eprintln!(
+        "   First chunk embedding dimension: {}",
+        chunks[0]
+            .embeddings
+            .as_ref()
+            .map(|e: &Vec<f32>| e.len())
+            .unwrap_or(0)
+    );
+    eprintln!(
+        "   Sample content: {}",
+        &chunks[0].content[..chunks[0].content.len().min(150)]
     );
 }

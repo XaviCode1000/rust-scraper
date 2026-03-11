@@ -1,17 +1,17 @@
 //! Quick test of AI pipeline
-use rust_scraper::infrastructure::ai::{SemanticCleanerImpl, ModelConfig};
+use rust_scraper::infrastructure::ai::{ModelConfig, SemanticCleanerImpl};
 use rust_scraper::SemanticCleaner;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("🚀 Testing AI Pipeline...");
-    
+
     let config = ModelConfig::default();
     println!("📦 Model config created");
-    
+
     let cleaner = SemanticCleanerImpl::new(config).await?;
     println!("✅ SemanticCleaner created");
-    
+
     let html = r#"<html><body>
 <h1>Hello World</h1>
 
@@ -35,22 +35,23 @@ async fn main() -> anyhow::Result<()> {
 </main>
 
 </body></html>"#;
-    
+
     println!("📄 HTML length: {} chars", html.len());
-    
+
     println!("🔄 Cleaning HTML...");
     let chunks = cleaner.clean(html).await?;
-    
+
     println!("✅ Generated {} chunks", chunks.len());
-    
+
     for (i, chunk) in chunks.iter().enumerate() {
-        println!("  Chunk {}: {} chars, has_embeddings: {}", 
-            i, 
+        println!(
+            "  Chunk {}: {} chars, has_embeddings: {}",
+            i,
             chunk.content.len(),
             chunk.has_embeddings()
         );
     }
-    
+
     println!("\n🎉 AI Pipeline works!");
     Ok(())
 }

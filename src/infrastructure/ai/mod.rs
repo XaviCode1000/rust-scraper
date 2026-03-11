@@ -57,10 +57,10 @@
 //! ```no_run
 //! # #[cfg(feature = "ai")]
 //! # async fn example() -> anyhow::Result<()> {
-//! use rust_scraper::infrastructure::ai::{create_semantic_cleaner, ModelConfig};
+//! use rust_scraper::infrastructure::ai::{SemanticCleanerImpl, ModelConfig};
 //!
 //! let config = ModelConfig::default();
-//! let cleaner = create_semantic_cleaner(&config).await?;
+//! let cleaner = SemanticCleanerImpl::new(config).await?;
 //!
 //! let html = "<article><p>Hello World</p></article>";
 //! let chunks = cleaner.clean(html).await?;
@@ -116,13 +116,13 @@ pub use model_downloader::{DownloadProgress, ModelDownloader};
 pub use semantic_cleaner_impl::{ModelConfig, SemanticCleanerImpl};
 
 #[cfg(feature = "ai")]
-pub(crate) use semantic_cleaner_impl::create_semantic_cleaner;
-
-#[cfg(feature = "ai")]
 pub use inference_engine::InferenceEngine;
 
 #[cfg(feature = "ai")]
 pub use tokenizer::{MiniLmTokenizer, TokenBatch, DEFAULT_MAX_LENGTH};
+
+#[cfg(feature = "ai")]
+pub use inference_engine::ModelInput;
 
 // Re-exports for Semantic Chunking (Modules 3-4)
 #[cfg(feature = "ai")]

@@ -384,13 +384,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "Threshold must be between")]
     fn test_relevance_scorer_invalid_threshold_low() {
-        RelevanceScorer::new(-0.1);
+        let _ = RelevanceScorer::new(-0.1);
     }
 
     #[test]
     #[should_panic(expected = "Threshold must be between")]
     fn test_relevance_scorer_invalid_threshold_high() {
-        RelevanceScorer::new(1.1);
+        let _ = RelevanceScorer::new(1.1);
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
         let scorer = RelevanceScorer::with_reference(0.3, reference.clone());
 
         let (chunk1, emb1) = create_test_chunk("Content 1");
-        let (chunk2, emb2) = create_test_chunk("Content 2");
+        let (chunk2, _emb2) = create_test_chunk("Content 2");
 
         // Create orthogonal embedding
         let emb_orthogonal = vec![0.0f32, 1.0, 0.0, 0.0];

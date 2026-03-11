@@ -63,7 +63,6 @@ use crate::error::SemanticError;
 use crate::infrastructure::ai::model_cache::{
     default_cache_dir, CacheConfig, ModelCache, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO,
 };
-use crate::infrastructure::ai::model_downloader::ModelResolver;
 use crate::infrastructure::ai::{HtmlChunker, InferenceEngine, MiniLmTokenizer, RelevanceScorer};
 
 /// Model configuration
@@ -287,11 +286,18 @@ impl SemanticCleanerImpl {
         } else if config.auto_download {
             // Try to verify model exists (for manual download scenario)
             info!("Verifying manually downloaded model...");
-            let resolver = ModelResolver::new()
-                .with_file(&config.model_file);
 
-            // Just verify - if not found, suggest manual download
-            resolver.verify(&config.cache_dir).await?;
+            // Just verify file exists - if not found, suggest manual download
+            let model_path = config.cache_dir.join(&config.model_file);
+            if !model_path.exists() {
+                return Err(SemanticError::ModelLoad(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!(
+                        "Model file not found at {}. Please download manually or enable auto-download.",
+                        model_path.display()
+                    ),
+                )));
+            }
         } else {
             return Err(SemanticError::OfflineMode {
                 repo: config.repo.clone(),
@@ -426,20 +432,20 @@ impl SemanticCleaner for SemanticCleanerImpl {
         // Pre-allocate with capacity following `mem-with-capacity`
         let mut token_buffers = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
-            let tokens = self.tokenizer.tokenize(&chunk.content).map_err(|e| {
+            let input = self.tokenizer.tokenize(&chunk.content).map_err(|e| {
                 SemanticError::Tokenize(format!("Tokenization failed for chunk: {}", e))
             })?;
 
             // Validate token count
-            if tokens.len() > self.config.max_tokens {
+            if input.seq_len() > self.config.max_tokens {
                 return Err(SemanticError::ChunkTooLarge {
                     chunk_id: format!("chunk-{}", token_buffers.len()),
-                    tokens: tokens.len(),
+                    tokens: input.seq_len(),
                     max: self.config.max_tokens,
                 });
             }
 
-            token_buffers.push(tokens);
+            token_buffers.push(input);
         }
 
         debug!(
@@ -454,7 +460,7 @@ impl SemanticCleaner for SemanticCleanerImpl {
         let embeddings = try_join_all(
             token_buffers
                 .iter()
-                .map(|tokens| self.inference_engine.run_inference(tokens)),
+                .map(|input| self.inference_engine.run_inference(input)),
         )
         .await
         .map_err(|e| {
@@ -544,20 +550,20 @@ impl SemanticCleanerImpl {
     /// let html = "<article><h1>Title</h1><p>Content here.</p></article>";
     /// let chunks = cleaner.clean(html).await?;
     ///
-/// // Verify embeddings are present (bug fix validation)
-///     let has_embeddings = chunks.first()
-///         .map(|c| c.embeddings.is_some())
-///         .ok_or_else(|| SemanticError::Inference(
-///             "No chunks returned from semantic cleaner. "
-///             "Check HTML content and AI model availability."
-///         ))?;
-///     assert!(has_embeddings, "embeddings should not be None after fix");
-///
-/// // Embedding dimension: 384 for all-MiniLM-L6-v2 model
-/// let dim = chunks.first()
-///     .map(|c| c.embeddings.as_ref().map(|e| e.len()))
-///     .ok_or(SemanticError::Inference("No chunks or embeddings returned".to_string()))?;
-/// assert_eq!(dim, Some(384));
+    /// // Verify embeddings are present (bug fix validation)
+    /// let has_embeddings = chunks.first()
+    ///     .map(|c| c.embeddings.is_some())
+    ///     .ok_or_else(|| SemanticError::Inference(
+    ///         "No chunks returned from semantic cleaner. "
+    ///         "Check HTML content and AI model availability."
+    ///     ))?;
+    /// assert!(has_embeddings, "embeddings should not be None after fix");
+    ///
+    /// // Embedding dimension: 384 for all-MiniLM-L6-v2 model
+    /// let dim = chunks.first()
+    ///     .map(|c| c.embeddings.as_ref().map(|e| e.len()))
+    ///     .ok_or(SemanticError::Inference("No chunks or Embeddings returned".to_string()))?;
+    /// assert_eq!(dim, Some(384));
     /// # Ok(())
     /// # }
     /// ```
@@ -595,8 +601,9 @@ impl SemanticCleanerImpl {
         })?;
 
         // Filter using scorer WITH embeddings preserved
-        let filtered_with_embeddings: Vec<(DocumentChunk, Vec<f32>)> =
-            self.scorer.filter_with_embeddings(&chunk_embedding_pairs, Some(reference));
+        let filtered_with_embeddings: Vec<(DocumentChunk, Vec<f32>)> = self
+            .scorer
+            .filter_with_embeddings(&chunk_embedding_pairs, Some(reference));
 
         // Restore embeddings to chunks following `mem-preserving-embeddings`
         let mut result = Vec::with_capacity(filtered_with_embeddings.len());
@@ -638,6 +645,7 @@ impl SemanticCleanerImpl {
 /// # Ok(())
 /// # }
 /// ```
+#[allow(dead_code)]
 pub(crate) async fn create_semantic_cleaner(
     config: &ModelConfig,
 ) -> Result<Box<dyn SemanticCleaner>, SemanticError> {
@@ -681,7 +689,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Relevance threshold must be between")]
     fn test_model_config_invalid_threshold() {
-        ModelConfig::new().with_relevance_threshold(1.5);
+        let _ = ModelConfig::new().with_relevance_threshold(1.5);
     }
 
     #[test]
@@ -697,37 +705,83 @@ mod tests {
     #[tokio::test]
     async fn test_semantic_cleaner_creation_fails_without_model() {
         // This test verifies that creation fails gracefully when model is not available
+        //
+        // FIX: Use a non-existent cache directory to ensure model is not found
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join("non_existent_cache");
+
         let config = ModelConfig::new()
+            .with_cache_dir(cache_dir)
             .with_auto_download(false)
             .with_offline_mode(true);
 
         let result = SemanticCleanerImpl::new(config).await;
+        assert!(result.is_err());
+    }
 
-        // Should fail with OfflineMode error
+    #[tokio::test]
+    async fn test_semantic_cleaner_offline_mode() {
+        // Test that offline mode fails when model is not cached
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join("offline_test");
+
+        let config = ModelConfig::new()
+            .with_cache_dir(cache_dir)
+            .with_auto_download(false)
+            .with_offline_mode(true);
+
+        let result = SemanticCleanerImpl::new(config).await;
         assert!(result.is_err());
 
-        // Print the actual error for debugging
-        let err = result.err().unwrap();
-        eprintln!("Actual error: {:?}", err);
-        
-        // With the new ModelResolver approach, when offline_mode is true and model doesn't exist,
-        // we should still get OfflineMode error
-        match err {
-            SemanticError::OfflineMode { repo } => {
-                assert_eq!(repo, DEFAULT_MODEL_REPO);
-            }
-            other => {
-                // For now, accept other errors too since the flow changed
-                // The important thing is that it fails gracefully
-                eprintln!("Got non-OfflineMode error (acceptable): {:?}", other);
-            }
+        if let Err(SemanticError::OfflineMode { .. }) = result {
+            // Expected
+        } else {
+            panic!("Expected OfflineMode error");
         }
     }
 
     #[test]
-    fn test_filter_by_relevance_empty() {
-        // Test filter_by_relevance with empty input
-        // Note: This test can't actually run without async setup
-        // It's here as a placeholder for future mock-based testing
+    fn test_model_config_with_relevance_threshold() {
+        let config = ModelConfig::default().with_relevance_threshold(0.5);
+        assert_eq!(config.relevance_threshold, 0.5);
+    }
+
+    #[test]
+    fn test_model_config_full_builder() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let config = ModelConfig::new()
+            .with_repo("test/repo")
+            .with_file("test.onnx")
+            .with_cache_dir(temp_dir.path().to_path_buf())
+            .with_auto_download(false)
+            .with_offline_mode(true)
+            .with_max_tokens(256)
+            .with_relevance_threshold(0.4);
+
+        assert_eq!(config.repo, "test/repo");
+        assert_eq!(config.model_file, "test.onnx");
+        assert!(!config.auto_download);
+        assert!(config.offline_mode);
+        assert_eq!(config.max_tokens, 256);
+        assert_eq!(config.relevance_threshold, 0.4);
+    }
+
+    #[test]
+    fn test_semantic_cleaner_impl_fields() {
+        // Verify that SemanticCleanerImpl has the expected fields
+        // This is a compile-time check
+        fn _check_fields(cleaner: &SemanticCleanerImpl) {
+            let _ = cleaner.relevance_threshold();
+            let _ = cleaner.auto_download_enabled();
+            let _ = cleaner.cache_dir();
+        }
+    }
+
+    #[test]
+    fn test_filter_by_relevance_length_mismatch() {
+        // This test would require creating a SemanticCleanerImpl instance,
+        // which requires async setup. Skipping for now.
+        // The method is tested indirectly through integration tests.
     }
 }

@@ -23,6 +23,7 @@ use rust_scraper::infrastructure::ai::model_downloader::ModelDownloader;
 use rust_scraper::infrastructure::ai::{InferenceEngine, ModelConfig, SemanticCleanerImpl};
 use rust_scraper::SemanticCleaner;
 use rust_scraper::SemanticError;
+use std::path::PathBuf;
 
 // ============================================================================
 // Existing Tests (unchanged - see original file for full content)
@@ -1039,7 +1040,13 @@ async fn test_error_chunk_too_large() {
 /// Test offline mode error
 #[tokio::test]
 async fn test_offline_mode_error() {
+    let temp_cache_dir = PathBuf::from(format!(
+        "/tmp/rust_scraper_test_cache_{}",
+        std::process::id()
+    ));
+
     let config = ModelConfig::new()
+        .with_cache_dir(temp_cache_dir)
         .with_auto_download(false)
         .with_offline_mode(true);
 

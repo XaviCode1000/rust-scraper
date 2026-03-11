@@ -318,7 +318,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Min threshold (0.8) cannot be greater than max threshold (0.2)")]
     fn test_threshold_config_invalid_min_greater_than_max() {
-        ThresholdConfig::new()
+        let _ = ThresholdConfig::new()
             .with_min_threshold(0.8)
             .with_max_threshold(0.2)
             .build();
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Default threshold (0.3) must be between min (0.5) and max (1)")]
     fn test_threshold_config_default_below_min() {
-        ThresholdConfig::new()
+        let _ = ThresholdConfig::new()
             .with_min_threshold(0.5)
             .with_max_threshold(1.0)
             .with_default_threshold(0.3)
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Default threshold (0.8) must be between min (0) and max (0.5)")]
     fn test_threshold_config_default_above_max() {
-        ThresholdConfig::new()
+        let _ = ThresholdConfig::new()
             .with_min_threshold(0.0)
             .with_max_threshold(0.5)
             .with_default_threshold(0.8)
@@ -347,13 +347,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "Min threshold must be between 0.0 and 1.0, got -0.1")]
     fn test_threshold_config_invalid_min_negative() {
-        ThresholdConfig::new().with_min_threshold(-0.1);
+        let _ = ThresholdConfig::new().with_min_threshold(-0.1);
     }
 
     #[test]
     #[should_panic(expected = "Max threshold must be between 0.0 and 1.0, got 1.1")]
     fn test_threshold_config_invalid_max_above_one() {
-        ThresholdConfig::new().with_max_threshold(1.1);
+        let _ = ThresholdConfig::new().with_max_threshold(1.1);
     }
 
     #[test]

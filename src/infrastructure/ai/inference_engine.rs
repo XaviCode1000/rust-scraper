@@ -5,6 +5,7 @@
 //! - Async inference via `spawn_blocking` (`async-spawn-blocking`)
 //! - Clone Arc before await (`async-clone-before-await`)
 //! - 384-dimensional embedding output for all-MiniLM-L6-v2
+//! - **3-input ONNX model**: input_ids, attention_mask, token_type_ids
 //!
 //! # Design Decisions
 //!
@@ -12,16 +13,21 @@
 //! - **Arc for session sharing**: Session is wrapped in Arc for thread-safe access across threads
 //! - **spawn_blocking**: CPU-intensive inference runs in blocking pool to avoid starving async runtime
 //! - **No locks across await**: Clone Arc before async operations
+//! - **3-input model**: all-MiniLM-L6-v2 requires input_ids, attention_mask, and token_type_ids
 //!
 //! # Examples
 //!
 //! ```no_run
 //! # async fn example() -> anyhow::Result<()> {
-//! use rust_scraper::infrastructure::ai::InferenceEngine;
+//! use rust_scraper::infrastructure::ai::{InferenceEngine, ModelInput};
 //!
 //! let engine = InferenceEngine::load_from_file("path/to/model.onnx").await?;
-//! let tokens = vec![101i64, 2054, 2003, 102]; // [CLS] hello world [SEP]
-//! let embedding = engine.run_inference(&tokens).await?;
+//! let input = ModelInput::new(
+//!     vec![101i64, 2054, 2003, 102], // input_ids
+//!     vec![1i64, 1, 1, 1],           // attention_mask
+//!     vec![0i64, 0, 0, 0],           // token_type_ids
+//! );
+//! let embedding = engine.run_inference(&input).await?;
 //! assert_eq!(embedding.len(), 384);
 //! # Ok(())
 //! # }
@@ -41,6 +47,100 @@ use crate::error::SemanticError;
 /// This is the correct type for ONNX inference with tract-onnx 0.21.
 pub type InferenceSession = Arc<TypedSimplePlan<TypedModel>>;
 
+/// Input data for ONNX model inference
+///
+/// The all-MiniLM-L6-v2 model requires 3 input tensors:
+/// 1. `input_ids` - Token IDs (vocab indices)
+/// 2. `attention_mask` - Which tokens are real (1) vs padding (0)
+/// 3. `token_type_ids` - Segment IDs (0 for single sentence)
+///
+/// All vectors must have the same length (sequence length).
+///
+/// # Examples
+///
+/// ```
+/// use rust_scraper::infrastructure::ai::ModelInput;
+///
+/// let input = ModelInput::new(
+///     vec![101i64, 2054, 2003, 102], // [CLS] hello world [SEP]
+///     vec![1i64, 1, 1, 1],           // All real tokens
+///     vec![0i64, 0, 0, 0],           // Single sentence
+/// );
+/// assert_eq!(input.seq_len(), 4);
+/// ```
+#[derive(Debug, Clone)]
+pub struct ModelInput {
+    /// Token IDs (vocab indices)
+    pub input_ids: Vec<i64>,
+    /// Attention mask (1 for real tokens, 0 for padding)
+    pub attention_mask: Vec<i64>,
+    /// Token type IDs (segment IDs, usually all 0s)
+    pub token_type_ids: Vec<i64>,
+}
+
+impl ModelInput {
+    /// Create a new model input
+    ///
+    /// # Arguments
+    ///
+    /// * `input_ids` - Token IDs including special tokens
+    /// * `attention_mask` - 1 for real tokens, 0 for padding
+    /// * `token_type_ids` - Segment IDs (0 for single sentence)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the three vectors have different lengths.
+    #[must_use]
+    pub fn new(input_ids: Vec<i64>, attention_mask: Vec<i64>, token_type_ids: Vec<i64>) -> Self {
+        // Validate lengths match (debug assertion for performance)
+        debug_assert_eq!(
+            input_ids.len(),
+            attention_mask.len(),
+            "input_ids and attention_mask must have same length"
+        );
+        debug_assert_eq!(
+            input_ids.len(),
+            token_type_ids.len(),
+            "input_ids and token_type_ids must have same length"
+        );
+
+        Self {
+            input_ids,
+            attention_mask,
+            token_type_ids,
+        }
+    }
+
+    /// Get sequence length
+    #[must_use]
+    pub fn seq_len(&self) -> usize {
+        self.input_ids.len()
+    }
+
+    /// Create from token IDs only (generates default mask and type IDs)
+    ///
+    /// This is a convenience method for single-sentence inputs where:
+    /// - attention_mask is all 1s (no padding)
+    /// - token_type_ids is all 0s (single segment)
+    ///
+    /// # Arguments
+    ///
+    /// * `input_ids` - Token IDs
+    ///
+    /// # Returns
+    ///
+    /// ModelInput with default attention_mask and token_type_ids
+    #[must_use]
+    pub fn from_tokens(input_ids: Vec<i64>) -> Self {
+        let seq_len = input_ids.len();
+        Self {
+            input_ids: input_ids.clone(),
+            attention_mask: vec![1i64; seq_len],
+            token_type_ids: vec![0i64; seq_len],
+        }
+    }
+}
+
 /// ONNX inference engine for sentence embeddings
 ///
 /// This engine loads an ONNX model and provides methods for running inference
@@ -55,7 +155,7 @@ pub type InferenceSession = Arc<TypedSimplePlan<TypedModel>>;
 ///
 /// ```no_run
 /// # async fn example() -> anyhow::Result<()> {
-/// use rust_scraper::infrastructure::ai::InferenceEngine;
+/// use rust_scraper::infrastructure::ai::{InferenceEngine, ModelInput};
 ///
 /// let engine = InferenceEngine::load_from_file("path/to/model.onnx").await?;
 ///
@@ -63,9 +163,9 @@ pub type InferenceSession = Arc<TypedSimplePlan<TypedModel>>;
 /// let engine_clone = engine.clone();
 ///
 /// // Both can be used concurrently
-/// let tokens = vec![101i64, 2054, 2003, 102];
-/// let embedding1 = engine.run_inference(&tokens).await?;
-/// let embedding2 = engine_clone.run_inference(&tokens).await?;
+/// let input = ModelInput::from_tokens(vec![101i64, 2054, 2003, 102]);
+/// let embedding1 = engine.run_inference(&input).await?;
+/// let embedding2 = engine_clone.run_inference(&input).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -160,14 +260,15 @@ impl InferenceEngine {
         Ok(Self { session })
     }
 
-    /// Run inference on token IDs
+    /// Run inference on token inputs
     ///
-    /// Takes token IDs and generates a 384-dimensional embedding vector.
-    /// Uses `spawn_blocking` to avoid blocking the async runtime (`async-spawn-blocking`).
+    /// Takes token IDs, attention mask, and token type IDs to generate a
+    /// 384-dimensional embedding vector. Uses `spawn_blocking` to avoid
+    /// blocking the async runtime (`async-spawn-blocking`).
     ///
     /// # Arguments
     ///
-    /// * `tokens` - Token IDs (including [CLS] and [SEP] special tokens)
+    /// * `input` - ModelInput containing input_ids, attention_mask, token_type_ids
     ///
     /// # Returns
     ///
@@ -183,39 +284,62 @@ impl InferenceEngine {
     ///
     /// ```no_run
     /// # async fn example() -> anyhow::Result<()> {
-    /// use rust_scraper::infrastructure::ai::InferenceEngine;
+    /// use rust_scraper::infrastructure::ai::{InferenceEngine, ModelInput};
     ///
     /// let engine = InferenceEngine::load_from_file("model.onnx").await?;
-    /// let tokens = vec![101i64, 2054, 2003, 102]; // [CLS] hello world [SEP]
-    /// let embedding = engine.run_inference(&tokens).await?;
+    /// let input = ModelInput::from_tokens(vec![101i64, 2054, 2003, 102]);
+    /// let embedding = engine.run_inference(&input).await?;
     /// assert_eq!(embedding.len(), 384);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn run_inference(&self, tokens: &[i64]) -> Result<Vec<f32>, SemanticError> {
+    pub async fn run_inference(&self, input: &ModelInput) -> Result<Vec<f32>, SemanticError> {
         // Clone Arc before await to avoid holding references across suspension
         // This ensures the future is Send and can be spawned (`async-clone-before-await`)
-        let session = Arc::clone(&self.session);
-        let tokens = tokens.to_vec();
+        let session: InferenceSession = Arc::clone(&self.session);
+        let input = input.clone();
 
         // Run inference in blocking pool (CPU-intensive work)
         // This prevents blocking the async runtime threads (`async-spawn-blocking`)
         let result = tokio::task::spawn_blocking(move || {
-            // Create input tensor: shape [1, sequence_length] with i64 data
-            // Using Tensor::from_shape which takes shape slice and data slice
-            let input_tensor = Tensor::from_shape(&[1, tokens.len()], &tokens)
-                .map_err(|e| SemanticError::Inference(format!("Failed to create tensor: {}", e)))?;
+            let seq_len = input.seq_len();
+
+            // Create 3 input tensors for all-MiniLM-L6-v2 model
+            // Shape: [1, sequence_length] with i64 data
+            let input_ids_tensor =
+                Tensor::from_shape(&[1, seq_len], &input.input_ids).map_err(|e| {
+                    SemanticError::Inference(format!("Failed to create input_ids tensor: {}", e))
+                })?;
+
+            let attention_mask_tensor = Tensor::from_shape(&[1, seq_len], &input.attention_mask)
+                .map_err(|e| {
+                    SemanticError::Inference(format!(
+                        "Failed to create attention_mask tensor: {}",
+                        e
+                    ))
+                })?;
+
+            let token_type_ids_tensor = Tensor::from_shape(&[1, seq_len], &input.token_type_ids)
+                .map_err(|e| {
+                    SemanticError::Inference(format!(
+                        "Failed to create token_type_ids tensor: {}",
+                        e
+                    ))
+                })?;
 
             // Create state for the plan
             // Pass the Arc directly (not &Arc) - TypedSimpleState::new takes P: Borrow<SimplePlan>
             let mut state = TypedSimpleState::new(session.clone())
                 .map_err(|e| SemanticError::Inference(format!("Failed to create state: {}", e)))?;
 
-            // Run the model with the input tensor
-            // Input: tvec!(tensor.into()) - correct pattern from tract examples
-            // Output: TypedSimpleState result containing output tensors
+            // Run the model with 3 input tensors
+            // all-MiniLM-L6-v2 expects: input_ids, attention_mask, token_type_ids
             let outputs = state
-                .run(tvec![input_tensor.into()])
+                .run(tvec![
+                    input_ids_tensor.into(),
+                    attention_mask_tensor.into(),
+                    token_type_ids_tensor.into(),
+                ])
                 .map_err(|e| SemanticError::Inference(format!("Model execution failed: {}", e)))?;
 
             // Extract first output tensor (the embedding)
@@ -288,5 +412,36 @@ mod tests {
     fn test_inference_engine_is_clone() {
         fn assert_clone<T: Clone>() {}
         assert_clone::<InferenceEngine>();
+    }
+
+    /// Test ModelInput creation
+    #[test]
+    fn test_model_input_creation() {
+        let input = ModelInput::new(
+            vec![101i64, 2054, 2003, 102],
+            vec![1i64, 1, 1, 1],
+            vec![0i64, 0, 0, 0],
+        );
+        assert_eq!(input.seq_len(), 4);
+        assert_eq!(input.input_ids.len(), 4);
+        assert_eq!(input.attention_mask.len(), 4);
+        assert_eq!(input.token_type_ids.len(), 4);
+    }
+
+    /// Test ModelInput from tokens convenience method
+    #[test]
+    fn test_model_input_from_tokens() {
+        let input = ModelInput::from_tokens(vec![101i64, 2054, 2003, 102]);
+        assert_eq!(input.seq_len(), 4);
+        assert_eq!(input.input_ids, vec![101, 2054, 2003, 102]);
+        assert_eq!(input.attention_mask, vec![1, 1, 1, 1]);
+        assert_eq!(input.token_type_ids, vec![0, 0, 0, 0]);
+    }
+
+    /// Test that ModelInput is Clone
+    #[test]
+    fn test_model_input_is_clone() {
+        fn assert_clone<T: Clone>() {}
+        assert_clone::<ModelInput>();
     }
 }

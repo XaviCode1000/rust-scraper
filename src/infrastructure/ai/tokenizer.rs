@@ -5,6 +5,7 @@
 //! - Special tokens: [CLS], [SEP], [PAD]
 //! - Truncation and padding to max_length (384)
 //! - Batch tokenization for throughput
+//! - **Returns ModelInput**: input_ids, attention_mask, token_type_ids
 //!
 //! # Design Decisions
 //!
@@ -12,6 +13,7 @@
 //! - **Borrowed input** (`own-borrow-over-clone`): Accepts &str, avoids String clones
 //! - **SmallVec optimization** (`mem-smallvec`): Uses SmallVec for typical chunks
 //! - **Buffer reuse** (`mem-reuse-collections`): Reuses internal buffers across calls
+//! - **ModelInput return** (`err-thiserror-lib`): Returns complete model input struct
 
 use std::path::Path;
 
@@ -19,6 +21,7 @@ use tokenizers::Tokenizer as HfTokenizer;
 use tracing::debug;
 
 use crate::error::SemanticError;
+use crate::infrastructure::ai::inference_engine::ModelInput;
 
 /// Special token IDs for BERT-style tokenizers
 pub mod special_tokens {
@@ -78,6 +81,24 @@ impl TokenBatch {
     pub fn sequence_length(&self) -> usize {
         self.sequences.first().map_or(0, Vec::len)
     }
+
+    /// Convert batch to Vec<ModelInput> for inference
+    ///
+    /// This converts each sequence in the batch to a ModelInput
+    /// suitable for passing to InferenceEngine::run_inference.
+    ///
+    /// # Returns
+    ///
+    /// Vec of ModelInput, one for each sequence in the batch
+    #[must_use]
+    pub fn to_model_inputs(&self) -> Vec<ModelInput> {
+        self.sequences
+            .iter()
+            .zip(self.attention_mask.iter())
+            .zip(self.token_type_ids.iter())
+            .map(|((ids, mask), types)| ModelInput::new(ids.clone(), mask.clone(), types.clone()))
+            .collect()
+    }
 }
 
 /// HuggingFace tokenizer wrapper for all-MiniLM-L6-v2
@@ -87,6 +108,7 @@ impl TokenBatch {
 /// - Special token insertion ([CLS], [SEP])
 /// - Truncation to max_length
 /// - Padding to max_length
+/// - **Returns ModelInput**: Complete input for ONNX model
 ///
 /// # Examples
 ///
@@ -95,9 +117,10 @@ impl TokenBatch {
 /// use rust_scraper::infrastructure::ai::MiniLmTokenizer;
 ///
 /// let tokenizer = MiniLmTokenizer::load_default().await?;
-/// let tokens = tokenizer.tokenize("Hello world")?;
-/// assert_eq!(tokens[0], 101); // [CLS]
-/// assert_eq!(tokens.last(), Some(&102)); // [SEP]
+/// let input = tokenizer.tokenize("Hello world")?;
+/// assert_eq!(input.input_ids[0], 101); // [CLS]
+/// assert_eq!(input.attention_mask[0], 1); // Real token
+/// assert_eq!(input.token_type_ids[0], 0); // Single sentence
 /// # Ok(())
 /// # }
 /// ```
@@ -159,7 +182,10 @@ impl MiniLmTokenizer {
 
     /// Tokenize a single text string
     ///
-    /// Takes text and returns token IDs with special tokens added.
+    /// Takes text and returns ModelInput with:
+    /// - input_ids: Token IDs with special tokens added
+    /// - attention_mask: 1 for real tokens, 0 for padding
+    /// - token_type_ids: All zeros for single sentence
     ///
     /// # Arguments
     ///
@@ -167,13 +193,13 @@ impl MiniLmTokenizer {
     ///
     /// # Returns
     ///
-    /// * `Ok(Vec<i64>)` - Token IDs including [CLS] and [SEP]
+    /// * `Ok(ModelInput)` - Complete model input
     /// * `Err(SemanticError::Tokenize)` - Tokenization failed
     ///
     /// # Performance
     ///
     /// Typical latency: 1-5ms per tokenization on Haswell CPU.
-    pub fn tokenize(&self, text: &str) -> Result<Vec<i64>, SemanticError> {
+    pub fn tokenize(&self, text: &str) -> Result<ModelInput, SemanticError> {
         debug!(text_length = text.len(), "Tokenizing text");
 
         // Encode with truncation and padding
@@ -183,28 +209,46 @@ impl MiniLmTokenizer {
             .map_err(|e| SemanticError::Tokenize(format!("Tokenization failed: {}", e)))?;
 
         // Extract token IDs with capacity pre-allocation
-        let mut tokens = Vec::with_capacity(encoding.len().min(self.max_length));
+        let mut input_ids = Vec::with_capacity(encoding.len().min(self.max_length));
+        let mut attention_mask = Vec::with_capacity(encoding.len().min(self.max_length));
+        let mut token_type_ids = Vec::with_capacity(encoding.len().min(self.max_length));
 
         // Get token IDs from encoding
         let ids = encoding.get_ids();
-        for &id in ids.iter().take(self.max_length) {
-            tokens.push(id as i64);
+        let masks = encoding.get_attention_mask();
+        let type_ids = encoding.get_type_ids();
+
+        for i in 0..ids.len().min(self.max_length) {
+            input_ids.push(ids[i] as i64);
+            attention_mask.push(masks[i] as i64);
+            token_type_ids.push(type_ids[i] as i64);
         }
 
         // Ensure [CLS] at start and [SEP] at end
-        if tokens.is_empty() {
-            tokens.push(special_tokens::CLS as i64);
-            tokens.push(special_tokens::SEP as i64);
-        } else if tokens[0] != special_tokens::CLS as i64 {
-            tokens.insert(0, special_tokens::CLS as i64);
+        if input_ids.is_empty() {
+            input_ids.push(special_tokens::CLS as i64);
+            input_ids.push(special_tokens::SEP as i64);
+            attention_mask.push(1);
+            attention_mask.push(1);
+            token_type_ids.push(0);
+            token_type_ids.push(0);
+        } else {
+            // Ensure [CLS] at start
+            if input_ids[0] != special_tokens::CLS as i64 {
+                input_ids.insert(0, special_tokens::CLS as i64);
+                attention_mask.insert(0, 1);
+                token_type_ids.insert(0, 0);
+            }
+
+            // Ensure [SEP] at end
+            if input_ids.last() != Some(&(special_tokens::SEP as i64)) {
+                input_ids.push(special_tokens::SEP as i64);
+                attention_mask.push(1);
+                token_type_ids.push(0);
+            }
         }
 
-        // Ensure [SEP] at end
-        if tokens.last() != Some(&(special_tokens::SEP as i64)) {
-            tokens.push(special_tokens::SEP as i64);
-        }
-
-        Ok(tokens)
+        Ok(ModelInput::new(input_ids, attention_mask, token_type_ids))
     }
 
     /// Tokenize multiple texts in batch
@@ -250,7 +294,12 @@ impl MiniLmTokenizer {
                 .collect();
 
             // Token type IDs (always 0 for single sentence)
-            let type_ids: Vec<i64> = vec![0; ids.len()];
+            let type_ids: Vec<i64> = encoding
+                .get_type_ids()
+                .iter()
+                .take(self.max_length)
+                .map(|&t| t as i64)
+                .collect();
 
             sequences.push(ids);
             attention_masks.push(mask);
@@ -281,8 +330,8 @@ impl MiniLmTokenizer {
 ///
 /// # Returns
 ///
-/// Token IDs including special tokens
-pub fn tokenize_text(tokenizer: &MiniLmTokenizer, text: &str) -> Result<Vec<i64>, SemanticError> {
+/// ModelInput including special tokens
+pub fn tokenize_text(tokenizer: &MiniLmTokenizer, text: &str) -> Result<ModelInput, SemanticError> {
     tokenizer.tokenize(text)
 }
 
@@ -325,5 +374,20 @@ mod tests {
 
         // MiniLmTokenizer should be Send but not Sync (Tokenizer is not Sync)
         _assert_send::<MiniLmTokenizer>();
+    }
+
+    #[test]
+    fn test_token_batch_to_model_inputs() {
+        let batch = TokenBatch::new(
+            vec![vec![1, 2, 3], vec![4, 5, 6]],
+            vec![vec![1, 1, 1], vec![1, 1, 1]],
+            vec![vec![0, 0, 0], vec![0, 0, 0]],
+        );
+
+        let inputs = batch.to_model_inputs();
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].input_ids, vec![1, 2, 3]);
+        assert_eq!(inputs[0].attention_mask, vec![1, 1, 1]);
+        assert_eq!(inputs[0].token_type_ids, vec![0, 0, 0]);
     }
 }
