@@ -20,9 +20,8 @@ full = ["images", "documents", "zvec"]
 zvec = ["dep:zvec-sys"]
 # AI-powered semantic cleaning (Module 3 + 4 + 5 + 7)
 ai = [
-    "dep:tract-onnx",
+    "dep:ort",
     "dep:tokenizers",
-    "dep:hf-hub",
     "dep:memmap2",
     "dep:ndarray",
     "dep:async-trait",
@@ -142,7 +141,7 @@ tokio-util = { version = "0.7.18", features = ["io"] }
 # AI/ML Dependencies (feature-gated: --features ai)
 # ============================================================================
 # ONNX runtime for model inference
-tract-onnx = { version = "0.21", optional = true }
+ort = { version = "2.0.0-rc.12", optional = true }
 # Tokenizer for sentence-transformers
 tokenizers = { version = "0.21", optional = true }
 # HuggingFace Hub for model downloads
@@ -150,7 +149,7 @@ hf-hub = { version = "0.5", features = ["tokio"], optional = true }
 # Memory-mapped file loading (zero-copy for HDD optimization)
 memmap2 = { version = "0.9", optional = true }
 # Multi-dimensional arrays for embeddings
-ndarray = { version = "0.16", optional = true }
+ndarray = { version = "0.17", optional = true }
 # Async trait support for dyn-compatible traits
 async-trait = { version = "0.1", optional = true }
 

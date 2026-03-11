@@ -19,7 +19,8 @@ rust-scraper [OPTIONS] --url <URL>
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-o, --output <DIR>` | Output directory | `output` |
-| `-f, --format <FORMAT>` | Output format (markdown/json/text) | `markdown` |
+| `-f, --format <FORMAT>` | Individual file format (markdown/json/text) | `markdown` |
+| `--export-format <FORMAT>` | RAG pipeline format (jsonl/zvec/auto) | `jsonl` |
 | `-s, --selector <SELECTOR>` | CSS selector for content | `body` |
 | `--download-images` | Download images to `output/images/` | ❌ |
 | `--download-documents` | Download documents to `output/documents/` | ❌ |
@@ -30,6 +31,28 @@ rust-scraper [OPTIONS] --url <URL>
 | `-V, --version` | Show version | - |
 
 ## Output Formats
+
+The scraper supports **two export systems**:
+
+### Individual Files (`-f, --format`)
+
+Creates separate output files per page - ideal for human-readable output:
+
+```bash
+cargo run -- --url "https://example.com" -f markdown
+```
+
+### RAG Pipeline (`--export-format`)
+
+Creates batch export for LLM/RAG pipelines:
+
+```bash
+cargo run -- --url "https://example.com" --export-format jsonl
+```
+
+## Individual File Formats (`-f, --format`)
+
+Use `-f` (short for `--format`) for individual file output:
 
 ### markdown (Default)
 
@@ -100,6 +123,51 @@ cargo run -- --url "https://example.com" -f text
 Example Domain
 
 Content of the page...
+```
+
+## RAG Pipeline Export Formats (`--export-format`)
+
+Use `--export-format` for batch export suitable for LLM/RAG pipelines:
+
+| Format | Flag | Description |
+|--------|------|-------------|
+| JSONL | `jsonl` | One JSON object per line, optimal for RAG (default for pipeline) |
+| Zvec | `zvec` | Alibaba Zvec format for vector DB imports |
+| Auto | `auto` | Auto-detect from existing export files |
+
+### jsonl (Default for RAG)
+
+Creates JSON Lines format - one JSON object per line:
+
+```bash
+cargo run -- --url "https://example.com" --export-format jsonl
+```
+
+**Output:** `output/export.jsonl`
+
+```jsonl
+{"id":"uuid","url":"https://example.com/","title":"Example","content":"Page content...","metadata":{}}
+{"id":"uuid","url":"https://example.com/about","title":"About","content":"About us...","metadata":{}}
+```
+
+### zvec
+
+Creates Zvec format for vector database imports:
+
+```bash
+cargo run -- --url "https://example.com" --export-format zvec --features zvec
+```
+
+**Output:** `output/export.zvec`
+
+Requires `--features zvec` to be enabled.
+
+### auto
+
+Auto-detects format from existing export files:
+
+```bash
+cargo run -- --url "https://example.com" --export-format auto
 ```
 
 ## Asset Download

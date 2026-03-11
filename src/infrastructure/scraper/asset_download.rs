@@ -3,10 +3,11 @@
 //! Feature-gated module for downloading assets found in scraped pages.
 //! Enabled with --features images or --features documents.
 
-use crate::config::ScraperConfig;
 use crate::domain::DownloadedAsset;
 use crate::error::Result;
+use crate::ScraperConfig;
 use futures::stream::{self, StreamExt};
+use scraper;
 use std::path::PathBuf;
 use tracing::warn;
 
@@ -29,9 +30,13 @@ pub async fn download_all(
 ) -> Result<Vec<DownloadedAsset>> {
     let mut assets = Vec::new();
 
+    // Parse HTML for asset extraction
+    let document = scraper::Html::parse_document(html);
+
     // Download images if enabled
     if config.download_images {
-        let images = crate::extractor::extract_images(html, base_url);
+        let images = crate::extractor::extract_images(&document, base_url);
+        tracing::info!("🖼️  Extract returned {} images", images.len());
         if !images.is_empty() {
             tracing::info!("🖼️  Found {} images to download", images.len());
             let downloaded = download_image_batch(&images, &config.output_dir).await;
@@ -41,7 +46,8 @@ pub async fn download_all(
 
     // Download documents if enabled
     if config.download_documents {
-        let documents = crate::extractor::extract_documents(html, base_url);
+        let documents = crate::extractor::extract_documents(&document, base_url);
+        tracing::info!("📄 Extract returned {} documents", documents.len());
         if !documents.is_empty() {
             tracing::info!("📄 Found {} documents to download", documents.len());
             let downloaded = download_document_batch(&documents, &config.output_dir).await;
@@ -133,7 +139,7 @@ async fn download_single_asset(
     hasher.update(&bytes);
     let hash = format!("{:x}", hasher.finalize());
 
-    let extension = crate::extractor::get_extension(url).unwrap_or_else(|| "bin".into());
+    let extension = crate::adapters::detector::mime::get_extension(url).unwrap_or_else(|| "bin".to_string());
     let filename = format!("{}.{}", &hash[..12], extension);
 
     let subdir = if asset_type == "image" {

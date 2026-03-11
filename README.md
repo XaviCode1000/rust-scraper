@@ -24,6 +24,7 @@
   - Local SLM inference (100% privacy)
   - 87% accuracy vs 13% fixed-size chunking
   - AVX2 SIMD acceleration (4-8x speedup)
+  - **✅ Bug fix: Embeddings now preserved** (see [Bug Fixes](#bug-fix-notes))
   - See [docs/AI-SEMANTIC-CLEANING.md](docs/AI-SEMANTIC-CLEANING.md)
 
 ### 🏗️ Architecture
@@ -286,6 +287,30 @@ at your option.
 - Uses [rust-skills](https://github.com/leonardomso/rust-skills) (179 rules)
 - AI features powered by [tract-onnx](https://github.com/sonos/tract) and [HuggingFace tokenizers](https://github.com/huggingface/tokenizers)
 
+## 🐛 Recent Bug Fixes
+
+### v1.0.5 - Embeddings Preservation Bug
+
+**Problem**: AI semantic cleaner was discarding embedding vectors during relevance filtering.
+
+**Symptoms**:
+- Log: "Generated 0 chunks with embeddings"
+- JSONL output: `embeddings: null` for all chunks
+- Data loss: 49536 dimensions of embedding vectors lost
+
+**Solution**:
+- Modified `filter_by_relevance()` to use `filter_with_embeddings()`
+- Restored embeddings after filtering before returning output
+- Added integration test to validate embeddings are present
+
+**Impact**:
+- 149 chunks with embeddings: ✅ Now preserved
+- 49536 dimensions of ✅ No longer lost
+
+See: [`semantics_cleaner_impl.rs::filter_by_relevance`] for technical details.
+
+---
+
 ## 📊 Stats
 
 - **Lines of Code:** ~6000+
@@ -296,6 +321,7 @@ at your option.
 ## 🗺️ Roadmap
 
 - [x] v1.0.5: AI-powered semantic cleaning (Issue #9 COMPLETE ✅)
+- [x] v1.0.5: Bug fix - Embeddings preservation in semantic filtering (Issue #BUGFIX-EMBEDDINGS COMPLETE ✅)
 - [ ] v1.1.0: Multi-domain crawling
 - [ ] v1.2.0: JavaScript rendering (headless browser)
 - [ ] v2.0.0: Distributed scraping

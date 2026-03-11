@@ -56,10 +56,6 @@ pub fn create_exporter(
                 Ok(Box::new(exporter))
             }
         }
-        _ => Err(ExporterError::InvalidConfig(format!(
-            "Format {:?} not yet implemented in Exporter trait",
-            format
-        ))),
     }
 }
 

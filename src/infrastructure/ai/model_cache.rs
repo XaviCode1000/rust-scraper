@@ -39,10 +39,10 @@ use crate::error::SemanticError;
 const CACHE_DIR_NAME: &str = "rust-scraper";
 const AI_MODELS_SUBDIR: &str = "ai_models";
 
-/// Default model repository
-pub const DEFAULT_MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
+/// Default model repository (Xenova's ONNX-converted version)
+pub const DEFAULT_MODEL_REPO: &str = "Xenova/all-MiniLM-L6-v2";
 
-/// Default model file name
+/// Default model file name (in onnx/ subdirectory)
 pub const DEFAULT_MODEL_FILE: &str = "model.onnx";
 
 /// Expected SHA256 for all-MiniLM-L6-v2 ONNX model
