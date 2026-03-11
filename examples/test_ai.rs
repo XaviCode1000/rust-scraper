@@ -1,4 +1,9 @@
 //! Quick test of AI pipeline
+//!
+//! Run with: `cargo run --example test_ai --features ai`
+
+#![cfg(feature = "ai")]
+
 use rust_scraper::domain::DocumentChunk;
 use rust_scraper::infrastructure::ai::{ModelConfig, SemanticCleanerImpl};
 use rust_scraper::SemanticCleaner;
