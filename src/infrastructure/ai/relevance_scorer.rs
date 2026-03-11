@@ -177,6 +177,70 @@ impl RelevanceScorer {
     ///
     /// ```no_run
     /// # #[cfg(feature = "ai")]
+    /// Filter chunks and preserve their embeddings
+    ///
+    /// Unlike [`filter`](Self::filter), this method returns the chunks WITH their
+    /// embedding vectors, not just the chunks.
+    ///
+    /// # Arguments
+    ///
+    /// * `chunks` - Slice of (DocumentChunk, embedding) pairs
+    /// * `reference` - Optional reference vector for scoring
+    ///
+    /// # Returns
+    ///
+    /// Vector of (DocumentChunk, embedding) pairs that meet the relevance threshold
+    #[must_use]
+    pub fn filter_with_embeddings(
+        &self,
+        chunks: &[(crate::domain::DocumentChunk, Vec<f32>)],
+        reference: Option<&[f32]>,
+    ) -> Vec<(crate::domain::DocumentChunk, Vec<f32>)> {
+        chunks
+            .iter()
+            .filter(|(_, embedding)| {
+                let score = self.score(embedding, reference);
+                self.meets_threshold(score)
+            })
+            .map(|(chunk, embedding)| (chunk.clone(), embedding.clone()))
+            .collect()
+    }
+
+    /// Filter chunks using stored reference and preserve embeddings
+    ///
+    /// # Arguments
+    ///
+    /// * `chunks` - Slice of (DocumentChunk, embedding) pairs
+    ///
+    /// # Returns
+    ///
+    /// Vector of (DocumentChunk, embedding) pairs, or empty vec if no reference stored
+    #[must_use]
+    pub fn filter_with_embeddings_stored(
+        &self,
+        chunks: &[(crate::domain::DocumentChunk, Vec<f32>)],
+    ) -> Vec<(crate::domain::DocumentChunk, Vec<f32>)> {
+        if self.reference.is_none() {
+            return Vec::new();
+        }
+
+        self.filter_with_embeddings(chunks, self.reference.as_deref())
+    }
+
+    /// Filter chunks by relevance score
+    ///
+    /// **WARNING**: This method discards embeddings! Use [`filter_with_embeddings`](Self::filter_with_embeddings)
+    /// if you need to preserve embedding vectors.
+    ///
+    /// # Arguments
+    ///
+    /// * `chunks` - Slice of (DocumentChunk, embedding) pairs
+    /// * `reference` - Reference vector for scoring
+    ///
+    /// # Returns
+    ///
+    /// Vector of relevant chunks (embeddings are discarded)
+    ///
     /// # fn example() -> anyhow::Result<()> {
     /// use rust_scraper::infrastructure::ai::RelevanceScorer;
     /// use rust_scraper::domain::DocumentChunk;
