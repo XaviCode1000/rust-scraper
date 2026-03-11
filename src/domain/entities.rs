@@ -58,21 +58,26 @@ pub struct ScrapedContent {
 ///
 /// Defines the supported output formats when exporting scraped content
 /// for use in retrieval-augmented generation systems.
+///
+/// These formats are designed for RAG/embedding pipelines, NOT for
+/// individual file output (see OutputFormat for that).
+///
+/// | Format | Extension | Use Case |
+/// |--------|-----------|----------|
+/// | Jsonl | .jsonl | One JSON object per line, optimal for RAG |
+/// | Zvec | .zvec | Alibaba Zvec format for vector DB imports |
+/// | Auto | .auto | Auto-detect from existing files |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, clap::ValueEnum)]
 pub enum ExportFormat {
-    /// Markdown format (for human-readable output)
-    Markdown,
     /// JSONL format (JSON Lines - one JSON object per line)
+    /// Optimal for RAG pipelines and vector database ingestion
     Jsonl,
-    /// Plain text format
-    Text,
-    /// Structured JSON format
-    Json,
-    /// Auto-detect format from existing files
-    Auto,
     /// Zvec format (for vector database imports)
     /// Schema: id (UUID), text (String), embedding (Vec<f32>)
+    /// Requires `zvec` feature to be enabled
     Zvec,
+    /// Auto-detect format from existing export files
+    Auto,
 }
 
 impl ExportFormat {
@@ -80,12 +85,9 @@ impl ExportFormat {
     #[must_use]
     pub fn extension(&self) -> &'static str {
         match self {
-            Self::Markdown => "md",
             Self::Jsonl => "jsonl",
-            Self::Text => "txt",
-            Self::Json => "json",
-            Self::Auto => "auto",
             Self::Zvec => "zvec",
+            Self::Auto => "auto",
         }
     }
 
@@ -93,12 +95,9 @@ impl ExportFormat {
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Markdown => "Markdown",
             Self::Jsonl => "JSONL",
-            Self::Text => "Text",
-            Self::Json => "Json",
-            Self::Auto => "Auto",
             Self::Zvec => "Zvec",
+            Self::Auto => "Auto",
         }
     }
 }

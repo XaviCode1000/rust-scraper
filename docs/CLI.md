@@ -1,4 +1,28 @@
-# CLI Reference
+# CLI Reference — rust-scraper
+
+**Version:** 1.0.0  
+**MSRV:** 1.80  
+**Last Updated:** 2026-03-11
+
+---
+
+## Quick Start
+
+```bash
+# Basic scraping (default: markdown output, 10 pages, 1s delay)
+cargo run -- --url "https://example.com"
+
+# Scrape with JSON output
+cargo run -- --url "https://example.com" -f json
+
+# Scrape for RAG pipeline (JSONL format)
+cargo run -- --url "https://example.com" --export-format jsonl
+
+# Interactive mode with TUI selector
+cargo run -- --url "https://example.com" --interactive
+```
+
+---
 
 ## Usage
 
@@ -6,265 +30,539 @@
 rust-scraper [OPTIONS] --url <URL>
 ```
 
-## Options
+---
 
-### Required
+## Required Arguments
 
-| Flag | Description |
-|------|-------------|
-| `-u, --url <URL>` | Target URL to scrape (must include `http://` or `https://`) |
+| Flag | Description | Required |
+|------|-------------|----------|
+| `-u, --url <URL>` | Target URL to scrape (must include `http://` or `https://`) | ✅ Yes |
 
-### Optional
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-o, --output <DIR>` | Output directory | `output` |
-| `-f, --format <FORMAT>` | Output format (markdown/json/text) | `markdown` |
-| `-s, --selector <SELECTOR>` | CSS selector for content | `body` |
-| `--download-images` | Download images to `output/images/` | ❌ |
-| `--download-documents` | Download documents to `output/documents/` | ❌ |
-| `--delay-ms <MS>` | Delay between requests (ms) | `1000` |
-| `--max-pages <N>` | Maximum pages to scrape | `10` |
-| `-v, --verbose` | Increase verbosity (`-vv` for debug) | ❌ |
-| `-h, --help` | Show help | - |
-| `-V, --version` | Show version | - |
-
-## Output Formats
-
-### markdown (Default)
-
-Creates structured Markdown with YAML frontmatter:
-
+**Example:**
 ```bash
+cargo run -- --url "https://example.com"
+```
+
+---
+
+## Output Options
+
+### Individual File Output (`-f, --format`)
+
+Creates separate output files per scraped page — ideal for human-readable output.
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `-f, --format <FORMAT>` | `markdown`, `json`, `text` | `markdown` | Output format for individual files |
+
+**Formats:**
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `markdown` | Markdown with YAML frontmatter | RAG, documentation, human-readable |
+| `json` | Structured JSON with metadata | Programmatic processing |
+| `text` | Plain text without formatting | Simple text extraction |
+
+**Example:**
+```bash
+# Markdown (default)
 cargo run -- --url "https://example.com" -f markdown
-```
 
-**Output:** `output/example.com/index.md`
-
-```yaml
----
-title: Example Domain
-url: https://example.com/
-date: 2026-03-08
-author: null
-excerpt: This domain is for use in documentation...
----
-
-# Example Domain
-
-Content of the page...
-
-```rust
-// Code blocks with syntax highlighting
-fn main() {
-    println!("Hello, world!");
-}
-```
-```
-
-### json
-
-Creates JSON file with all metadata:
-
-```bash
+# JSON output
 cargo run -- --url "https://example.com" -f json
-```
 
-**Output:** `output/results.json`
-
-```json
-[
-  {
-    "title": "Example Domain",
-    "content": "...",
-    "url": "https://example.com/",
-    "excerpt": "...",
-    "author": null,
-    "date": null,
-    "assets": []
-  }
-]
-```
-
-### text
-
-Creates plain text file without formatting:
-
-```bash
+# Plain text
 cargo run -- --url "https://example.com" -f text
 ```
 
-**Output:** `output/example.com/index.txt`
+### RAG Pipeline Export (`--export-format`)
 
-```
-Example Domain
+Creates batch export suitable for LLM/RAG pipelines.
 
-Content of the page...
-```
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--export-format <FORMAT>` | `jsonl`, `zvec`, `auto` | `jsonl` | Export format for RAG pipeline |
 
-## Asset Download
+**Formats:**
 
-### Download Images
+| Format | Description | Feature Required |
+|--------|-------------|------------------|
+| `jsonl` | JSON Lines (one JSON per line), optimal for RAG | None (default) |
+| `zvec` | Alibaba Zvec format for vector DB imports | `--features zvec` |
+| `auto` | Auto-detect from existing export files | None |
 
-Download all images found on the page:
-
+**Example:**
 ```bash
-cargo run -- --url "https://example.com" --download-images
+# JSONL export (default)
+cargo run -- --url "https://example.com" --export-format jsonl
+
+# Zvec format (requires feature flag)
+cargo run --features zvec -- --url "https://example.com" --export-format zvec
+
+# Auto-detect format
+cargo run -- --url "https://example.com" --export-format auto
 ```
 
-Images are saved to `output/images/` with unique filenames based on content hash:
+### Output Directory (`-o, --output`)
 
-```
-output/images/
-├── 027e504eabfc.png
-├── 0c2f4f0301fe.png
-└── e15cbdd2d653.svg
-```
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-o, --output <DIR>` | Path | `output` | Output directory for scraped content |
 
-### Download Documents
-
-Download all documents (PDF, DOCX, XLSX, etc.) found on the page:
-
+**Example:**
 ```bash
-cargo run -- --url "https://example.com" --download-documents
-```
-
-Documents are saved to `output/documents/`:
-
-```
-output/documents/
-└── 9870371a7a8c.pdf
-```
-
-### Download Both Images and Documents
-
-```bash
-cargo run -- --url "https://example.com" --download-images --download-documents
-```
-
-### Asset Download Features
-
-| Feature | Description |
-|---------|-------------|
-| **MIME Detection** | Automatic detection from URL extension |
-| **File Size Limit** | 50MB maximum per file |
-| **Timeout** | 30 seconds per download |
-| **Unique Filenames** | SHA256 content hash (first 12 chars) |
-| **Directory Organization** | Separate folders for images/documents |
-| **Concurrency Limit** | 3 concurrent downloads (HDD-safe) |
-
-## Examples
-
-### Basic Usage
-
-```bash
-# Scrape a simple page
-cargo run -- --url "https://example.com"
-
-# Specify output directory
-cargo run -- --url "https://example.com" -o ./data
-
-# Get JSON output
-cargo run -- --url "https://example.com" -f json
-```
-
-### Verbose Output
-
-```bash
-# Show info logs
-cargo run -- --url "https://example.com" -v
-
-# Show debug logs
-cargo run -- --url "https://example.com" -vv
-
-# Show trace logs
-cargo run -- --url "https://example.com" -vvv
-```
-
-### Output Location
-
-```bash
-# Default: ./output/domain/path.md
-cargo run -- --url "https://example.com/docs"
-
-# Custom directory
 cargo run -- --url "https://example.com" -o ./my-scrapes
 ```
 
-### Asset Downloads
+---
+
+## Scraping Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-s, --selector <SELECTOR>` | String | `body` | CSS selector for content extraction |
+| `--max-pages <N>` | Integer | `10` | Maximum pages to scrape |
+| `--delay-ms <MS>` | Integer | `1000` | Delay between requests in milliseconds |
+| `--concurrency <VALUE>` | `auto` or Integer | `auto` | Concurrency level (parallel requests) |
+
+### CSS Selector (`-s, --selector`)
+
+Extract specific content using CSS selectors:
 
 ```bash
-# Download only images
-cargo run -- --url "https://example.com" --download-images
+# Extract only article content
+cargo run -- --url "https://example.com" -s "article"
 
-# Download only documents
-cargo run -- --url "https://example.com" --download-documents
+# Extract main content by ID
+cargo run -- --url "https://example.com" -s "#main-content"
 
-# Download both images and documents
-cargo run -- --url "https://example.com" --download-images --download-documents
-
-# Custom output directory for assets
-cargo run -- --url "https://example.com" --download-images -o ./my-downloads
+# Extract by class
+cargo run -- --url "https://example.com" -s ".content-body"
 ```
 
-### Production Usage
+### Page Limit (`--max-pages`)
+
+Control how many pages to scrape:
 
 ```bash
-# Scrape multiple pages with rate limiting
-cargo run -- --url "https://example.com" \
+# Scrape only 5 pages
+cargo run -- --url "https://example.com" --max-pages 5
+
+# Scrape up to 100 pages
+cargo run -- --url "https://example.com" --max-pages 100
+```
+
+### Request Delay (`--delay-ms`)
+
+Rate limiting to avoid overwhelming servers:
+
+```bash
+# 2 second delay between requests
+cargo run -- --url "https://example.com" --delay-ms 2000
+
+# Fast scraping (500ms delay)
+cargo run -- --url "https://example.com" --delay-ms 500
+```
+
+### Concurrency (`--concurrency`)
+
+Hardware-aware concurrency control:
+
+| Value | Description |
+|-------|-------------|
+| `auto` (default) | Auto-detect based on CPU cores |
+| `1-16` | Explicit concurrency value |
+
+**Auto-detection logic:**
+- 1-2 cores: 1 worker
+- 3-4 cores: 3 workers (HDD-aware default)
+- 5-7 cores: 5 workers
+- 8+ cores: `min(cores - 1, 8)` workers
+
+**Example:**
+```bash
+# Auto-detect (default)
+cargo run -- --url "https://example.com" --concurrency auto
+
+# Explicit concurrency
+cargo run -- --url "https://example.com" --concurrency 5
+
+# Single-threaded (safe for slow networks)
+cargo run -- --url "https://example.com" --concurrency 1
+```
+
+---
+
+## Asset Download
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--download-images` | `false` | Download images (PNG, JPG, GIF, WEBP, SVG, BMP) |
+| `--download-documents` | `false` | Download documents (PDF, DOCX, XLSX, PPTX, etc.) |
+
+**Feature Requirements:**
+- Requires `--features images` for `--download-images`
+- Requires `--features documents` for `--download-documents`
+- Or use `--features full` for all features
+
+**Example:**
+```bash
+# Download images only
+cargo run --features images -- --url "https://example.com" --download-images
+
+# Download documents only
+cargo run --features documents -- --url "https://example.com" --download-documents
+
+# Download both
+cargo run --features full -- --url "https://example.com" --download-images --download-documents
+```
+
+**Output Structure:**
+```
+output/
+├── images/
+│   ├── 027e504eabfc.png
+│   ├── 0c2f4f0301fe.png
+│   └── e15cbdd2d653.svg
+└── documents/
+    └── 9870371a7a8c.pdf
+```
+
+**Asset Download Features:**
+- **MIME Detection:** Automatic detection from URL extension
+- **File Size Limit:** 50MB maximum per file
+- **Timeout:** 30 seconds per download
+- **Unique Filenames:** SHA256 content hash (first 12 chars)
+- **Directory Organization:** Separate folders for images/documents
+- **Concurrency Limit:** 3 concurrent downloads (HDD-safe)
+
+---
+
+## State Management
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--resume` | `false` | Resume mode - skip URLs already processed |
+| `--state-dir <DIR>` | `~/.cache/rust-scraper/state` | Custom state directory for resume mode |
+
+### Resume Mode (`--resume`)
+
+Avoids re-processing URLs already scraped successfully:
+
+```bash
+# First run
+cargo run -- --url "https://example.com" --max-pages 50 --resume
+
+# Interrupted? Resume from where you left off
+cargo run -- --url "https://example.com" --max-pages 50 --resume
+```
+
+### Custom State Directory (`--state-dir`)
+
+```bash
+# Use custom state directory
+cargo run -- --url "https://example.com" --resume --state-dir ./my-state
+```
+
+---
+
+## Sitemap Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--use-sitemap` | `false` | Use sitemap for URL discovery |
+| `--sitemap-url <URL>` | Auto-discover | Explicit sitemap URL |
+
+### Sitemap Discovery (`--use-sitemap`)
+
+Automatically discovers sitemap from `robots.txt`:
+
+```bash
+# Auto-discover sitemap
+cargo run -- --url "https://example.com" --use-sitemap
+```
+
+### Explicit Sitemap URL (`--sitemap-url`)
+
+```bash
+# Specify explicit sitemap URL
+cargo run -- --url "https://example.com" --use-sitemap --sitemap-url "https://example.com/sitemap.xml"
+```
+
+**Sitemap Features:**
+- Auto-discovery from `robots.txt`
+- Sitemap index recursion (max depth 3)
+- Gzip decompression support
+- Zero-allocation streaming parser (quick-xml)
+
+---
+
+## Interactive Mode
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--interactive` | `false` | Interactive mode with TUI URL selector |
+
+### TUI Interactive Mode (`--interactive`)
+
+Launch interactive TUI for URL selection:
+
+```bash
+cargo run -- --url "https://example.com" --interactive
+```
+
+**Features:**
+- Interactive checkbox selection of URLs
+- Confirmation mode before download
+- Terminal restore on panic/exit
+- Ratatui + crossterm backend
+
+---
+
+## AI Options (Feature-Gated)
+
+| Flag | Default | Description | Feature Required |
+|------|---------|-------------|------------------|
+| `--clean-ai` | `false` | Use AI-powered semantic cleaning for RAG output | `ai` |
+
+### AI Semantic Cleaning (`--clean-ai`)
+
+Requires `--features ai` to be enabled at compile time:
+
+```bash
+cargo run --features ai -- --url "https://example.com" --clean-ai
+```
+
+**What it does:**
+- Uses `SemanticCleaner` to process HTML content
+- Generates semantic chunks with embeddings
+- Exports in JSONL format with embeddings field
+
+**AI Feature Dependencies:**
+- ONNX runtime (tract-onnx)
+- Tokenizers (sentence-transformers)
+- HuggingFace Hub for model downloads
+- Memory-mapped file loading (zero-copy)
+- Multi-dimensional arrays for embeddings
+
+---
+
+## Logging & Verbosity
+
+| Flag | Description |
+|------|-------------|
+| `-v` | Info level logging |
+| `-vv` | Debug level logging |
+| `-vvv` | Trace level logging |
+
+### Verbosity Flags
+
+```bash
+# Info level
+cargo run -- --url "https://example.com" -v
+
+# Debug level
+cargo run -- --url "https://example.com" -vv
+
+# Trace level (most verbose)
+cargo run -- --url "https://example.com" -vvv
+```
+
+### Environment Variable (`RUST_LOG`)
+
+For fine-grained control:
+
+```bash
+# Debug for specific module
+RUST_LOG=rust_scraper=debug cargo run -- --url "https://example.com"
+
+# Trace for entire application
+RUST_LOG=trace cargo run -- --url "https://example.com"
+
+# Multiple levels
+RUST_LOG=rust_scraper=debug,reqwest=info cargo run -- --url "https://example.com"
+```
+
+---
+
+## Help & Version
+
+| Flag | Description |
+|------|-------------|
+| `-h, --help` | Print help (see summary with `-h`) |
+| `--version` | Print version information |
+
+```bash
+# Full help
+cargo run -- --help
+
+# Quick help summary
+cargo run -- -h
+
+# Version
+cargo run -- --version
+```
+
+---
+
+## Complete Examples
+
+### 1. Basic Scraping
+
+```bash
+# Default settings (markdown output, 10 pages, 1s delay)
+cargo run -- --url "https://example.com"
+```
+
+### 2. Custom Output Format
+
+```bash
+# JSON output
+cargo run -- --url "https://example.com" -f json
+
+# Plain text output
+cargo run -- --url "https://example.com" -f text
+```
+
+### 3. RAG Pipeline Export
+
+```bash
+# JSONL format (optimal for RAG)
+cargo run -- --url "https://example.com" --export-format jsonl
+
+# With custom output directory
+cargo run -- --url "https://example.com" --export-format jsonl -o ./rag-data
+```
+
+### 4. Asset Downloads
+
+```bash
+# Download images only
+cargo run --features images -- --url "https://example.com" --download-images
+
+# Download documents only
+cargo run --features documents -- --url "https://example.com" --download-documents
+
+# Download both images and documents
+cargo run --features full -- --url "https://example.com" --download-images --download-documents
+```
+
+### 5. Rate Limiting & Concurrency
+
+```bash
+# Slower scraping (2s delay)
+cargo run -- --url "https://example.com" --delay-ms 2000
+
+# Limit to 5 pages
+cargo run -- --url "https://example.com" --max-pages 5
+
+# Custom concurrency
+cargo run -- --url "https://example.com" --concurrency 2
+```
+
+### 6. Resume Mode
+
+```bash
+# First run with resume enabled
+cargo run -- --url "https://example.com" --max-pages 100 --resume
+
+# Resume after interruption
+cargo run -- --url "https://example.com" --max-pages 100 --resume
+```
+
+### 7. Sitemap Discovery
+
+```bash
+# Auto-discover sitemap from robots.txt
+cargo run -- --url "https://example.com" --use-sitemap
+
+# Explicit sitemap URL
+cargo run -- --url "https://example.com" --use-sitemap --sitemap-url "https://example.com/sitemap.xml"
+```
+
+### 8. Interactive Mode
+
+```bash
+# Launch TUI for URL selection
+cargo run -- --url "https://example.com" --interactive
+```
+
+### 9. AI Semantic Cleaning
+
+```bash
+# Enable AI-powered cleaning
+cargo run --features ai -- --url "https://example.com" --clean-ai
+```
+
+### 10. Production Dataset Creation
+
+```bash
+# Full production run with all features
+cargo run --features full -- \
+  --url "https://example.com" \
+  --export-format jsonl \
   --download-images \
   --download-documents \
   --delay-ms 2000 \
-  --max-pages 50 \
-  -o ./rag-dataset \
+  --max-pages 100 \
+  --concurrency 3 \
+  --resume \
+  -o ./production-dataset \
   -vv
 ```
 
-## Exit Codes
+### 11. CSS Selector Extraction
 
-| Code | Description |
-|------|-------------|
-| 0 | Success |
-| 1 | Error (invalid URL, network error, etc.) |
+```bash
+# Extract only article content
+cargo run -- --url "https://example.com/blog" -s "article.post-content"
 
-## Production Features (v0.3.0)
+# Extract main content by ID
+cargo run -- --url "https://example.com" -s "#main"
+```
 
-### Retry Logic
+### 12. Verbose Debugging
 
-The scraper automatically retries failed requests with exponential backoff:
+```bash
+# Debug logging
+cargo run -- --url "https://example.com" -vv
 
-- **Retries:** 3 attempts
-- **Backoff:** 100ms → 200ms → 400ms
-- **Triggers:** 5xx errors, timeouts, connection resets
+# Trace logging with custom RUST_LOG
+RUST_LOG=rust_scraper=trace cargo run -- --url "https://example.com" -vvv
+```
 
-No configuration needed - works automatically.
+---
 
-### Concurrency Control
+## Feature Flags
 
-Bounded concurrency prevents resource exhaustion:
+rust-scraper supports optional features for extended functionality:
 
-- **Limit:** 3 concurrent requests
-- **Purpose:** Prevents HDD thrashing, FD exhaustion
-- **Hardware-aware:** Optimized for 4C/8GB RAM systems
+| Feature | Description | Enables |
+|---------|-------------|---------|
+| `images` | Image downloading support | `mime-type-detector` |
+| `documents` | Document downloading support | `mime-type-detector` |
+| `zvec` | Zvec export format | `zvec-sys` |
+| `ai` | AI semantic cleaning | `ort`, `tokenizers`, `tract-onnx`, etc. |
+| `full` | All features | `images`, `documents`, `zvec` |
 
-### User-Agent Rotation
+### Using Feature Flags
 
-Automatic rotation of User-Agent headers:
+```bash
+# Enable single feature
+cargo run --features images -- --url "https://example.com" --download-images
 
-- **Pool:** 14 modern browsers
-- **Distribution:** 40% Chrome, 20% Firefox, 20% Safari, 20% Edge
-- **Purpose:** Reduces bot detection
+# Enable multiple features
+cargo run --features "images,documents" -- --url "https://example.com" --download-images --download-documents
 
-No configuration needed - works automatically.
+# Enable all features
+cargo run --features full -- --url "https://example.com" --download-images --download-documents
 
-## Notes
+# Build with features (faster subsequent runs)
+cargo build --release --features full
+./target/release/rust-scraper --url "https://example.com" --download-images --download-documents
+```
 
-- URL must include protocol (`http://` or `https://`)
-- HTTPS uses system TLS certificates (rustls with native roots)
-- The scraper extracts main content using Readability algorithm
-- Files are organized by domain to avoid collisions
-- Code blocks are syntax-highlighted automatically
-- YAML frontmatter includes metadata (title, URL, date, author, excerpt)
+---
 
 ## Troubleshooting
 
@@ -278,21 +576,27 @@ cargo run -- --url "example.com"
 cargo run -- --url "https://example.com"
 ```
 
-### SSL/TLS Errors
+**Error Message:**
+```
+Error: Invalid URL: Failed to parse URL 'example.com': relative URL without a base
+```
 
-If you encounter SSL certificate errors:
+### SSL/TLS Certificate Errors
 
 ```bash
-# Update system certificates (Arch Linux)
+# Update system certificates (Arch Linux / CachyOS)
 sudo pacman -Sy ca-certificates
 
 # Update system certificates (Debian/Ubuntu)
 sudo update-ca-certificates
 ```
 
-### Permission Denied
+**Error Message:**
+```
+Error: error sending request: certificate validation failed
+```
 
-If you get permission errors writing to output directory:
+### Permission Denied
 
 ```bash
 # Check directory permissions
@@ -302,11 +606,206 @@ ls -la ./output
 mkdir -p ./output && chmod 755 ./output
 ```
 
+**Error Message:**
+```
+Error: Failed to write output: Permission denied (os error 13)
+```
+
 ### Network Timeouts
 
-For slow networks, increase timeout (requires code change):
+For slow networks, increase delay and reduce concurrency:
 
-```rust
-// In src/application/http_client.rs
-const TIMEOUT_SECS: u64 = 60; // Increase from 30 to 60
+```bash
+cargo run -- --url "https://example.com" --delay-ms 3000 --concurrency 1
 ```
+
+### Feature Not Enabled
+
+```bash
+# ❌ Wrong (trying to use feature without enabling)
+cargo run -- --url "https://example.com" --download-images
+
+# ✅ Correct
+cargo run --features images -- --url "https://example.com" --download-images
+```
+
+**Error Message:**
+```
+Error: Feature 'images' is not enabled
+```
+
+### AI Feature Compilation Errors
+
+The `ai` feature requires additional system dependencies:
+
+```bash
+# Install build dependencies (Arch Linux / CachyOS)
+sudo pacman -Sy cmake llvm clang
+
+# Install C++ toolchain
+sudo pacman -Sy gcc gcc-libs
+```
+
+**Common Errors:**
+- `CMake not found` → Install CMake
+- `Cannot find -lstdc++` → Install GCC
+- `ONNX runtime not found` → Build with `--features ai`
+
+### Memory Issues on Large Scrapes
+
+For systems with limited RAM (8GB or less):
+
+```bash
+# Reduce concurrency
+cargo run -- --url "https://example.com" --concurrency 1 --max-pages 20
+
+# Process in batches
+cargo run -- --url "https://example.com" --max-pages 10 --resume
+```
+
+---
+
+## Exit Codes
+
+| Code | Description |
+|------|-------------|
+| `0` | Success |
+| `1` | General error (invalid URL, network error, etc.) |
+| `2` | CLI argument parsing error |
+
+---
+
+## Full Help Output
+
+<details>
+<summary><strong>Click to expand full --help output (verified 2026-03-11)</strong></summary>
+
+```
+Production-ready web scraper with Clean Architecture                    
+
+Usage: rust_scraper [OPTIONS] --url <URL>                               
+
+Options:                                                                
+  -u, --url <URL>                                                       
+          URL to scrape (required)                                      
+                                                                        
+  -s, --selector <SELECTOR>                                             
+          CSS selector for content extraction                           
+                                                                        
+          [default: body]                                               
+                                                                        
+  -o, --output <OUTPUT>                                                 
+          Output directory for scraped content                          
+                                                                        
+          [default: output]                                             
+                                                                        
+  -f, --format <FORMAT>                                                 
+          Output format for individual files (markdown, text, json)     
+                                                                        
+          Creates separate output files for each scraped page: - markdown: Markdown with YAML frontmatter (default) - text: Plain text without formatting - json: Structured JSON with metadata
+                                                                        
+          Use this for human-readable output or when you need individual files per page.
+                                                                        
+          Possible values:                                              
+          - markdown: Markdown format with YAML frontmatter (recommended for RAG)
+          - json:     Structured JSON with metadata                     
+          - text:     Plain text without formatting                     
+                                                                        
+          [default: markdown]                                           
+                                                                        
+      --export-format <EXPORT_FORMAT>                                   
+          Export format for RAG pipeline (jsonl, zvec, auto)            
+                                                                        
+          Creates output suitable for retrieval-augmented generation: - jsonl: JSON Lines format (one JSON per line), optimal for RAG - zvec: Alibaba Zvec format (requires `--features zvec`) - auto: Detect from existing export files
+                                                                        
+          Use this for LLM/RAG pipelines that need batch export.        
+                                                                        
+          Possible values:                                              
+          - jsonl: JSONL format (JSON Lines - one JSON object per line) Optimal for RAG pipelines and vector database ingestion
+          - zvec:  Zvec format (for vector database imports) Schema: id (UUID), text (String), embedding (Vec<f32>) Requires `zvec` feature to be enabled
+          - auto:  Auto-detect format from existing export files        
+                                                                        
+          [default: jsonl]                                              
+                                                                        
+      --resume                                                          
+          Resume mode - skip URLs already processed                     
+                                                                        
+          Saves processing status to cache directory (~/.cache/rust-scraper/state) Avoids re-processing URLs already scraped successfully.
+                                                                        
+      --state-dir <STATE_DIR>                                           
+          Custom state directory for resume mode                        
+                                                                        
+          Default: ~/.cache/rust-scraper/state                          
+                                                                        
+      --delay-ms <DELAY_MS>                                             
+          Delay between requests in milliseconds                        
+                                                                        
+          [default: 1000]                                               
+                                                                        
+      --max-pages <MAX_PAGES>                                           
+          Maximum pages to scrape                                       
+                                                                        
+          [default: 10]                                                 
+                                                                        
+      --download-images                                                 
+          Download images from the page                                 
+                                                                        
+      --download-documents                                              
+          Download documents from the page (PDF, DOCX, XLSX, etc.)      
+                                                                        
+  -v, --verbose...                                                      
+          Verbosity level (use multiple times for more detail: -v, -vv, -vvv)
+                                                                        
+      --concurrency <CONCURRENCY>                                       
+          Concurrency level (number of parallel requests)               
+                                                                        
+          Default: auto-detect based on CPU cores: - 1-2 cores: 1 - 4 cores: 3 (HDD-aware) - 8+ cores: min(CPU cores - 1, 8)
+                                                                        
+          Note: Can be overridden via CLI or detected at runtime. The actual value used is determined at startup.
+                                                                        
+          [default: auto]                                               
+                                                                        
+      --use-sitemap                                                     
+          Use sitemap for URL discovery (auto-discovers from robots.txt if URL not provided)
+                                                                        
+      --sitemap-url <SITEMAP_URL>                                       
+          Explicit sitemap URL (optional, auto-discovers if not provided)
+                                                                        
+      --interactive                                                     
+          Interactive mode with TUI URL selector                        
+                                                                        
+  -h, --help                                                            
+          Print help (see a summary with '-h')
+```
+
+</details>
+
+*To regenerate: `cargo run -- --help 2>&1 | tee /tmp/cli_full_help.txt`*
+
+---
+
+## Related Documentation
+
+- [Architecture](./ARCHITECTURE.md) — Clean Architecture layers
+- [Configuration](./CONFIGURATION.md) — Advanced configuration options
+- [RAG Pipeline](./RAG_PIPELINE.md) — Using rust-scraper for RAG datasets
+- [TUI Guide](./TUI.md) — Interactive mode guide
+
+---
+
+## Version History
+
+### v1.0.0 (2026-03-11)
+
+- ✅ Full CLI documentation with all verified flags
+- ✅ Feature flags documented (`ai`, `zvec`, `images`, `documents`)
+- ✅ Concurrency auto-detection (hardware-aware)
+- ✅ Sitemap support with auto-discovery
+- ✅ TUI interactive mode
+- ✅ State management with resume capability
+- ✅ AI semantic cleaning (feature-gated)
+
+---
+
+**Last Verified:** 2026-03-11 with `cargo run -- --help`  
+**rust-scraper** v1.0.0 — Production-ready web scraper with Clean Architecture

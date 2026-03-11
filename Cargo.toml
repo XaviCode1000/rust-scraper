@@ -18,6 +18,20 @@ images = ["dep:mimetype-detector"]
 documents = ["dep:mimetype-detector"]
 full = ["images", "documents", "zvec"]
 zvec = ["dep:zvec-sys"]
+# AI-powered semantic cleaning (Module 3 + 4 + 5 + 7)
+ai = [
+    "dep:ort",
+    "dep:tokenizers",
+    "dep:memmap2",
+    "dep:ndarray",
+    "dep:async-trait",
+    "dep:unicode-segmentation",
+    "dep:bumpalo",
+    "dep:smallvec",
+    "dep:wide",
+    "dep:tract-onnx",
+    "dep:hf-hub",
+]
 
 [dependencies]
 # CLI - Argument parsing obligatorio
@@ -92,7 +106,7 @@ rand = "0.8"
 # Cache directory management (TASK-001: User-Agent lazy update)
 dirs = "5"
 
-# Walking directories for tests
+# Walking directory for tests
 walkdir = "2"
 
 # MIME type detection (optional - for image/document detection)
@@ -124,6 +138,36 @@ num_cpus = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
+
+# ============================================================================
+# AI/ML Dependencies (feature-gated: --features ai)
+# ============================================================================
+# ONNX runtime for model inference (tract-onnx - 100% Rust)
+tract-onnx = { version = "0.21", optional = true }
+# Alternative ONNX runtime (ort)
+ort = { version = "2.0.0-rc.12", optional = true }
+# Tokenizer for sentence-transformers
+tokenizers = { version = "0.21", optional = true }
+# HuggingFace Hub for model downloads
+hf-hub = { version = "0.5", features = ["tokio"], optional = true }
+# Memory-mapped file loading (zero-copy for HDD optimization)
+memmap2 = { version = "0.9", optional = true }
+# Multi-dimensional arrays for embeddings
+ndarray = { version = "0.17", optional = true }
+# Async trait support for dyn-compatible traits
+async-trait = { version = "0.1", optional = true }
+
+# ============================================================================
+# Semantic Chunking Dependencies (feature-gated: --features ai)
+# ============================================================================
+# Unicode-aware sentence segmentation
+unicode-segmentation = { version = "1.12", optional = true }
+# Arena allocator for chunk metadata (mem-arena-allocator)
+bumpalo = { version = "3.16", optional = true }
+# Small vector optimization for small collections (mem-smallvec)
+smallvec = { version = "1.13", optional = true }
+# SIMD operations for cosine similarity (opt-simd-portable)
+wide = { version = "0.7", optional = true }
 
 [dev-dependencies]
 mockall = "0.12"

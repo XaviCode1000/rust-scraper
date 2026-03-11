@@ -276,17 +276,12 @@ async fn download_assets_if_enabled(
     config: &ScraperConfig,
 ) -> ScraperResult<Vec<crate::domain::DownloadedAsset>> {
     if config.has_downloads() {
-        use crate::infrastructure::scraper::asset_download::download_assets;
+        tracing::debug!("Calling download_all for assets...");
+        use crate::infrastructure::scraper::asset_download::download_all;
 
-        download_assets(
-            html,
-            url,
-            &super::create_http_client().map_err(|e| ScraperError::Middleware(e.to_string()))?,
-            &config.output_dir,
-            config.max_file_size,
-        )
-        .await
+        download_all(html, url, config).await
     } else {
+        tracing::debug!("has_downloads is false, skipping asset download");
         Ok(Vec::new())
     }
 }

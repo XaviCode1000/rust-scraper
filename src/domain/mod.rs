@@ -8,6 +8,9 @@ pub mod entities;
 pub mod exporter;
 pub mod value_objects;
 
+#[cfg(feature = "ai")]
+pub mod semantic_cleaner;
+
 pub use crawler_entities::{
     matches_pattern, ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder,
     DiscoveredUrl,

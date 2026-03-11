@@ -146,10 +146,14 @@ pub mod error;
 
 // Domain layer — Core business entities (pure, no dependencies)
 pub mod domain;
+#[cfg(feature = "ai")]
+pub use domain::semantic_cleaner::SemanticCleaner;
 pub use domain::{
     ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
     DownloadedAsset, ExportFormat, ScrapedContent, ValidUrl,
 };
+#[cfg(feature = "ai")]
+pub use error::SemanticError;
 
 // Application layer — Use cases (orchestration)
 pub mod application;
@@ -658,15 +662,27 @@ pub struct Args {
     #[arg(short, long, default_value = "output")]
     pub output: std::path::PathBuf,
 
-    /// Export format (markdown, text, json, jsonl, zvec, auto)
+    /// Output format for individual files (markdown, text, json)
     ///
-    /// - markdown: FileSaver Markdown format (default)
-    /// - text: Plain text
-    /// - json: Structured JSON
+    /// Creates separate output files for each scraped page:
+    /// - markdown: Markdown with YAML frontmatter (default)
+    /// - text: Plain text without formatting
+    /// - json: Structured JSON with metadata
+    ///
+    /// Use this for human-readable output or when you need
+    /// individual files per page.
+    #[arg(short = 'f', long, default_value = "markdown", value_enum)]
+    pub format: OutputFormat,
+
+    /// Export format for RAG pipeline (jsonl, zvec, auto)
+    ///
+    /// Creates output suitable for retrieval-augmented generation:
     /// - jsonl: JSON Lines format (one JSON per line), optimal for RAG
     /// - zvec: Alibaba Zvec format (requires `--features zvec`)
-    /// - auto: Detect from existing output files
-    #[arg(long, default_value = "markdown", value_enum)]
+    /// - auto: Detect from existing export files
+    ///
+    /// Use this for LLM/RAG pipelines that need batch export.
+    #[arg(long, default_value = "jsonl", value_enum)]
     pub export_format: ExportFormat,
 
     /// Resume mode - skip URLs already processed
@@ -728,6 +744,30 @@ pub struct Args {
     /// Interactive mode with TUI URL selector
     #[arg(long)]
     pub interactive: bool,
+
+    // ========== AI Semantic Cleaning ==========
+    /// Use AI-powered semantic cleaning for better RAG output
+    ///
+    /// When enabled:
+    /// - Uses SemanticCleaner to process HTML content
+    /// - Generates semantic chunks with embeddings
+    /// - Exports in JSONL format with embeddings field
+    ///
+    /// Requires: --features ai to be enabled at compile time
+    ///
+    /// Example:
+    ///   cargo run --features ai -- --url https://example.com --clean-ai
+    #[cfg(feature = "ai")]
+    #[arg(long, default_value = "false")]
+    pub clean_ai: bool,
+
+    /// Feature flag placeholder when AI is not enabled
+    ///
+    /// This field exists to provide a clear error message when --clean-ai
+    /// is used without the 'ai' feature enabled.
+    #[cfg(not(feature = "ai"))]
+    #[arg(long, default_value = "false", hide = true)]
+    pub clean_ai: bool,
 }
 
 // ============================================================================

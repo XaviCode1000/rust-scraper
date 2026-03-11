@@ -216,16 +216,18 @@ mod tests {
 
     #[test]
     fn test_export_format_extension() {
-        assert_eq!(ExportFormat::Markdown.extension(), "md");
+        // ExportFormat is for RAG pipeline: Jsonl, Zvec, Auto
         assert_eq!(ExportFormat::Jsonl.extension(), "jsonl");
         assert_eq!(ExportFormat::Zvec.extension(), "zvec");
+        assert_eq!(ExportFormat::Auto.extension(), "auto");
     }
 
     #[test]
     fn test_export_format_name() {
-        assert_eq!(ExportFormat::Markdown.name(), "Markdown");
+        // ExportFormat is for RAG pipeline: Jsonl, Zvec, Auto
         assert_eq!(ExportFormat::Jsonl.name(), "JSONL");
         assert_eq!(ExportFormat::Zvec.name(), "Zvec");
+        assert_eq!(ExportFormat::Auto.name(), "Auto");
     }
 
     #[test]

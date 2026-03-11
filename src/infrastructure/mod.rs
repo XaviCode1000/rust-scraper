@@ -7,6 +7,7 @@
 //! - File I/O (saving results, frontmatter generation)
 //! - Web crawling (FASE 1)
 //! - Export pipeline (JSONL, Zvec) (FASE 1)
+//! - AI-powered semantic cleaning (FASE 1 - feature-gated)
 //!
 //! Following Clean Architecture: infrastructure depends on domain, not vice versa.
 
@@ -16,3 +17,6 @@ pub mod export;
 pub mod http;
 pub mod output;
 pub mod scraper;
+
+#[cfg(feature = "ai")]
+pub mod ai;
