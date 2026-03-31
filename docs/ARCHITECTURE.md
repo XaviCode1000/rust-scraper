@@ -23,7 +23,7 @@ The rust-scraper follows **Clean Architecture** with strict separation of concer
 │                      Library (lib.rs)                         │
 │  - Public API re-exports                                      │
 │  - ScraperConfig, Args, OutputFormat                          │
-│  - Feature flags (ai, images, documents, zvec)                │
+│  - Feature flags (ai, images, documents)                │
 │  - 28,780 LOC                                                 │
 └─────────────────────┬─────────────────────────────────────────┘
                       │
@@ -98,7 +98,7 @@ src/domain/
 |------|---------|-----|
 | `DownloadedAsset` | Downloaded image/document with metadata | ~30 |
 | `ScrapedContent` | Main output: title, content, URL, metadata, assets | ~50 |
-| `ExportFormat` | JSONL, Zvec, Auto for RAG pipeline | ~40 |
+| `ExportFormat` | JSONL, Auto for RAG pipeline | ~40 |
 | `ExportState` | Pending, Exported, Failed with metadata | ~30 |
 | `DocumentChunk` | AI semantic chunk with embedding | ~50 |
 
@@ -158,7 +158,6 @@ pub trait Exporter: Send + Sync + 'static {
 
 **Implementations:**
 - `JsonlExporter` — JSON Lines format for RAG pipelines
-- `ZvecExporter` — Alibaba Zvec format (feature-gated)
 
 ### SemanticCleaner Trait (`semantic_cleaner.rs`)
 
@@ -308,7 +307,6 @@ src/infrastructure/
 ├── export/
 │   ├── mod.rs                  (17 LOC)
 │   ├── jsonl_exporter.rs       (207 LOC)  — JSONL export
-│   ├── zvec_exporter.rs        (96 LOC)   — Zvec export
 │   └── state_store.rs          (433 LOC)  — Export state tracking
 └── ai/ (feature-gated)
     ├── mod.rs                  (141 LOC)
@@ -405,10 +403,6 @@ pub fn extract_content(html: &str, url: &Url) -> Result<ScrapedContent, ScraperE
 **JSONL Exporter (`jsonl_exporter.rs`):**
 - One JSON object per line
 - Optimal for RAG pipelines
-
-**Zvec Exporter (`zvec_exporter.rs`):**
-- Alibaba Zvec format
-- Feature-gated with `zvec`
 
 **State Store (`state_store.rs`):**
 - Tracks export state

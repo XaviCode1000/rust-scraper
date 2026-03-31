@@ -16,7 +16,6 @@ The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** format
 | Component | Status | Lines | Tests |
 |-----------|--------|-------|-------|
 | `JsonlExporter` | ✅ Complete | 207 lines | 3/3 passing |
-| `ZvecExporter` | ✅ Implemented | 96 lines | Ready for embeddings |
 | `StateStore` | ✅ Complete | 433 lines | 9/9 passing |
 | `ExportState` | ✅ Complete | Domain entity | Integrated |
 
@@ -37,7 +36,6 @@ The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** format
 src/infrastructure/export/
 ├── mod.rs              # Module exports
 ├── jsonl_exporter.rs   # JSONL exporter (207 lines)
-├── zvec_exporter.rs    # Zvec exporter (96 lines)
 └── state_store.rs      # State persistence (433 lines)
 
 src/infrastructure/output/
@@ -268,9 +266,8 @@ State is saved atomically using write-to-temp + rename pattern:
 
 ```
 --export-format <FORMAT>
-    Export format for RAG pipeline (jsonl, zvec, auto)
+    Export format for RAG pipeline (jsonl, auto)
     - jsonl: JSON Lines format (one JSON per line), optimal for RAG
-    - zvec: Alibaba Zvec format (requires `--features zvec`)
     - auto: Detect from existing export files
 
 --resume
@@ -613,9 +610,7 @@ strip = true
 - [x] **Fase 1: Infraestructura de Exportación**
   - [x] Definir el trait Exporter en domain/
   - [x] Implementar JsonlExporter con buffering eficiente
-- [x] **Fase 2: Integración Zvec**
-  - [x] Añadir zvec-bindings y configurar el esquema de colección
-  - [x] Implementar ZvecExporter con inserciones en lote
+- [x] **Fase 2: Integración Zvec** *(removed in v1.0.7 — zvec feature deprecated)*
 - [x] **Fase 3: Resiliencia (Resume)**
   - [x] Crear el módulo de persistencia de estado (StateStore)
   - [x] Integrar la lógica de "skip" en el crawler_service
@@ -659,7 +654,7 @@ cargo test state
 
 # Verify module structure
 eza --tree --level=2 src/infrastructure/export/
-# Expected: jsonl_exporter.rs, zvec_exporter.rs, state_store.rs, mod.rs
+# Expected: jsonl_exporter.rs, state_store.rs, mod.rs
 
 # Verify CLI flags
 cargo run -- --help | grep -A 2 "export-format\|resume\|state-dir"
