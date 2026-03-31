@@ -18,7 +18,8 @@ env:
   RUSTFLAGS: -Dwarnings
   RUSTDOCFLAGS: -Dwarnings
   CARGO_PROFILE_TEST_DEBUG: 0
-  SCCACHE_GHA_ENABLED: "true"
+  # SCCACHE directory will be set per job after caching
+  SCCACHE_DIR: ${{ runner.temp }}/sccache
 
 jobs:
   # ── FASTEST FIRST: Fail early on style/lint issues ────────────────────
@@ -28,13 +29,33 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - uses: mozilla-actions/sccache-action@v0.0.9
+          toolchain: stable-1.70.0
+          override: true
+          profile: minimal
+
+      - name: Cache SCCACHE
+        uses: actions/cache@v3
+        with:
+          path: ~/.sccache
+          key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+
+      - name: Install SCCACHE
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: 0.14.0
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: lint
+          # Only include build-relevant environment variables
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST
+
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run clippy
@@ -47,6 +68,27 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-1.70.0
+          override: true
+          profile: minimal
+
+      - name: Cache SCCACHE
+        uses: actions/cache@v3
+        with:
+          path: ~/.sccache
+          key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+
+      - name: Install SCCACHE
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: 0.14.0
+
       - uses: taiki-e/install-action@cargo-deny
       - name: Check advisories, licenses, and bans
         run: cargo deny check advisories licenses bans
@@ -59,10 +101,31 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: taiki-e/install-action@nextest
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-1.70.0
+          override: true
+          profile: minimal
+
+      - name: Cache SCCACHE
+        uses: actions/cache@v3
+        with:
+          path: ~/.sccache
+          key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+
+      - name: Install SCCACHE
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: 0.14.0
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST
 
       # PRs: fast test without coverage instrumentation
       - name: Test (PR)
@@ -97,9 +160,32 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-1.70.0
+          override: true
+          profile: minimal
+
+      - name: Cache SCCACHE
+        uses: actions/cache@v3
+        with:
+          path: ~/.sccache
+          key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+
+      - name: Install SCCACHE
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: 0.14.0
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: doc
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST
+
       - name: Run doctests
         run: cargo test --locked --workspace --all-features --doc
       - name: Build docs
