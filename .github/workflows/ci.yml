@@ -17,8 +17,6 @@ env:
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: -Dwarnings
   RUSTDOCFLAGS: -Dwarnings
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
   RUST_BACKTRACE: 1
 
 jobs:
@@ -45,6 +43,7 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.7
+        continue-on-error: true
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -64,9 +63,6 @@ jobs:
         with:
           toolchain: "1.80"
           profile: minimal
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.7
 
       - uses: taiki-e/install-action@cargo-audit
       - name: Check security advisories
@@ -107,6 +103,7 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.7
+        continue-on-error: true
 
       - uses: taiki-e/install-action@nextest
 
@@ -153,6 +150,7 @@ jobs:
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.7
+        continue-on-error: true
 
       - name: Run doctests
         run: cargo test --locked --workspace --features full --doc
