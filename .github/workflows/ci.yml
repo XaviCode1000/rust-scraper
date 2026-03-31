@@ -18,8 +18,8 @@ env:
   RUSTFLAGS: -Dwarnings
   RUSTDOCFLAGS: -Dwarnings
   CARGO_PROFILE_TEST_DEBUG: 0
-  # SCCACHE directory will be set per job after caching
-  SCCACHE_DIR: ${{ runner.temp }}/sccache
+  # SCCACHE will use the cached directory under $HOME/.sccache
+  SCCACHE_DIR: ${{ env.HOME }}/.sccache
 
 jobs:
   # ── FASTEST FIRST: Fail early on style/lint issues ────────────────────
@@ -40,7 +40,7 @@ jobs:
       - name: Cache SCCACHE
         uses: actions/cache@v3
         with:
-          path: ~/.sccache
+          path: ${{ env.HOME }}/.sccache
           key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-sccache-
@@ -79,7 +79,7 @@ jobs:
       - name: Cache SCCACHE
         uses: actions/cache@v3
         with:
-          path: ~/.sccache
+          path: ${{ env.HOME }}/.sccache
           key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-sccache-
@@ -112,7 +112,7 @@ jobs:
       - name: Cache SCCACHE
         uses: actions/cache@v3
         with:
-          path: ~/.sccache
+          path: ${{ env.HOME }}/.sccache
           key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-sccache-
@@ -171,7 +171,7 @@ jobs:
       - name: Cache SCCACHE
         uses: actions/cache@v3
         with:
-          path: ~/.sccache
+          path: ${{ env.HOME }}/.sccache
           key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-sccache-
