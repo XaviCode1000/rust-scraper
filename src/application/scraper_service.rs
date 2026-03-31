@@ -14,6 +14,7 @@
 use crate::domain::{DownloadedAsset, ScrapedContent, ValidUrl};
 use crate::error::{Result, ScraperError};
 use crate::ScraperConfig;
+use super::http_client::detect_waf_challenge;
 use futures::stream::{self, StreamExt};
 use reqwest_middleware::ClientWithMiddleware;
 use tracing::{debug, info, warn};
@@ -77,6 +78,15 @@ pub async fn scrape_with_config(
 
     let html = response.text().await.map_err(ScraperError::Network)?;
     debug!("📄 Downloaded {} bytes from {}", html.len(), url);
+
+    // Detect WAF/CAPTCHA challenges disguised as HTTP 200
+    if let Some(provider) = detect_waf_challenge(&html) {
+        warn!("WAF challenge detected from {}: {}", url, provider);
+        return Err(ScraperError::WafBlocked {
+            url: url.to_string(),
+            provider: provider.to_string(),
+        });
+    }
 
     // Try Readability first, fallback to plain text extraction
     match crate::infrastructure::scraper::readability::parse(&html, Some(url.as_str())) {

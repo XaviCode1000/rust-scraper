@@ -66,6 +66,15 @@ pub enum ScraperError {
     #[error("Error de configuración: {0}")]
     Config(String),
 
+    /// WAF/CAPTCHA challenge detected in HTTP 200 response
+    #[error("WAF/CAPTCHA detectado en {url}: {provider}")]
+    WafBlocked {
+        /// URL that was blocked
+        url: String,
+        /// Detected WAF provider (e.g., "Cloudflare", "DataDome", "reCAPTCHA")
+        provider: String,
+    },
+
     /// URL validation failed
     #[error("Validación de URL falló: {0}")]
     Validation(String),
@@ -223,6 +232,15 @@ impl ScraperError {
         Self::Http {
             status,
             url: url.to_string(),
+        }
+    }
+
+    /// Create a WafBlocked error
+    #[must_use]
+    pub fn waf_blocked(url: impl Into<String>, provider: impl Into<String>) -> Self {
+        Self::WafBlocked {
+            url: url.into(),
+            provider: provider.into(),
         }
     }
 

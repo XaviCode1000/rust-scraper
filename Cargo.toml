@@ -107,6 +107,9 @@ rand = "0.8"
 # Cache directory management (TASK-001: User-Agent lazy update)
 dirs = "5"
 
+# File locking for concurrent state access (SRE hotfix: Vector 2)
+fs2 = "0.4"
+
 # Walking directory for tests
 walkdir = "2"
 
