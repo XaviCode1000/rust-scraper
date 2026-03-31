@@ -2,8 +2,22 @@
 
 ## 🎉 Latest Achievements
 
-**Tests:** **252 passing** (nextest)  
-**Status:** ✅ **All tests passing, 0 failing**
+**Tests:** **265 passing** (nextest)  
+**Status:** ✅ **All tests passing, 0 failing**  
+**Version:** v1.0.7 — Indestructible & Lean
+
+### v1.0.7 Highlights
+- **SRE Hardening:** WAF/CAPTCHA detection (19 signatures), fs2 file locking, OOM protection, TUI panic safety
+- **Pure Rust:** Zero FFI dependencies (removed zvec-sys stub, bumpalo dead code)
+- **AI Safety:** Fixed P0 bug — `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (was silent in --release)
+- **Network Hardening:** `connect_timeout(10s)` + `pool_max_idle_per_host` for resilient scraping
+**Version:** v1.0.7 — Indestructible & Lean
+
+### v1.0.7 Highlights
+- **SRE Hardening:** WAF/CAPTCHA detection, file locking, OOM protection, TUI safety
+- **Pure Rust:** Zero FFI dependencies (removed zvec-sys, bumpalo dead code)
+- **AI Safety:** Fixed P0 bug (`debug_assert_eq!` → `assert_eq!` in production)
+- **Network:** connect_timeout + pool management for resilient scraping
 
 ---
 
@@ -284,4 +298,4 @@ cargo llvm-cov nextest --clean --html
 **Last updated**: 2026-03-31  
 **Rust version**: 1.93.0  
 **Stack version**: 2025-26 optimal
-**Tests**: 252 passing (nextest)
+**Tests**: 265 passing (nextest)

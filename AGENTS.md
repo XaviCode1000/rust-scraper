@@ -221,6 +221,7 @@ cargo test --all-features
 - `quick-xml` for sitemap parsing (zero-allocation streaming).
 - `ratatui` + `crossterm` for TUI.
 - `tract-onnx` (optional, behind `--features ai`) for semantic cleaning.
+- `fs2` for file locking (concurrent scraper instances).
 
 ### Feature Flags
 
@@ -247,6 +248,8 @@ cargo test --all-features
 - No `.unwrap()` on network responses — network is unreliable by definition.
 - Handle HTTP 429 (rate limit) with exponential backoff.
 - Validate URLs with `url::Url::parse()`, not string matching.
+- **WAF/CAPTCHA Detection:** HTTP 200 responses are scanned for 19 WAF signatures (Cloudflare, reCAPTCHA, hCaptcha, DataDome, PerimeterX, Akamai). If detected, the UA is rotated and retried once. If still blocked, returns `ScraperError::WafBlocked`. See `detect_waf_challenge()` in `http_client.rs`.
+- **Sitemap Size Limits:** HTTP responses capped at 50MB, GZIP decompression at 100MB to prevent OOM from decompression bombs.
 
 ### Streaming & Concurrency
 
