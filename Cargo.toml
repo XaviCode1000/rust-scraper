@@ -146,7 +146,8 @@ tokio-util = { version = "0.7.18", features = ["io"] }
 # ONNX runtime for model inference (tract-onnx - 100% Rust)
 tract-onnx = { version = "0.21", optional = true }
 # Alternative ONNX runtime (ort)
-ort = { version = "2.0.0-rc.12", optional = true }
+# Pinned to avoid edition2024 requirement (needs Rust 1.85+)
+ort = { version = "=2.0.0-rc.10", optional = true }
 # Tokenizer for sentence-transformers
 tokenizers = { version = "0.21", optional = true }
 # HuggingFace Hub for model downloads
