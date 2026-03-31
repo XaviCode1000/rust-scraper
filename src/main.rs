@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     };
     rust_scraper::config::init_logging(log_level);
 
-    info!("🚀 Rust Scraper v0.4.0 - Clean Architecture + TUI");
+    info!("🚀 Rust Scraper v1.0.7 - Clean Architecture + TUI");
     info!("📌 Target: {}", args.url);
     info!("📁 Output: {}", args.output.display());
 
