@@ -134,7 +134,7 @@ impl HttpClient {
             .gzip(true)
             .brotli(true)
             .cookie_store(true); // Explicitly enable cookies for session persistence
-        
+
         let client = builder
             .build()
             .map_err(|e| ScraperError::Config(format!("Failed to create HTTP client: {}", e)))?;
@@ -166,17 +166,23 @@ impl HttpClient {
         // Try with first UA, then loop handles 403 retry
         let mut ua_index = 0;
         let max_attempts = self.config.max_retries;
-        
+
         loop {
             // Check if we've exhausted retries
             if ua_index >= self.user_agents.len() && ua_index > 0 {
                 return Err(HttpError::Forbidden);
             }
 
-            let ua = self.user_agents.get(ua_index % self.user_agents.len()).cloned()
-                .unwrap_or_else(|| "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".into());
+            let ua = self
+                .user_agents
+                .get(ua_index % self.user_agents.len())
+                .cloned()
+                .unwrap_or_else(|| {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".into()
+                });
 
-            let request = self.client
+            let request = self
+                .client
                 .get(url)
                 .header("Accept-Language", &self.config.accept_language)
                 .header("Accept", &self.config.accept)
@@ -198,7 +204,10 @@ impl HttpClient {
 
             match status.as_u16() {
                 200..=299 => {
-                    return response.text().await.map_err(|e| HttpError::Request(e.to_string()));
+                    return response
+                        .text()
+                        .await
+                        .map_err(|e| HttpError::Request(e.to_string()));
                 }
                 403 => {
                     warn!("403 Forbidden from {}", url);
@@ -225,7 +234,7 @@ impl HttpClient {
                     let ua_for_retry = ua.clone();
                     while attempt < max_attempts {
                         attempt += 1;
-                        
+
                         let delay_ms = if retry_after > 0 {
                             retry_after * 1000
                         } else {
@@ -239,7 +248,8 @@ impl HttpClient {
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
                         // Try request again
-                        let request = self.client
+                        let request = self
+                            .client
                             .get(url)
                             .header("Accept-Language", &self.config.accept_language)
                             .header("Accept", &self.config.accept)
@@ -250,7 +260,10 @@ impl HttpClient {
                         match request.send().await {
                             Ok(resp) => {
                                 if resp.status().is_success() {
-                                    return resp.text().await.map_err(|e| HttpError::Request(e.to_string()));
+                                    return resp
+                                        .text()
+                                        .await
+                                        .map_err(|e| HttpError::Request(e.to_string()));
                                 } else if resp.status().as_u16() == 429 {
                                     // Still rate limited, continue backing off
                                     continue;
@@ -276,13 +289,13 @@ impl HttpClient {
                 }
                 500..=599 => {
                     debug!("{} from {}", status, url);
-                    
+
                     // Retry loop with exponential backoff
                     let mut attempt = 0;
                     let ua_for_retry = ua.clone();
                     while attempt < max_attempts {
                         attempt += 1;
-                        
+
                         // Backoff: 1s -> 2s -> 4s (attempt starts at 1)
                         let exponent = attempt.saturating_sub(1);
                         let delay = self.config.backoff_base_ms * (2_u64.pow(exponent));
@@ -292,7 +305,8 @@ impl HttpClient {
                         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
                         // Try request again
-                        let request = self.client
+                        let request = self
+                            .client
                             .get(url)
                             .header("Accept-Language", &self.config.accept_language)
                             .header("Accept", &self.config.accept)
@@ -303,7 +317,10 @@ impl HttpClient {
                         match request.send().await {
                             Ok(resp) => {
                                 if resp.status().is_success() {
-                                    return resp.text().await.map_err(|e| HttpError::Request(e.to_string()));
+                                    return resp
+                                        .text()
+                                        .await
+                                        .map_err(|e| HttpError::Request(e.to_string()));
                                 } else if resp.status().is_server_error() {
                                     // Server error, continue retrying
                                     continue;
@@ -390,7 +407,10 @@ mod tests {
         let config = HttpClientConfig::default();
 
         assert_eq!(config.accept_language, "en-US,en;q=0.9");
-        assert_eq!(config.accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        assert_eq!(
+            config.accept,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        );
         assert_eq!(config.referer, "https://www.google.com/");
         assert_eq!(config.cache_control, "no-cache");
         assert_eq!(config.max_retries, 3);
@@ -477,10 +497,22 @@ mod tests {
 
     #[test]
     fn test_http_error_display() {
-        assert_eq!(format!("{}", HttpError::Forbidden), "403 Forbidden - site blocking");
-        assert_eq!(format!("{}", HttpError::RateLimited(30)), "429 Rate Limited - retry after 30 seconds");
-        assert_eq!(format!("{}", HttpError::ClientError(404)), "Client Error 404");
-        assert_eq!(format!("{}", HttpError::ServerError(500)), "Server Error 500");
+        assert_eq!(
+            format!("{}", HttpError::Forbidden),
+            "403 Forbidden - site blocking"
+        );
+        assert_eq!(
+            format!("{}", HttpError::RateLimited(30)),
+            "429 Rate Limited - retry after 30 seconds"
+        );
+        assert_eq!(
+            format!("{}", HttpError::ClientError(404)),
+            "Client Error 404"
+        );
+        assert_eq!(
+            format!("{}", HttpError::ServerError(500)),
+            "Server Error 500"
+        );
         assert_eq!(format!("{}", HttpError::Timeout), "Request Timeout");
     }
 
@@ -499,7 +531,7 @@ mod tests {
     fn test_http_client_has_user_agents() {
         let config = HttpClientConfig::default();
         let _client = HttpClient::new(config).unwrap();
-        
+
         // Client should have user agents (from fallback)
         // We can't directly check private field, but we can verify it was created
         assert!(true);
@@ -509,7 +541,7 @@ mod tests {
     async fn test_http_client_get_invalid_url() {
         let config = HttpClientConfig::default();
         let client = HttpClient::new(config).unwrap();
-        
+
         // Invalid URL should fail
         let result = client.get("not-a-valid-url").await;
         assert!(result.is_err());
@@ -520,11 +552,11 @@ mod tests {
     async fn test_http_client_get_example_com() {
         let config = HttpClientConfig::default();
         let client = HttpClient::new(config).unwrap();
-        
+
         // Valid request to example.com should succeed
         let result = client.get("https://example.com").await;
         assert!(result.is_ok());
-        
+
         let body = result.unwrap();
         assert!(!body.is_empty());
     }
@@ -543,7 +575,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_403_returns_error() {
         let mock_server = MockServer::start().await;
-        
+
         // Request returns 403
         Mock::given(method("GET"))
             .and(path("/"))
@@ -558,7 +590,7 @@ mod wiremock_tests {
         let client = HttpClient::new(config).unwrap();
 
         let result = client.get(&mock_server.uri()).await;
-        
+
         // Should return 403 error after exhausting retries
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), HttpError::Forbidden));
@@ -571,7 +603,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_429_returns_error() {
         let mock_server = MockServer::start().await;
-        
+
         // Request returns 429
         Mock::given(method("GET"))
             .and(path("/"))
@@ -605,7 +637,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_500_returns_error() {
         let mock_server = MockServer::start().await;
-        
+
         // Always return 500
         Mock::given(method("GET"))
             .and(path("/"))
@@ -622,7 +654,7 @@ mod wiremock_tests {
         let client = HttpClient::new(config).unwrap();
 
         let result = client.get(&mock_server.uri()).await;
-        
+
         // Should fail after exhausting retries
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), HttpError::ServerError(500)));
@@ -631,7 +663,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_500_exhausts_retries() {
         let mock_server = MockServer::start().await;
-        
+
         // Always return 500
         Mock::given(method("GET"))
             .and(path("/"))
@@ -648,7 +680,7 @@ mod wiremock_tests {
         let client = HttpClient::new(config).unwrap();
 
         let result = client.get(&mock_server.uri()).await;
-        
+
         // Should fail after exhausting retries
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), HttpError::ServerError(500)));
@@ -661,7 +693,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_404_returns_client_error() {
         let mock_server = MockServer::start().await;
-        
+
         Mock::given(method("GET"))
             .and(path("/notfound"))
             .respond_with(ResponseTemplate::new(404))
@@ -672,7 +704,7 @@ mod wiremock_tests {
         let client = HttpClient::new(config).unwrap();
 
         let result = client.get(&format!("{}/notfound", mock_server.uri())).await;
-        
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), HttpError::ClientError(404)));
     }
@@ -684,7 +716,7 @@ mod wiremock_tests {
     #[tokio::test]
     async fn test_200_returns_body() {
         let mock_server = MockServer::start().await;
-        
+
         let expected_body = "<html><body>Hello World</body></html>";
         Mock::given(method("GET"))
             .and(path("/"))
@@ -696,7 +728,7 @@ mod wiremock_tests {
         let client = HttpClient::new(config).unwrap();
 
         let result = client.get(&mock_server.uri()).await;
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected_body);
     }

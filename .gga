@@ -1,12 +1,9 @@
 # Gentleman Guardian Angel Configuration
 # https://github.com/your-org/gga
 
-# Gentleman Guardian Angel Configuration
-# Code review with AI for Rust projects
-
 # AI Provider (required)
-# Options: claude, gemini, codex, opencode, ollama:<model>, lmstudio[:model], github:<model>
-PROVIDER="gemini"
+# Using router for automatic provider selection
+PROVIDER="router"
 
 # File patterns to include in review (comma-separated)
 # Rust project: .rs source files and .toml config files
@@ -22,7 +19,7 @@ RULES_FILE="AGENTS.md"
 
 # Strict mode: fail if AI response is ambiguous
 # Default: true
-STRICT_MODE="true"
+STRICT_MODE="false"
 
 # Timeout in seconds for AI provider response
 # Default: 300 (5 minutes)
