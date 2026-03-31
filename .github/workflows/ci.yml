@@ -84,15 +84,18 @@ jobs:
         if: github.event_name == 'pull_request'
         run: cargo nextest run --locked --workspace --all-features
 
+      - name: Install cargo-llvm-cov
+        if: github.event_name != 'pull_request'
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Coverage (main/scheduled)
         if: github.event_name != 'pull_request'
-        run: |
-          rustup component add llvm-tools
-          cargo install cargo-llvm-cov
-          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 
       - name: Upload coverage
-        if: github.event_name != 'pull_request' && secrets.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        if: github.event_name != 'pull_request' && env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
