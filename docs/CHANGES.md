@@ -347,7 +347,7 @@ b6471228b feat: actualizar a Rust 2024 y unsafe block para env::set_var
 |---|-------|--------|------|
 | #10 | feat: RAG Export Pipeline con resume system | MERGED | 2026-03-09 |
 | #9 | [Feature] AI Semantic Cleaning & RAG Pipeline | CLOSED | 2026-03-10 |
-| #8 | [Feature] RAG-Ready Export Pipeline (Zvec & JSONL Integration) | CLOSED | 2026-03-10 |
+| #8 | [Feature] RAG-Ready Export Pipeline (JSONL Integration) *(Zvec removed in v1.0.7)* | CLOSED | 2026-03-10 |
 | #7 | 🕷️ Feature: Soporte para Sitios Dinámicos (Fase 4) | CLOSED | 2026-03-08 |
 | #6 | 🕷️ Feature: Web Crawler para Sitios Estáticos (Fases 1-3) | CLOSED | 2026-03-08 |
 | #5 | Production Readiness: Error Handling, Concurrency Control & Network Resilience | CLOSED | 2026-03-08 |

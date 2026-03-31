@@ -16,8 +16,7 @@ rust-version = "1.88"
 default = []
 images = ["dep:mimetype-detector"]
 documents = ["dep:mimetype-detector"]
-full = ["images", "documents", "zvec"]
-zvec = ["dep:zvec-sys"]
+full = ["images", "documents"]
 # AI-powered semantic cleaning (Module 3 + 4 + 5 + 7)
 ai = [
     "dep:ort",
@@ -26,7 +25,6 @@ ai = [
     "dep:ndarray",
     "dep:async-trait",
     "dep:unicode-segmentation",
-    "dep:bumpalo",
     "dep:smallvec",
     "dep:wide",
     "dep:tract-onnx",
@@ -107,16 +105,14 @@ rand = "0.8"
 # Cache directory management (TASK-001: User-Agent lazy update)
 dirs = "5"
 
+# File locking for concurrent state access (SRE hotfix: Vector 2)
+fs2 = "0.4"
+
 # Walking directory for tests
 walkdir = "2"
 
 # MIME type detection (optional - for image/document detection)
 mimetype-detector = { version = "0.3", optional = true }
-
-# Zvec FFI bindings (optional - for RAG export pipeline)
-# Requiere: CMake, C++17, liblz4-dev
-# Habilitar con: cargo build --features zvec
-zvec-sys = { version = "0.3", optional = true }
 
 # Rate limiting (hardware-aware para HDD) - FASE 1 Web Crawler
 governor = "0.6"
@@ -164,8 +160,6 @@ async-trait = { version = "0.1", optional = true }
 # ============================================================================
 # Unicode-aware sentence segmentation
 unicode-segmentation = { version = "1.12", optional = true }
-# Arena allocator for chunk metadata (mem-arena-allocator)
-bumpalo = { version = "3.16", optional = true }
 # Small vector optimization for small collections (mem-smallvec)
 smallvec = { version = "1.13", optional = true }
 # SIMD operations for cosine similarity (opt-simd-portable)

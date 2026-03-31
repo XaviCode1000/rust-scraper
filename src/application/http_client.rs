@@ -86,6 +86,8 @@ pub enum HttpError {
     Connection(String),
     /// Request building/error - contains error message
     Request(String),
+    /// WAF/CAPTCHA challenge detected in HTTP 200 (false positive)
+    WafChallenge(String),
 }
 
 impl std::fmt::Display for HttpError {
@@ -100,11 +102,76 @@ impl std::fmt::Display for HttpError {
             HttpError::Timeout => write!(f, "Request Timeout"),
             HttpError::Connection(msg) => write!(f, "Connection Error: {}", msg),
             HttpError::Request(msg) => write!(f, "Request Error: {}", msg),
+            HttpError::WafChallenge(provider) => {
+                write!(f, "WAF/CAPTCHA challenge detected ({})", provider)
+            }
         }
     }
 }
 
 impl std::error::Error for HttpError {}
+
+/// WAF/CAPTCHA challenge signature for detection in HTTP 200 responses
+///
+/// Each entry is (signature, provider_name). The detector scans the response body
+/// for these substrings — zero allocations, O(N*M) where M is the signature count.
+///
+/// Following **perf-iter-over-index**: iterator-based scanning, no regex needed.
+const WAF_SIGNATURES: &[(&str, &str)] = &[
+    // Cloudflare Turnstile / JS Challenge
+    ("cf-turnstile", "Cloudflare Turnstile"),
+    ("challenge-platform", "Cloudflare JS Challenge"),
+    ("Just a moment...", "Cloudflare"),
+    ("Checking your browser", "Cloudflare"),
+    ("__cf_chl_f_tk", "Cloudflare"),
+    // Google reCAPTCHA
+    ("g-recaptcha", "reCAPTCHA"),
+    ("recaptcha/api.js", "reCAPTCHA"),
+    ("grecaptcha.execute", "reCAPTCHA"),
+    // hCaptcha
+    ("hcaptcha.com", "hCaptcha"),
+    ("h-captcha", "hCaptcha"),
+    // DataDome
+    ("datadome", "DataDome"),
+    ("dd-captcha", "DataDome"),
+    // PerimeterX / HUMAN Security
+    ("perimeterx", "PerimeterX"),
+    ("_pxCaptcha", "PerimeterX"),
+    // Akamai Bot Manager
+    ("_abck", "Akamai Bot Manager"),
+    ("SensorData", "Akamai Bot Manager"),
+    // Generic challenge phrases
+    ("Please verify you are a human", "Generic Challenge"),
+    ("verify you are human", "Generic Challenge"),
+    ("bot detection", "Generic Detection"),
+];
+
+/// Detect WAF/CAPTCHA challenge pages disguised as HTTP 200
+///
+/// Scans the response body for known WAF signatures. Returns the provider name
+/// if a challenge is detected, or `None` if the content appears legitimate.
+///
+/// # Arguments
+///
+/// * `body` - The HTTP response body as a string
+///
+/// # Returns
+///
+/// * `Some(provider_name)` if a WAF challenge signature is found
+/// * `None` if no challenge detected
+///
+/// # Performance
+///
+/// O(N * M) where N = body length, M = signature count (currently 19).
+/// Zero allocations — uses `str::contains()` with static string slices.
+/// For M > 20, consider upgrading to `aho-corasick` for O(N) DFA matching.
+#[inline]
+pub fn detect_waf_challenge(body: &str) -> Option<&'static str> {
+    // Following **perf-iter-over-index**: iterator scan, no intermediate collections
+    WAF_SIGNATURES
+        .iter()
+        .find_map(|(sig, provider)| body.contains(sig).then_some(*provider))
+}
 
 /// HTTP client wrapper with configurable retry behavior
 ///
@@ -204,10 +271,26 @@ impl HttpClient {
 
             match status.as_u16() {
                 200..=299 => {
-                    return response
+                    let body = response
                         .text()
                         .await
-                        .map_err(|e| HttpError::Request(e.to_string()));
+                        .map_err(|e| HttpError::Request(e.to_string()))?;
+
+                    // Detect WAF/CAPTCHA challenges disguised as HTTP 200
+                    if let Some(provider) = detect_waf_challenge(&body) {
+                        warn!(
+                            "WAF challenge detected from {} ({}), rotating UA",
+                            url, provider
+                        );
+                        // Same retry logic as 403: rotate UA once
+                        if ua_index == 0 {
+                            ua_index += 1;
+                            continue;
+                        }
+                        return Err(HttpError::WafChallenge(provider.to_string()));
+                    }
+
+                    return Ok(body);
                 }
                 403 => {
                     warn!("403 Forbidden from {}", url);
@@ -731,5 +814,173 @@ mod wiremock_tests {
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected_body);
+    }
+}
+
+#[cfg(test)]
+mod waf_detection_tests {
+    use super::*;
+
+    // =========================================================================
+    // detect_waf_challenge unit tests
+    // =========================================================================
+
+    #[test]
+    fn test_detect_cloudflare_turnstile() {
+        let html = r#"<div id="cf-turnstile" data-sitekey="abc123"></div>"#;
+        assert_eq!(detect_waf_challenge(html), Some("Cloudflare Turnstile"));
+    }
+
+    #[test]
+    fn test_detect_cloudflare_just_a_moment() {
+        let html = "<html><body><h1>Just a moment...</h1></body></html>";
+        assert_eq!(detect_waf_challenge(html), Some("Cloudflare"));
+    }
+
+    #[test]
+    fn test_detect_cloudflare_checking_browser() {
+        let html = "<html><body>Checking your browser before accessing...</body></html>";
+        assert_eq!(detect_waf_challenge(html), Some("Cloudflare"));
+    }
+
+    #[test]
+    fn test_detect_recaptcha() {
+        let html = r#"<script src="https://www.google.com/recaptcha/api.js?render=abc"></script>"#;
+        assert_eq!(detect_waf_challenge(html), Some("reCAPTCHA"));
+    }
+
+    #[test]
+    fn test_detect_g_recaptcha() {
+        let html = r#"<div class="g-recaptcha" data-sitekey="abc"></div>"#;
+        assert_eq!(detect_waf_challenge(html), Some("reCAPTCHA"));
+    }
+
+    #[test]
+    fn test_detect_hcaptcha() {
+        let html = r#"<div class="h-captcha" data-sitekey="abc"></div>"#;
+        assert_eq!(detect_waf_challenge(html), Some("hCaptcha"));
+    }
+
+    #[test]
+    fn test_detect_datadome() {
+        let html = r#"<script src="https://js.datadome.co/captcha.js"></script>"#;
+        assert_eq!(detect_waf_challenge(html), Some("DataDome"));
+    }
+
+    #[test]
+    fn test_detect_perimeterx() {
+        let html = r#"<script>var _pxCaptcha = {};</script>"#;
+        assert_eq!(detect_waf_challenge(html), Some("PerimeterX"));
+    }
+
+    #[test]
+    fn test_detect_akamai() {
+        let html = r#"<input type="hidden" name="_abck" value="xxx">"#;
+        assert_eq!(detect_waf_challenge(html), Some("Akamai Bot Manager"));
+    }
+
+    #[test]
+    fn test_detect_generic_challenge() {
+        let html = "<p>Please verify you are a human to continue.</p>";
+        assert_eq!(detect_waf_challenge(html), Some("Generic Challenge"));
+    }
+
+    #[test]
+    fn test_clean_html_no_detection() {
+        let html = r#"
+            <html>
+                <head><title>Normal Page</title></head>
+                <body>
+                    <article>
+                        <h1>Welcome</h1>
+                        <p>This is a normal page with real content.</p>
+                    </article>
+                </body>
+            </html>
+        "#;
+        assert_eq!(detect_waf_challenge(html), None);
+    }
+
+    #[test]
+    fn test_empty_body_no_detection() {
+        assert_eq!(detect_waf_challenge(""), None);
+    }
+
+    // =========================================================================
+    // Wiremock integration: HTTP 200 with WAF body
+    // =========================================================================
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_200_cloudflare_challenge_returns_waf_error() {
+        let mock_server = MockServer::start().await;
+
+        // Cloudflare challenge page returns 200
+        let challenge_body = r#"<html><head><title>Just a moment...</title></head>
+        <body><div id="challenge-running">Checking your browser...</div></body></html>"#;
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(challenge_body))
+            .mount(&mock_server)
+            .await;
+
+        let config = HttpClientConfig {
+            max_retries: 1, // Only 1 retry
+            ..Default::default()
+        };
+        let client = HttpClient::new(config).unwrap();
+
+        let result = client.get(&mock_server.uri()).await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HttpError::WafChallenge(_)));
+    }
+
+    #[tokio::test]
+    async fn test_200_recaptcha_challenge_returns_waf_error() {
+        let mock_server = MockServer::start().await;
+
+        let challenge_body = r#"<html><body><div class="g-recaptcha" data-sitekey="abc"></div></body></html>"#;
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(challenge_body))
+            .mount(&mock_server)
+            .await;
+
+        let config = HttpClientConfig {
+            max_retries: 1,
+            ..Default::default()
+        };
+        let client = HttpClient::new(config).unwrap();
+
+        let result = client.get(&mock_server.uri()).await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HttpError::WafChallenge(_)));
+    }
+
+    #[tokio::test]
+    async fn test_200_normal_page_returns_body() {
+        let mock_server = MockServer::start().await;
+
+        let normal_body = "<html><body><article><h1>Real Content</h1><p>Normal page.</p></article></body></html>";
+
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(normal_body))
+            .mount(&mock_server)
+            .await;
+
+        let config = HttpClientConfig::default();
+        let client = HttpClient::new(config).unwrap();
+
+        let result = client.get(&mock_server.uri()).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), normal_body);
     }
 }

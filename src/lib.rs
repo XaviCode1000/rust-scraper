@@ -180,7 +180,7 @@ pub use application::{
 pub mod infrastructure;
 pub use infrastructure::{
     converter, crawler,
-    export::{jsonl_exporter, state_store, zvec_exporter},
+    export::{jsonl_exporter, state_store},
     http,
     output::file_saver,
     scraper::readability,
@@ -687,11 +687,10 @@ pub struct Args {
     #[arg(short = 'f', long, default_value = "markdown", value_enum)]
     pub format: OutputFormat,
 
-    /// Export format for RAG pipeline (jsonl, zvec, auto)
+    /// Export format for RAG pipeline (jsonl, auto)
     ///
     /// Creates output suitable for retrieval-augmented generation:
     /// - jsonl: JSON Lines format (one JSON per line), optimal for RAG
-    /// - zvec: Alibaba Zvec format (requires `--features zvec`)
     /// - auto: Detect from existing export files
     ///
     /// Use this for LLM/RAG pipelines that need batch export.
@@ -983,9 +982,6 @@ mod tests {
         use clap::ValueEnum;
 
         let format = ExportFormat::from_str("jsonl", true);
-        assert!(format.is_ok());
-
-        let format = ExportFormat::from_str("zvec", true);
         assert!(format.is_ok());
     }
 }

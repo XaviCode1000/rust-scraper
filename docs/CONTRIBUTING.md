@@ -32,7 +32,7 @@ Thank you for considering contributing to rust-scraper! This document provides *
 | **Rust** | 1.80+ (MSRV) | `rustc --version` (current: 1.93.0) |
 | **Cargo** | 1.80+ | `cargo --version` (current: 1.93.0) |
 | **OS** | Linux, macOS, Windows | Tested on CachyOS Linux |
-| **Optional (AI features)** | CMake, C++17 | Required for `tract-onnx`, `zvec` |
+| **Optional (AI features)** | CMake, C++17 | Required for `tract-onnx` |
 
 ### Setup Steps
 
@@ -157,7 +157,6 @@ rust_scraper/
 | `documents` | Enable document downloading | Included in `full` |
 | `full` | All features except AI | 217 library tests |
 | `ai` | AI-powered semantic cleaning | 64 AI integration tests |
-| `zvec` | Vector embeddings (AI dependency) | Requires CMake |
 
 ---
 

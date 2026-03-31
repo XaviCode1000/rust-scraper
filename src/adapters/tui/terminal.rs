@@ -4,6 +4,7 @@
 //! Follows security-no-unwrap-prod rule - no unwrap() in production code.
 
 use crossterm::{
+    cursor::Show,
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -43,6 +44,7 @@ pub fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
 pub fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), Show)?;
     Ok(())
 }
 
@@ -50,11 +52,18 @@ pub fn restore_terminal() -> io::Result<()> {
 ///
 /// This ensures the terminal is not left in a corrupted state
 /// if the application panics during TUI mode.
+///
+/// Each restoration step runs independently so that a partial
+/// failure (e.g., broken stdout) doesn't prevent other steps.
 fn setup_panic_hook() {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        // Restore terminal before panic to prevent corruption
-        let _ = restore_terminal();
+        // Each step runs independently — failure in one doesn't block others
+        // Following **err-result-over-panic**: ignore errors in cleanup path
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), Show);
+        eprintln!("Application panicked. Terminal restored.");
         original_hook(panic_info);
     }));
 }

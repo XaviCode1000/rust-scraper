@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use crate::domain::ExportState;
 use crate::error::ScraperError;
 use dirs::cache_dir;
+use fs2::FileExt;
 use tracing::{debug, info};
 
 /// StateStore manages persistence of export state for a specific domain
@@ -125,6 +126,18 @@ impl StateStore {
             return Err(ScraperError::Io(err));
         }
 
+        // Acquire shared lock to prevent reading during concurrent write
+        let lock_path = path.with_extension("json.lock");
+        let lock_file = fs::File::create(&lock_path).map_err(ScraperError::Io)?;
+        // allow: fs2::FileExt::lock_shared, clippy misidentifies as std::io::FileExt (1.89+)
+        #[allow(clippy::incompatible_msrv)]
+        lock_file.lock_shared().map_err(|e| {
+            ScraperError::Io(std::io::Error::other(format!(
+                "failed to acquire state read lock: {}",
+                e
+            )))
+        })?;
+
         // Read and parse JSON file
         let content = fs::read_to_string(&path).map_err(ScraperError::Io)?; // IO error when reading file
 
@@ -137,6 +150,7 @@ impl StateStore {
             state.processed_urls.len()
         );
 
+        // Lock released automatically on drop
         Ok(state)
     }
 
@@ -173,6 +187,16 @@ impl StateStore {
             fs::create_dir_all(parent).map_err(ScraperError::Io)?; // IO error when creating directories
         }
 
+        // Acquire exclusive file lock to prevent concurrent writes
+        let lock_path = path.with_extension("json.lock");
+        let lock_file = fs::File::create(&lock_path).map_err(ScraperError::Io)?;
+        lock_file.lock_exclusive().map_err(|e| {
+            ScraperError::Io(std::io::Error::other(format!(
+                "failed to acquire state lock: {}",
+                e
+            )))
+        })?;
+
         // Serialize to JSON
         let json = serde_json::to_string_pretty(state).map_err(ScraperError::Serialization)?; // Serialization error
 
@@ -194,6 +218,7 @@ impl StateStore {
             state.processed_urls.len()
         );
 
+        // Lock released automatically on drop
         Ok(())
     }
 

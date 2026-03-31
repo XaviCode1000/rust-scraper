@@ -61,6 +61,12 @@ pub enum SitemapError {
 
     #[error("invalid scheme: {0} (only http/https allowed)")]
     InvalidScheme(String),
+
+    #[error("response too large: exceeds {0} bytes")]
+    ResponseTooLarge(usize),
+
+    #[error("decompressed data too large: exceeds {0} bytes")]
+    DecompressedTooLarge(usize),
 }
 
 /// Result type for sitemap operations
@@ -77,6 +83,10 @@ pub struct SitemapConfig {
     pub max_depth: u8,
     /// Concurrent requests for sitemap indexes (default: 5)
     pub concurrency: usize,
+    /// Maximum HTTP response size in bytes (default: 50MB)
+    pub max_response_size: usize,
+    /// Maximum decompressed gzip size in bytes (default: 100MB)
+    pub max_decompressed_size: usize,
 }
 
 impl Default for SitemapConfig {
@@ -85,6 +95,8 @@ impl Default for SitemapConfig {
             gzip_enabled: true,
             max_depth: 3,
             concurrency: 5,
+            max_response_size: 52_428_800,    // 50MB
+            max_decompressed_size: 104_857_600, // 100MB
         }
     }
 }
@@ -105,6 +117,8 @@ pub struct SitemapConfigBuilder {
     gzip_enabled: bool,
     max_depth: u8,
     concurrency: usize,
+    max_response_size: usize,
+    max_decompressed_size: usize,
 }
 
 impl SitemapConfigBuilder {
@@ -126,13 +140,36 @@ impl SitemapConfigBuilder {
         self
     }
 
+    /// Set maximum HTTP response size in bytes
+    pub fn max_response_size(mut self, size: usize) -> Self {
+        self.max_response_size = size;
+        self
+    }
+
+    /// Set maximum decompressed gzip size in bytes
+    pub fn max_decompressed_size(mut self, size: usize) -> Self {
+        self.max_decompressed_size = size;
+        self
+    }
+
     /// Build the configuration
     #[must_use]
     pub fn build(self) -> SitemapConfig {
+        let defaults = SitemapConfig::default();
         SitemapConfig {
             gzip_enabled: self.gzip_enabled,
             max_depth: self.max_depth,
             concurrency: self.concurrency,
+            max_response_size: if self.max_response_size == 0 {
+                defaults.max_response_size
+            } else {
+                self.max_response_size
+            },
+            max_decompressed_size: if self.max_decompressed_size == 0 {
+                defaults.max_decompressed_size
+            } else {
+                self.max_decompressed_size
+            },
         }
     }
 }
@@ -214,15 +251,33 @@ impl SitemapParser {
                 .map(|v| v == "gzip")
                 .unwrap_or(false);
 
-        // Get bytes
-        let bytes = response.bytes().await?;
+        // Stream response with size limit to prevent OOM
+        use futures::StreamExt;
+        let mut stream = response.bytes_stream();
+        let mut raw_bytes = Vec::with_capacity(8192);
+        let mut total_bytes = 0usize;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(SitemapError::HttpError)?;
+            total_bytes += chunk.len();
+            if total_bytes > self.config.max_response_size {
+                tracing::warn!(
+                    "Sitemap response too large: {} bytes from {}",
+                    total_bytes,
+                    url
+                );
+                return Err(SitemapError::ResponseTooLarge(
+                    self.config.max_response_size,
+                ));
+            }
+            raw_bytes.extend_from_slice(&chunk);
+        }
 
         // Parse based on compression
         // Following mem-streaming-large-data: stream, don't accumulate
         let urls = if is_gzip && self.config.gzip_enabled {
-            self.parse_gzip_sitemap(&bytes).await?
+            self.parse_gzip_sitemap(&raw_bytes).await?
         } else {
-            self.parse_xml_sitemap(&bytes).await?
+            self.parse_xml_sitemap(&raw_bytes).await?
         };
 
         // Check if sitemap index (recursive)
@@ -244,9 +299,24 @@ impl SitemapParser {
         let reader = BufReader::new(bytes);
         let mut decoder = GzipDecoder::new(reader);
 
-        // Read decompressed bytes
+        // Limit decompressed size to prevent decompression bombs
+        let mut limited = tokio::io::AsyncReadExt::take(
+            &mut decoder,
+            self.config.max_decompressed_size as u64,
+        );
         let mut decompressed = Vec::new();
-        tokio::io::AsyncReadExt::read_to_end(&mut decoder, &mut decompressed).await?;
+        tokio::io::AsyncReadExt::read_to_end(&mut limited, &mut decompressed).await?;
+
+        // Check if we hit the limit (possible decompression bomb)
+        if decompressed.len() >= self.config.max_decompressed_size {
+            tracing::warn!(
+                "Gzip decompression hit size limit ({} bytes) — possible decompression bomb",
+                decompressed.len()
+            );
+            return Err(SitemapError::DecompressedTooLarge(
+                self.config.max_decompressed_size,
+            ));
+        }
 
         // Parse XML
         self.parse_xml_sitemap(&decompressed).await

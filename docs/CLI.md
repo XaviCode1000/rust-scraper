@@ -81,23 +81,19 @@ Creates batch export suitable for LLM/RAG pipelines.
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--export-format <FORMAT>` | `jsonl`, `zvec`, `auto` | `jsonl` | Export format for RAG pipeline |
+| `--export-format <FORMAT>` | `jsonl`, `auto` | `jsonl` | Export format for RAG pipeline |
 
 **Formats:**
 
 | Format | Description | Feature Required |
 |--------|-------------|------------------|
 | `jsonl` | JSON Lines (one JSON per line), optimal for RAG | None (default) |
-| `zvec` | Alibaba Zvec format for vector DB imports | `--features zvec` |
 | `auto` | Auto-detect from existing export files | None |
 
 **Example:**
 ```bash
 # JSONL export (default)
 cargo run -- --url "https://example.com" --export-format jsonl
-
-# Zvec format (requires feature flag)
-cargo run --features zvec -- --url "https://example.com" --export-format zvec
 
 # Auto-detect format
 cargo run -- --url "https://example.com" --export-format auto
@@ -541,9 +537,8 @@ rust-scraper supports optional features for extended functionality:
 |---------|-------------|---------|
 | `images` | Image downloading support | `mime-type-detector` |
 | `documents` | Document downloading support | `mime-type-detector` |
-| `zvec` | Zvec export format | `zvec-sys` |
 | `ai` | AI semantic cleaning | `ort`, `tokenizers`, `tract-onnx`, etc. |
-| `full` | All features | `images`, `documents`, `zvec` |
+| `full` | All features | `images`, `documents` |
 
 ### Using Feature Flags
 
@@ -714,15 +709,14 @@ Options:
           [default: markdown]                                           
                                                                         
       --export-format <EXPORT_FORMAT>                                   
-          Export format for RAG pipeline (jsonl, zvec, auto)            
-                                                                        
-          Creates output suitable for retrieval-augmented generation: - jsonl: JSON Lines format (one JSON per line), optimal for RAG - zvec: Alibaba Zvec format (requires `--features zvec`) - auto: Detect from existing export files
+          Export format for RAG pipeline (jsonl, auto)            
+                                                                   
+          Creates output suitable for retrieval-augmented generation: - jsonl: JSON Lines format (one JSON per line), optimal for RAG - auto: Detect from existing export files
                                                                         
           Use this for LLM/RAG pipelines that need batch export.        
                                                                         
           Possible values:                                              
           - jsonl: JSONL format (JSON Lines - one JSON object per line) Optimal for RAG pipelines and vector database ingestion
-          - zvec:  Zvec format (for vector database imports) Schema: id (UUID), text (String), embedding (Vec<f32>) Requires `zvec` feature to be enabled
           - auto:  Auto-detect format from existing export files        
                                                                         
           [default: jsonl]                                              
@@ -798,7 +792,7 @@ Options:
 ### v1.0.0 (2026-03-11)
 
 - ✅ Full CLI documentation with all verified flags
-- ✅ Feature flags documented (`ai`, `zvec`, `images`, `documents`)
+- ✅ Feature flags documented (`ai`, `images`, `documents`)
 - ✅ Concurrency auto-detection (hardware-aware)
 - ✅ Sitemap support with auto-discovery
 - ✅ TUI interactive mode

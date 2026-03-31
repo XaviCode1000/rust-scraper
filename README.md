@@ -100,7 +100,7 @@ cargo build --release
 |---------|-------------|--------------|
 | `images` | Enable image downloading | `mimetype-detector` |
 | `documents` | Enable document downloading | `mimetype-detector` |
-| `full` | All features except AI | `images`, `documents`, `zvec` |
+| `full` | All features except AI | `images`, `documents` |
 | `ai` | AI-powered semantic cleaning | `tract-onnx`, `tokenizers`, `hf-hub`, `ort` |
 
 **Build with AI features:**
@@ -389,7 +389,7 @@ cargo doc --open
 
 - **Rust:** 1.80+ (MSRV)
 - **Cargo:** 1.80+
-- **Optional:** CMake, C++17, liblz4-dev (for `zvec` feature)
+- **Optional:** CMake, C++17 for `tract-onnx`
 
 ### Build Commands
 

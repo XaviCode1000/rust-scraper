@@ -52,7 +52,7 @@ cargo run -- --help
 |------|---------|-------------|
 | `-o, --output <DIR>` | `output` | Output directory for scraped content |
 | `-f, --format <FORMAT>` | `markdown` | Output format: `markdown`, `json`, `text` |
-| `--export-format <FORMAT>` | `jsonl` | RAG export: `jsonl`, `zvec`, `auto` |
+| `--export-format <FORMAT>` | `jsonl` | RAG export: `jsonl`, `auto` |
 | `--max-pages <N>` | `10` | Maximum pages to scrape |
 | `--delay-ms <MS>` | `1000` | Delay between requests in milliseconds |
 | `--concurrency <N>` | `auto` | Parallel requests (auto-detects CPU) |
@@ -71,7 +71,6 @@ cargo run -- --help
 **RAG export formats (`--export-format`):**
 
 - `jsonl` — JSON Lines (one JSON per line), optimal for RAG pipelines
-- `zvec` — Alibaba Zvec format (requires `--features zvec`)
 - `auto` — Auto-detect from existing export files
 
 ---
@@ -184,19 +183,6 @@ cargo run --features ai -- --url https://example.com \
 {"url": "https://example.com/page1", "title": "Page Title", "content": "...", "embedding": [0.1, 0.2, ...]}
 {"url": "https://example.com/page2", "title": "Another Page", "content": "...", "embedding": [0.3, 0.4, ...]}
 ```
-
-### Zvec Format
-
-```bash
-# Requires --features zvec
-cargo run --features zvec -- --url https://example.com \
-  --export-format zvec
-```
-
-**Schema:**
-- `id` — UUID
-- `text` — String (content)
-- `embedding` — `Vec<f32>` (for vector database imports)
 
 ### Resume Mode
 
@@ -380,15 +366,6 @@ cargo run -- --url https://example.com --delay-ms 3000
 - Try a different `--selector`
 - Check if page uses JavaScript rendering (not supported)
 - Verify page has actual content
-
-#### `Zvec feature not enabled`
-
-**Cause:** Requested `--export-format zvec` without feature flag.
-
-**Solution:**
-```bash
-cargo run --features zvec -- --url https://example.com --export-format zvec
-```
 
 #### `Modo offline: modelo '<repo>' no está en caché`
 
