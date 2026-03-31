@@ -13,6 +13,8 @@ allow = [
     "Unicode-DFS-2016",
     "MPL-2.0",
     "OpenSSL",
+    "Zlib",
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]
