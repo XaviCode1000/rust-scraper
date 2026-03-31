@@ -1,8 +1,6 @@
-[build]
-rustc-wrapper = "sccache"
-
-# Aliases removed - cargo-nextest/cargo-watch/cargo-llvm-cov already work
-# via `cargo nextest` / `cargo watch` / `cargo llvm-cov` when installed
+# Cargo configuration for local development
+# Note: sccache wrapper removed - CI uses Swatinem/rust-cache@v2
+# For local dev, set RUSTC_WRAPPER=sccache in your shell instead
 
 [profile.dev]
 opt-level = 0
