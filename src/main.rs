@@ -27,7 +27,7 @@ use clap::Parser;
 use rust_scraper::{
     adapters::tui,
     application::{discover_urls_for_tui, scrape_urls_for_tui},
-    export_factory, validate_and_parse_url, Args, CrawlerConfig, ExportFormat, ScraperConfig,
+    export_factory, validate_and_parse_url, Args, CrawlerConfig, ScraperConfig,
     UserAgentCache,
 };
 use std::path::PathBuf;
@@ -133,18 +133,6 @@ async fn main() -> anyhow::Result<()> {
         );
         discovered_urls
     };
-
-    // 9. Check Zvec feature availability
-    if args.export_format == ExportFormat::Zvec
-        && !rust_scraper::infrastructure::export::zvec_exporter::ZvecExporter::is_available()
-    {
-        warn!(
-            "⚠️  Zvec format requested but not available. Enable with: cargo build --features zvec"
-        );
-        return Err(anyhow::anyhow!(
-            "Zvec feature not enabled. Use: cargo build --features zvec"
-        ));
-    }
 
     // 9a. Initialize StateStore for resume mode
     let state_store = if args.resume {

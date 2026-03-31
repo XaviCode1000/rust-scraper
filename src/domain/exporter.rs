@@ -216,17 +216,15 @@ mod tests {
 
     #[test]
     fn test_export_format_extension() {
-        // ExportFormat is for RAG pipeline: Jsonl, Zvec, Auto
+        // ExportFormat is for RAG pipeline: Jsonl, Auto
         assert_eq!(ExportFormat::Jsonl.extension(), "jsonl");
-        assert_eq!(ExportFormat::Zvec.extension(), "zvec");
         assert_eq!(ExportFormat::Auto.extension(), "auto");
     }
 
     #[test]
     fn test_export_format_name() {
-        // ExportFormat is for RAG pipeline: Jsonl, Zvec, Auto
+        // ExportFormat is for RAG pipeline: Jsonl, Auto
         assert_eq!(ExportFormat::Jsonl.name(), "JSONL");
-        assert_eq!(ExportFormat::Zvec.name(), "Zvec");
         assert_eq!(ExportFormat::Auto.name(), "Auto");
     }
 
@@ -253,12 +251,12 @@ mod tests {
 
     #[test]
     fn test_exporter_config_with_builder_pattern() {
-        let config = ExporterConfig::new(PathBuf::from("/data"), ExportFormat::Zvec, "my_data")
+        let config = ExporterConfig::new(PathBuf::from("/data"), ExportFormat::Jsonl, "my_data")
             .with_append(true)
             .with_batch_size(1000);
 
         assert_eq!(config.output_dir, PathBuf::from("/data"));
-        assert_eq!(config.format, ExportFormat::Zvec);
+        assert_eq!(config.format, ExportFormat::Jsonl);
         assert_eq!(config.filename, "my_data");
         assert!(config.append);
         assert_eq!(config.batch_size, Some(1000));

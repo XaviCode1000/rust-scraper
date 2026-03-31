@@ -8,9 +8,7 @@ use tracing::info;
 
 use crate::{
     domain::{entities::ExportFormat, Exporter, ExporterConfig, ExporterError},
-    infrastructure::export::{
-        jsonl_exporter, state_store::StateStore, zvec_exporter::ZvecExporter,
-    },
+    infrastructure::export::{jsonl_exporter, state_store::StateStore},
 };
 
 /// Create exporter based on output format
@@ -26,17 +24,6 @@ pub fn create_exporter(
             info!("Creating JSONL exporter: {:?}", config.output_path());
             let exporter = jsonl_exporter::JsonlExporter::new(config);
             Ok(Box::new(exporter))
-        }
-        ExportFormat::Zvec => {
-            if ZvecExporter::is_available() {
-                info!("Creating Zvec exporter: {:?}", config.output_path());
-                let exporter = ZvecExporter::new(config);
-                Ok(Box::new(exporter))
-            } else {
-                Err(ExporterError::InvalidConfig(
-                    "Zvec format requires zvec feature enabled".to_string(),
-                ))
-            }
         }
         ExportFormat::Auto => {
             // Auto-detect: checks if export.jsonl exists, then uses Jsonl

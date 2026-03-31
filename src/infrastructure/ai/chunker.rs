@@ -1,16 +1,13 @@
-//! HTML chunker with arena allocator
+//! HTML chunker
 //!
 //! Implements semantic chunking following 2026 best practices:
 //! - Two-pass approach: structural boundaries → embedding refinement
-//! - Arena allocator for efficient memory management (`mem-arena-allocator`)
 //! - SmallVec optimization for small collections (`mem-smallvec`)
 //!
 //! # Thread Safety
 //!
 //! `HtmlChunker` is `Send + Sync` and can be shared across threads.
-//! The arena allocator pattern is used internally per-call, not stored in the struct.
 
-use bumpalo::Bump;
 use smallvec::SmallVec;
 use uuid::Uuid;
 
@@ -19,17 +16,11 @@ use crate::error::SemanticError;
 
 use super::sentence::SentenceSplitter;
 
-/// HTML chunker with arena allocator
+/// HTML chunker
 ///
 /// Chunks HTML content into semantic segments using a two-pass approach:
 /// 1. **Structural boundaries**: Split by paragraphs and HTML elements
 /// 2. **Embedding-based refinement**: Merge/split based on semantic similarity
-///
-/// # Memory Management
-///
-/// Uses `bumpalo` arena allocator for efficient chunk metadata allocation.
-/// This reduces allocation overhead when processing many chunks.
-/// The arena is created per-call to ensure thread safety (`Send + Sync`).
 ///
 /// # Examples
 ///
@@ -173,9 +164,6 @@ impl HtmlChunker {
     /// # }
     /// ```
     pub fn chunk(&self, html: &str) -> Result<Vec<DocumentChunk>, SemanticError> {
-        // Create arena for this call (not stored in struct for thread safety)
-        let _arena = Bump::new();
-
         // Pass 1: Structural boundaries (strip HTML and split by paragraphs)
         let text = self.strip_html_tags(html);
         let paragraphs: Vec<&str> = text

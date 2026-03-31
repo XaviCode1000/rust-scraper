@@ -6,7 +6,7 @@
 //! - Content conversion (HTML to Markdown, syntax highlighting)
 //! - File I/O (saving results, frontmatter generation)
 //! - Web crawling (FASE 1)
-//! - Export pipeline (JSONL, Zvec) (FASE 1)
+//! - Export pipeline (JSONL) (FASE 1)
 //! - AI-powered semantic cleaning (FASE 1 - feature-gated)
 //!
 //! Following Clean Architecture: infrastructure depends on domain, not vice versa.

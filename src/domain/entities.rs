@@ -65,17 +65,12 @@ pub struct ScrapedContent {
 /// | Format | Extension | Use Case |
 /// |--------|-----------|----------|
 /// | Jsonl | .jsonl | One JSON object per line, optimal for RAG |
-/// | Zvec | .zvec | Alibaba Zvec format for vector DB imports |
 /// | Auto | .auto | Auto-detect from existing files |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, clap::ValueEnum)]
 pub enum ExportFormat {
     /// JSONL format (JSON Lines - one JSON object per line)
     /// Optimal for RAG pipelines and vector database ingestion
     Jsonl,
-    /// Zvec format (for vector database imports)
-    /// Schema: id (UUID), text (String), embedding (Vec<f32>)
-    /// Requires `zvec` feature to be enabled
-    Zvec,
     /// Auto-detect format from existing export files
     Auto,
 }
@@ -86,7 +81,6 @@ impl ExportFormat {
     pub fn extension(&self) -> &'static str {
         match self {
             Self::Jsonl => "jsonl",
-            Self::Zvec => "zvec",
             Self::Auto => "auto",
         }
     }
@@ -96,7 +90,6 @@ impl ExportFormat {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Jsonl => "JSONL",
-            Self::Zvec => "Zvec",
             Self::Auto => "Auto",
         }
     }
@@ -106,7 +99,7 @@ impl ExportFormat {
 ///
 /// Represents a single unit of content that can be:
 /// - Embedded in a vector database
-/// - Exported in various formats (JSONL, Zvec, Markdown)
+/// - Exported in various formats (JSONL, Markdown)
 ///
 /// The embeddings field is optional because in the initial scraping phase
 /// the AI model may not be available yet. It can be populated later
