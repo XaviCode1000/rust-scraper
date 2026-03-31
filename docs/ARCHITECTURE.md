@@ -982,7 +982,6 @@ hf-hub = { version = "0.5", features = ["tokio"], optional = true }
 memmap2 = { version = "0.9", optional = true }
 ndarray = { version = "0.17", optional = true }
 unicode-segmentation = { version = "1.12", optional = true }
-bumpalo = { version = "3.16", optional = true }
 smallvec = { version = "1.13", optional = true }
 wide = { version = "0.7", optional = true }
 ```
@@ -1031,7 +1030,7 @@ strip = true
 7. **SHA256 Hashing** — Fast unique filenames
 8. **Zero-Copy** — Memory-mapped model loading
 9. **SIMD** — Cosine similarity with `wide` crate
-10. **Arena Allocators** — `bumpalo` for chunk metadata
+10. **SIMD** — Cosine similarity with `wide` crate
 
 ---
 
@@ -1093,7 +1092,7 @@ rg "^use rust_scraper::(domain|application)" src/infrastructure/  # Returns matc
 - ✅ mem-with-capacity — `Vec::with_capacity()` where size known
 - ✅ mem-smallvec — `SmallVec` in AI module (feature-gated)
 - ✅ mem-zero-copy — Memory-mapped model loading
-- ✅ mem-arena-allocator — `bumpalo` for chunk metadata
+- ✅ mem-smallvec — SmallVec for usually-small collections
 
 ### HIGH Priority
 

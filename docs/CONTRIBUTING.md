@@ -29,10 +29,9 @@ Thank you for considering contributing to rust-scraper! This document provides *
 
 | Requirement | Version | How to Check |
 |-------------|---------|--------------|
-| **Rust** | 1.80+ (MSRV) | `rustc --version` (current: 1.93.0) |
-| **Cargo** | 1.80+ | `cargo --version` (current: 1.93.0) |
+| **Rust** | 1.88+ (MSRV) | `rustc --version` (current: 1.93.0) |
+| **Cargo** | 1.88+ | `cargo --version` (current: 1.93.0) |
 | **OS** | Linux, macOS, Windows | Tested on CachyOS Linux |
-| **Optional (AI features)** | CMake, C++17 | Required for `tract-onnx` |
 
 ### Setup Steps
 

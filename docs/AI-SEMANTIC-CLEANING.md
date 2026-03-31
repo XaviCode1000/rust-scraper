@@ -31,7 +31,7 @@ Rust Scraper includes **AI-powered semantic content extraction** using Small Lan
        │
        ▼
 ┌─────────────────────────────────┐
-│ [1] HtmlChunker                 │  ← bumpalo arena allocator
+│ [1] HtmlChunker                 │  ← SmallVec optimization
 │     Split into semantic chunks  │     src/infrastructure/ai/chunker.rs
 └──────┬──────────────────────────┘
        │
@@ -66,8 +66,8 @@ Rust Scraper includes **AI-powered semantic content extraction** using Small Lan
 ```
 src/infrastructure/ai/
 ├── mod.rs                    # Module exports
-├── chunk_id.rs               # Arena-allocated chunk IDs
-├── chunker.rs                # bumpalo arena allocator
+├── chunk_id.rs               # Chunk ID generation (newtype)
+├── chunker.rs                # Semantic chunking (SmallVec)
 ├── embedding_ops.rs          # wide::f32x8 SIMD operations
 ├── inference_engine.rs       # tract-onnx inference
 ├── model_cache.rs            # SHA256 model validation
@@ -91,7 +91,7 @@ Infrastructure Layer (Implementations)
 ├── ai/
 │   ├── inference_engine.rs    (tract-onnx)
 │   ├── tokenizer.rs           (HuggingFace)
-│   ├── chunker.rs             (bumpalo arena)
+│   ├── chunker.rs             (SmallVec optimization)
 │   ├── sentence.rs            (unicode-segmentation)
 │   ├── relevance_scorer.rs    (SIMD cosine)
 │   ├── embedding_ops.rs       (wide::f32x8)
@@ -142,7 +142,6 @@ hf-hub = { version = "0.5", features = ["tokio"], optional = true }
 
 # Memory optimization
 memmap2 = { version = "0.9", optional = true }
-bumpalo = { version = "3.16", optional = true }
 smallvec = { version = "1.13", optional = true }
 
 # SIMD acceleration
@@ -278,6 +277,34 @@ RUSTFLAGS="-C target-cpu=haswell" cargo build --release --features ai
 
 ## 🐛 Bug Fixes
 
+### v1.0.7 - Production Assertion Fix (CRITICAL)
+
+**Bug Fix**: `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (`inference_engine.rs`)
+
+**Problem**: `debug_assert_eq!` compiles to nothing in `--release` builds. Mismatched tensor lengths were silently creating invalid model inputs in production.
+
+**Impact**:
+- In debug builds: panics correctly on length mismatch
+- In release builds (before fix): silently creates invalid inputs with mismatched tensor lengths, leading to unpredictable inference results
+- After fix: panics correctly in both debug and release builds
+
+**Fix**:
+```rust
+// ❌ WRONG (before v1.0.7)
+debug_assert_eq!(input_ids.len(), attention_mask.len());
+debug_assert_eq!(input_ids.len(), token_type_ids.len());
+
+// ✅ CORRECT (v1.0.7+)
+assert_eq!(input_ids.len(), attention_mask.len(),
+    "input_ids and attention_mask must have same length");
+assert_eq!(input_ids.len(), token_type_ids.len(),
+    "input_ids and token_type_ids must have same length");
+```
+
+**Location**: `src/infrastructure/ai/inference_engine.rs`, `ModelInput::new()`
+
+---
+
 ### v1.0.5 - Embeddings Preservation Bug (CRITICAL)
 
 **Issue:** [#9](https://github.com/XaviCode1000/rust-scraper/issues/9)
@@ -410,7 +437,7 @@ This implementation follows the [rust-skills](https://github.com/leonardomso/rus
 |------|-------------|----------|
 | `own-borrow-over-clone` | Accept `&[T]` not `&Vec<T>` | `filter_with_embeddings(&[(Chunk, Vec<f32>)])` |
 | `own-slice-over-vec` | Borrow slices | `reference: Option<&[f32]>` |
-| `mem-arena-allocator` | bumpalo for chunk metadata | `chunker.rs` |
+| `mem-smallvec` | SmallVec for small collections | `chunker.rs` |
 | `mem-reuse-collections` | Pre-allocate, clear buffers | `inference_engine.rs` |
 | `mem-with-capacity` | `Vec::with_capacity()` | Hot paths |
 | `err-thiserror-lib` | Typed error handling | `mod.rs` error types |
@@ -630,7 +657,7 @@ git log --oneline --grep="embed" | head -5
 # Result: 4 commits found (c7ca7b4, 528657b, etc.)
 
 # Dependencies
-rg "^tract-|^tokenizers|^hf-hub|^wide|^bumpalo" Cargo.toml
+rg "^tract-|^tokenizers|^hf-hub|^wide|^smallvec" Cargo.toml
 # Result: All AI dependencies confirmed
 
 # Bug fix verification

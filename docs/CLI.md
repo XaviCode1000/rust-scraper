@@ -629,22 +629,13 @@ cargo run --features images -- --url "https://example.com" --download-images
 Error: Feature 'images' is not enabled
 ```
 
-### AI Feature Compilation Errors
+### AI Feature Compilation
 
-The `ai` feature requires additional system dependencies:
-
-```bash
-# Install build dependencies (Arch Linux / CachyOS)
-sudo pacman -Sy cmake llvm clang
-
-# Install C++ toolchain
-sudo pacman -Sy gcc gcc-libs
-```
+The `ai` feature is 100% Pure Rust — no CMake, no C++ toolchain needed. All dependencies (`tract-onnx`, `tokenizers`, `hf-hub`) compile natively with `cargo build --features ai`.
 
 **Common Errors:**
-- `CMake not found` → Install CMake
-- `Cannot find -lstdc++` → Install GCC
 - `ONNX runtime not found` → Build with `--features ai`
+- Out of memory during build → Use `sccache` or increase swap
 
 ### Memory Issues on Large Scrapes
 

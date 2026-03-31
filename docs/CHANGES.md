@@ -11,7 +11,7 @@
 
 | Metric | Value |
 |--------|-------|
-| **Current Version** | v1.0.6 (tagged) |
+| **Current Version** | v1.0.7 (tagged) |
 | **Total Commits** | 90+ |
 | **Commits Since v1.0.0** | 45+ |
 | **Total Contributors** | 2 (XaviCode1000: 76, Xavi: 3) |
@@ -42,6 +42,36 @@
 ---
 
 ## 📦 Release History
+
+### [v1.0.7] - 2026-03-31 - Documentation Veracity Audit & Dead Code Cleanup
+
+**Tag**: v1.0.7  
+**Key Focus**: Clean codebase, accurate documentation, production safety
+
+#### Changes
+- ✅ Removed dead code: `bumpalo` dependency and `zvec` stub completely purged
+- ✅ **Bug Fix**: `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (`inference_engine.rs`)
+  - `debug_assert_eq!` compiles to nothing in `--release`
+  - Mismatched tensor lengths now panic correctly in production instead of creating silently invalid inputs
+- ✅ Updated all documentation to reflect current codebase (no phantom components)
+- ✅ Removed CMake/C++ build requirements from docs (AI is 100% Pure Rust via `tract-onnx`)
+- ✅ Updated Feature Flags tables: `full = [images, documents]` (no zvec)
+
+#### Files Modified
+- `docs/AI-SEMANTIC-CLEANING.md` — Removed bumpalo/arena references, added v1.0.7 bug fix
+- `docs/ARCHITECTURE.md` — Removed arena allocator references, updated AI deps
+- `README.md` — Removed CMake requirement, updated version to 1.0.7
+- `docs/CONTRIBUTING.md` — Removed CMake requirement
+- `docs/RAG-EXPORT.md` — Updated zvec deprecation note
+- `docs/CLI.md` — Already clean (no zvec export references)
+
+#### Test Results
+```
+cargo nextest run → 252 tests passed
+cargo clippy -- -D warnings → ✅ clean
+```
+
+---
 
 ### [v1.0.6] - 2026-03-31 - HTTP Client Improvements & Real Site Validation
 
@@ -93,9 +123,9 @@ Compliance (Spec 2) → 11/11
 
 **AI Infrastructure (Issue #9)** - Complete RAG Pipeline:
 - `SemanticCleaner` trait with sealed pattern
-- `InferenceEngine` with ort (ONNX Runtime)
+- `InferenceEngine` with tract-onnx (100% Rust)
 - `MiniLmTokenizer` (HuggingFace tokenizers)
-- `HtmlChunker` with bumpalo arena allocator
+- `HtmlChunker` with SmallVec optimization
 - `RelevanceScorer` with SIMD cosine similarity (wide::f32x8)
 - Model downloader & cache (hf-hub, memmap2)
 
@@ -128,11 +158,11 @@ c7ca7b4 fix(ai): Preserve embeddings during semantic filtering (Issue #9)
 #### 📦 Dependencies Added
 
 ```toml
-ort = "2.0.0-rc.12"           # ONNX inference
+ort = "=2.0.0-rc.10"         # ONNX inference (pinned)
 tokenizers = "0.21"           # HuggingFace tokenizers
 wide = "0.7"                  # SIMD acceleration (AVX2)
-bumpalo = "3.16"              # Arena allocator
-hf-hub = "0.4"                # Model download
+smallvec = "1.13"             # Small vector optimization
+hf-hub = "0.5"                # Model download
 unicode-segmentation = "1.12" # Sentence splitting
 ```
 

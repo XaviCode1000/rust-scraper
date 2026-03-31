@@ -6,7 +6,7 @@
 [![Tests](https://img.shields.io/badge/tests-252%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.80%2B-orange)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.5-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
+[![Version](https://img.shields.io/badge/version-1.0.7-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
 
 ---
 
@@ -90,9 +90,8 @@ cargo build --release
 
 ### Requirements
 
-- **Rust:** 1.80+ (MSRV)
-- **Cargo:** 1.80+
-- **Optional (AI features):** CMake, C++17 for `tract-onnx`
+- **Rust:** 1.88+ (MSRV)
+- **Cargo:** 1.88+
 
 ### Feature Flags
 
@@ -387,9 +386,8 @@ cargo doc --open
 
 ### Requirements
 
-- **Rust:** 1.80+ (MSRV)
-- **Cargo:** 1.80+
-- **Optional:** CMake, C++17 for `tract-onnx`
+- **Rust:** 1.88+ (MSRV)
+- **Cargo:** 1.88+
 
 ### Build Commands
 
@@ -637,7 +635,7 @@ By contributing to this project, you agree that your contributions will be licen
 | **Public Functions** | 64 |
 | **MSRV** | 1.80.0 |
 | **Dependencies** | 45+ (core), 60+ (with AI) |
-| **Latest Version** | 1.0.5 |
+| **Latest Version** | 1.0.7 |
 | **Test Runner** | cargo-nextest (4x faster) |
 | **Background Checker** | bacon (instant feedback) |
 
@@ -653,6 +651,8 @@ By contributing to this project, you agree that your contributions will be licen
 - [x] **v1.0.5** — Performance optimization (eliminated unnecessary cloning)
 - [x] **v1.0.6** — HTTP Client improvements (Option A: headers, cookies, retry, backoff)
 - [x] **v1.0.6** — Real site validation (books.toscrape.com, quotes.toscrape.com, webscraper.io)
+- [x] **v1.0.7** — Dead code cleanup (bumpalo, zvec stub removed)
+- [x] **v1.0.7** — Production assertion fix (`debug_assert_eq!` → `assert_eq!` in inference)
 
 ### Planned 🚧
 

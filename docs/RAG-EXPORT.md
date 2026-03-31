@@ -610,7 +610,7 @@ strip = true
 - [x] **Fase 1: Infraestructura de Exportación**
   - [x] Definir el trait Exporter en domain/
   - [x] Implementar JsonlExporter con buffering eficiente
-- [x] **Fase 2: Integración Zvec** *(removed in v1.0.7 — zvec feature deprecated)*
+- [x] **Fase 2: Export Format Extensions** *(zvec format removed in v1.0.7 — deprecated feature)*
 - [x] **Fase 3: Resiliencia (Resume)**
   - [x] Crear el módulo de persistencia de estado (StateStore)
   - [x] Integrar la lógica de "skip" en el crawler_service
