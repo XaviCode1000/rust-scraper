@@ -1,9 +1,3 @@
 # Cargo configuration for local development
-# Note: sccache wrapper removed - CI uses Swatinem/rust-cache@v2
-# For local dev, set RUSTC_WRAPPER=sccache in your shell instead
-
-[profile.dev]
-opt-level = 0
-
-[profile.test]
-incremental = true
+# For sccache, set RUSTC_WRAPPER=sccache in your shell environment
+# CI uses Swatinem/rust-cache@v2 instead

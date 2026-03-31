@@ -35,6 +35,9 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: rust_scraper
           - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: rust_scraper
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: rust_scraper
           - os: windows-latest
@@ -47,10 +50,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y liblz4-dev
 
       - name: Build Release
         run: cargo build --release --target ${{ matrix.target }}
@@ -80,6 +87,7 @@ jobs:
         run: |
           cd artifacts
           cp rust_scraper-x86_64-unknown-linux-gnu/rust_scraper rust_scraper-x86_64-unknown-linux-gnu/rust_scraper-linux-x86_64
+          cp rust_scraper-aarch64-apple-darwin/rust_scraper rust_scraper-aarch64-apple-darwin/rust_scraper-macos-aarch64
           cp rust_scraper-x86_64-apple-darwin/rust_scraper rust_scraper-x86_64-apple-darwin/rust_scraper-macos-x86_64
           cp rust_scraper-x86_64-pc-windows-msvc/rust_scraper.exe rust_scraper-x86_64-pc-windows-msvc/rust_scraper-windows-x86_64.exe
 
@@ -90,6 +98,7 @@ jobs:
           files: |
             artifacts/rust_scraper-x86_64-pc-windows-msvc/rust_scraper-windows-x86_64.exe
             artifacts/rust_scraper-x86_64-unknown-linux-gnu/rust_scraper-linux-x86_64
+            artifacts/rust_scraper-aarch64-apple-darwin/rust_scraper-macos-aarch64
             artifacts/rust_scraper-x86_64-apple-darwin/rust_scraper-macos-x86_64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

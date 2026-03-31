@@ -26,6 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies (for zvec-sys FFI)
+        run: sudo apt-get update && sudo apt-get install -y liblz4-dev
+
       - name: Install Rust (MSRV 1.80)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -68,6 +71,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies (for zvec-sys FFI)
+        run: sudo apt-get update && sudo apt-get install -y liblz4-dev
+
       - name: Install Rust (MSRV 1.80)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -109,6 +115,9 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies (for zvec-sys FFI)
+        run: sudo apt-get update && sudo apt-get install -y liblz4-dev
 
       - name: Install Rust (MSRV 1.80)
         uses: dtolnay/rust-toolchain@stable
