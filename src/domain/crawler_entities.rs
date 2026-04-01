@@ -385,6 +385,10 @@ pub enum CrawlError {
     /// Infrastructure layer converts SitemapError → this variant.
     #[error("sitemap error: {0}")]
     Sitemap(String),
+
+    /// Sitemap not found during auto-discovery
+    #[error("sitemap not found for {0}")]
+    SitemapNotFound(String),
 }
 
 /// Pattern matching helper function

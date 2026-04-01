@@ -13,5 +13,5 @@ pub mod url_queue;
 
 pub use http_client::{create_rate_limited_client, fetch_url};
 pub use link_extractor::{extract_links, is_internal_link, normalize_url};
-pub use sitemap_parser::{SitemapConfig, SitemapError, SitemapParser};
+pub use sitemap_parser::{resolve_url, SitemapConfig, SitemapError, SitemapParser};
 pub use url_queue::UrlQueue;

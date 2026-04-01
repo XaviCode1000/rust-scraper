@@ -67,10 +67,60 @@ pub enum SitemapError {
 
     #[error("decompressed data too large: exceeds {0} bytes")]
     DecompressedTooLarge(usize),
+
+    #[error("no sitemap found at {0}")]
+    SitemapNotFound(String),
+
+    #[error("invalid content type: expected XML, got {0}")]
+    InvalidContentType(String),
 }
 
 /// Result type for sitemap operations
 pub type Result<T> = std::result::Result<T, SitemapError>;
+
+/// Safely resolve a potentially-relative URL against a base URL.
+///
+/// Handles all RFC 3986 reference types: absolute, scheme-relative,
+/// absolute-path, relative-path. Returns `None` for empty inputs.
+///
+/// Following **err-result-over-panic**: returns Option, never panics.
+/// Following **perf-iter-over-index**: uses early returns, no loops.
+///
+/// # Arguments
+///
+/// * `base` - The base URL for resolution context
+/// * `input` - The URL or path to resolve
+///
+/// # Returns
+///
+/// * `Some(Url)` - Successfully resolved URL
+/// * `None` - Empty input or resolution failure
+///
+/// # Examples
+///
+/// ```
+/// use url::Url;
+/// use rust_scraper::infrastructure::crawler::sitemap_parser::resolve_url;
+///
+/// let base = Url::parse("https://example.com/sitemap.xml").unwrap();
+/// let resolved = resolve_url(&base, "/page.html").unwrap();
+/// assert_eq!(resolved.as_str(), "https://example.com/page.html");
+/// ```
+#[must_use]
+pub fn resolve_url(base: &Url, input: &str) -> Option<Url> {
+    let input = input.trim();
+    if input.is_empty() {
+        return None;
+    }
+
+    // Fast path: already absolute
+    if input.starts_with("http://") || input.starts_with("https://") {
+        return Url::parse(input).ok();
+    }
+
+    // Use RFC 3986 resolution via url::Url::join
+    base.join(input).ok()
+}
 
 /// Sitemap parser configuration (builder pattern)
 ///
@@ -244,6 +294,29 @@ impl SitemapParser {
 
         // Check if gzip compressed
         // Following security-filter-input: validate content type
+        // Validate content type is XML or compatible - reject non-XML responses early
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .map(|v| v.to_str().unwrap_or(""))
+            .unwrap_or("");
+
+        let is_xml = content_type.is_empty()
+            || content_type.contains("application/xml")
+            || content_type.contains("text/xml")
+            || content_type.contains("application/xhtml+xml")
+            || url.ends_with(".xml")
+            || url.ends_with(".xml.gz");
+
+        if !is_xml {
+            tracing::warn!(
+                "Sitemap URL returned non-XML content type: {} from {}",
+                content_type,
+                url
+            );
+            return Err(SitemapError::InvalidContentType(content_type.to_string()));
+        }
+
         let is_gzip = url.ends_with(".gz")
             || response
                 .headers()
@@ -343,13 +416,8 @@ impl SitemapParser {
                     // Following own-cow-for-owned-borrowed: unescape returns Cow
                     if let Ok(text) = e.unescape() {
                         // Following security-filter-input: validate URL scheme
-                        // Use base_url.join() to resolve relative URLs like /page.html
-                        let resolved = if text.starts_with("http://") || text.starts_with("https://") {
-                            Url::parse(&text).ok()
-                        } else {
-                            base_url.join(&text).ok()
-                        };
-                        if let Some(url) = resolved {
+                        // Use resolve_url() to handle relative URLs safely
+                        if let Some(url) = resolve_url(base_url, &text) {
                             // Only http/https schemes allowed
                             if url.scheme() == "http" || url.scheme() == "https" {
                                 urls.insert(url);
@@ -458,7 +526,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let urls = parser.parse_xml_sitemap(xml.as_bytes()).await.unwrap();
+        let base = Url::parse("https://example.com").unwrap();
+        let urls = parser.parse_xml_sitemap(xml.as_bytes(), &base).await.unwrap();
 
         assert_eq!(urls.len(), 3);
         assert!(urls
@@ -477,7 +546,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let urls = parser.parse_xml_sitemap(xml.as_bytes()).await.unwrap();
+        let base = Url::parse("https://example.com").unwrap();
+        let urls = parser.parse_xml_sitemap(xml.as_bytes(), &base).await.unwrap();
 
         // HashSet should deduplicate
         assert_eq!(urls.len(), 2);
@@ -491,7 +561,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let result = parser.parse_xml_sitemap(xml.as_bytes()).await;
+        let base = Url::parse("https://example.com").unwrap();
+        let result = parser.parse_xml_sitemap(xml.as_bytes(), &base).await;
 
         assert!(matches!(result, Err(SitemapError::NoUrlsFound)));
     }
@@ -506,7 +577,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let result = parser.parse_xml_sitemap(xml.as_bytes()).await;
+        let base = Url::parse("https://example.com").unwrap();
+        let result = parser.parse_xml_sitemap(xml.as_bytes(), &base).await;
 
         // Should handle gracefully (quick_xml is lenient)
         // At minimum, shouldn't panic
@@ -581,7 +653,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let urls = parser.parse_xml_sitemap(xml.as_bytes()).await.unwrap();
+        let base = Url::parse("https://example.com").unwrap();
+        let urls = parser.parse_xml_sitemap(xml.as_bytes(), &base).await.unwrap();
 
         // Only http/https should be included
         assert_eq!(urls.len(), 2);
@@ -604,7 +677,8 @@ mod tests {
         </urlset>"#;
 
         let parser = SitemapParser::new();
-        let urls = parser.parse_xml_sitemap(xml.as_bytes()).await.unwrap();
+        let base = Url::parse("https://example.com").unwrap();
+        let urls = parser.parse_xml_sitemap(xml.as_bytes(), &base).await.unwrap();
 
         // Should extract all loc elements (including image locs)
         assert!(urls.len() >= 2);

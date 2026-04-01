@@ -647,9 +647,17 @@ pub async fn crawl_with_sitemap(
         }
         _ => {
             tracing::info!("Auto-discovering sitemap URL for {}", base_url);
-            let discovered = discover_sitemap_url(base_url).await?;
-            tracing::info!("Discovered sitemap URL: {}", discovered);
-            discovered
+            match discover_sitemap_url(base_url).await {
+                Ok(url) => {
+                    tracing::info!("Discovered sitemap URL: {}", url);
+                    url
+                }
+                Err(CrawlError::SitemapNotFound(_)) => {
+                    tracing::warn!("no sitemap found, switching to standard crawling");
+                    return Ok(Vec::new());
+                }
+                Err(e) => return Err(e),
+            }
         }
     };
 
@@ -767,12 +775,9 @@ async fn discover_sitemap_url(base_url: &str) -> Result<String, CrawlError> {
         }
     }
 
-    // Last resort: return default location (may 404, but caller handles)
-    let fallback = base
-        .join("/sitemap.xml")
-        .map_err(|e| CrawlError::InvalidUrl(e.to_string()))?;
-    tracing::info!("No sitemap found, using default: {}", fallback);
-    Ok(fallback.to_string())
+    // No sitemap found - return error instead of guessing
+    tracing::warn!("no sitemap found for {}", base_url);
+    Err(CrawlError::SitemapNotFound(base_url.to_string()))
 }
 
 /// Fetch and parse a sitemap.xml file (legacy - kept for backwards compatibility)
