@@ -162,7 +162,7 @@ pub mod domain;
 pub use domain::semantic_cleaner::SemanticCleaner;
 pub use domain::{
     ContentType, CrawlError, CrawlResult, CrawlerConfig, CrawlerConfigBuilder, DiscoveredUrl,
-    DownloadedAsset, ExportFormat, ScrapedContent, ValidUrl,
+    DownloadedAsset, ExportFormat, JsRenderError, JsRenderer, ScrapedContent, ValidUrl,
 };
 #[cfg(feature = "ai")]
 pub use error::SemanticError;
@@ -170,10 +170,11 @@ pub use error::SemanticError;
 // Application layer — Use cases (orchestration)
 pub mod application;
 pub use application::{
-    crawl_site, crawl_with_sitemap, create_http_client, discover_urls_for_tui, extract_domain,
+    crawl_site, crawl_with_sitemap, create_http_client, detect_spa_content, discover_urls_for_tui,
+    extract_domain,
     http_client::{HttpClient, HttpClientConfig, HttpError},
     is_allowed, is_excluded, is_internal_link, matches_pattern, scrape_multiple_with_limit,
-    scrape_urls_for_tui, scrape_with_config, scrape_with_readability,
+    scrape_urls_for_tui, scrape_with_config, scrape_with_readability, SpaDetectionResult,
 };
 
 // Infrastructure layer — Implementations (technical details)
@@ -780,6 +781,18 @@ pub struct Args {
     #[cfg(not(feature = "ai"))]
     #[arg(long, default_value = "false", hide = true)]
     pub clean_ai: bool,
+
+    // ========== JavaScript Rendering (reserved for v1.4) ==========
+    /// Force JavaScript rendering for SPA sites (not yet implemented)
+    ///
+    /// Reserved for future use. When implemented, this will enable
+    /// headless browser rendering for sites that require JavaScript
+    /// to display content (Single Page Applications).
+    ///
+    /// Currently this flag is a no-op and has no effect.
+    /// Track implementation: https://github.com/XaviCode1000/rust-scraper/issues/16
+    #[arg(long, default_value = "false")]
+    pub force_js_render: bool,
 }
 
 // ============================================================================

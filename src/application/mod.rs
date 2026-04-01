@@ -13,6 +13,7 @@ pub use crawler_service::{
 };
 pub use http_client::create_http_client;
 pub use scraper_service::{
-    scrape_multiple_with_limit, scrape_with_config, scrape_with_readability,
+    detect_spa_content, scrape_multiple_with_limit, scrape_with_config, scrape_with_readability,
+    SpaDetectionResult,
 };
 pub use url_filter::{extract_domain, is_allowed, is_excluded, is_internal_link, matches_pattern};

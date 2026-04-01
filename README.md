@@ -17,6 +17,7 @@
 - [Usage](#-usage)
 - [Testing](#-testing)
 - [Architecture](#-architecture)
+- [Known Limitations](#-known-limitations-spajs-rendered-sites)
 - [Documentation](#-documentation)
 - [Development](#-development)
 - [Bug Fixes](#-bug-fixes)
@@ -499,6 +500,33 @@ strip = true
 
 ---
 
+## ⚠️ Known Limitations: SPA/JS-rendered Sites
+
+### Single Page Applications (SPAs)
+
+**Problem:** Sites that render content client-side via JavaScript (React, Vue, Angular, etc.) return empty or minimal HTML when fetched without a browser engine. The scraper's HTTP client receives only the initial shell HTML — the actual content is injected by JavaScript after page load.
+
+**Symptoms:**
+- Extracted content is below 50 characters after readability/fallback extraction
+- Page titles are empty or generic
+- HTML contains only `<div id="root">` or `<div id="app">` mount points
+
+**Current Behavior (Phase 1):**
+- A warning is emitted via `tracing::warn!` when minimal content is detected
+- Warning format: `{domain} returned minimal content ({N} chars). This site may require JavaScript rendering. This feature is not yet implemented. Track: https://github.com/XaviCode1000/rust-scraper/issues/16`
+- The `--force-js-render` CLI flag is reserved for future use (currently no-op)
+- The `JsRenderer` trait is defined in the domain layer as a forward-compatible stub
+
+**Planned Solution (v1.4 — Phase 2):**
+- Full JavaScript rendering via headless browser (Chromium-based)
+- `JsRenderer` trait implementations in the Infrastructure layer
+- Automatic SPA detection with fallback to JS rendering
+- No new crates will be added until Phase 2 implementation
+
+**Workaround:** For SPA sites, consider using the site's API directly if available, or wait for v1.4 JS rendering support.
+
+---
+
 ## 🤝 Contributing
 
 ### Getting Started
@@ -661,7 +689,8 @@ By contributing to this project, you agree that your contributions will be licen
 
 - [ ] **v1.1.0** — TLS fingerprint impersonation via `wreq` + BoringSSL ([Issue #14](https://github.com/XaviCode1000/rust-scraper/issues/14))
 - [ ] **v1.2.0** — Vector DB integration (LanceDB or Qdrant for RAG export)
-- [ ] **v1.3.0** — JavaScript rendering (headless browser) — for SPA sites
+- [ ] **v1.3.0** — SPA content detection & warnings (Phase 1 of JS rendering)
+- [ ] **v1.4.0** — JavaScript rendering (headless browser) — for SPA sites
 - [ ] **v2.0.0** — Distributed scraping
 
 ---
