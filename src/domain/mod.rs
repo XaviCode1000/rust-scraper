@@ -6,6 +6,7 @@
 pub mod crawler_entities;
 pub mod entities;
 pub mod exporter;
+pub mod js_renderer;
 pub mod value_objects;
 
 #[cfg(feature = "ai")]
@@ -17,4 +18,5 @@ pub use crawler_entities::{
 };
 pub use entities::{DocumentChunk, DownloadedAsset, ExportFormat, ExportState, ScrapedContent};
 pub use exporter::{ExportResult, Exporter, ExporterConfig, ExporterError};
+pub use js_renderer::{JsRenderError, JsRenderer};
 pub use value_objects::ValidUrl;
