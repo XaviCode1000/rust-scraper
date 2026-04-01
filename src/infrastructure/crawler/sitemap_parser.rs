@@ -231,9 +231,9 @@ impl SitemapParser {
             return Err(SitemapError::MaxDepthExceeded);
         }
 
-        // Parse base URL for validation
+        // Parse base URL for validation and relative URL resolution
         // Following own-borrow-over-clone: &str not &String
-        let _base_url = Url::parse(url)?;
+        let base_url = Url::parse(url)?;
 
         // Fetch sitemap content
         // Following security-no-unwrap-in-prod: proper error handling
@@ -275,9 +275,9 @@ impl SitemapParser {
         // Parse based on compression
         // Following mem-streaming-large-data: stream, don't accumulate
         let urls = if is_gzip && self.config.gzip_enabled {
-            self.parse_gzip_sitemap(&raw_bytes).await?
+            self.parse_gzip_sitemap(&raw_bytes, &base_url).await?
         } else {
-            self.parse_xml_sitemap(&raw_bytes).await?
+            self.parse_xml_sitemap(&raw_bytes, &base_url).await?
         };
 
         // Check if sitemap index (recursive)
@@ -293,9 +293,7 @@ impl SitemapParser {
     /// Parse gzip-compressed sitemap
     ///
     /// Following mem-streaming-large-data: decompress in stream
-    async fn parse_gzip_sitemap(&self, bytes: &[u8]) -> Result<Vec<Url>> {
-        // Decompress gzip using async-compression
-        // Following own-borrow-over-clone: &[u8] not &Vec<u8>
+    async fn parse_gzip_sitemap(&self, bytes: &[u8], base_url: &Url) -> Result<Vec<Url>> {
         let reader = BufReader::new(bytes);
         let mut decoder = GzipDecoder::new(reader);
 
@@ -319,13 +317,13 @@ impl SitemapParser {
         }
 
         // Parse XML
-        self.parse_xml_sitemap(&decompressed).await
+        self.parse_xml_sitemap(&decompressed, base_url).await
     }
 
     /// Parse XML sitemap (zero-allocation streaming)
     ///
     /// Following mem-no-clone-in-loop: no allocations inside parsing loop
-    async fn parse_xml_sitemap(&self, bytes: &[u8]) -> Result<Vec<Url>> {
+    async fn parse_xml_sitemap(&self, bytes: &[u8], base_url: &Url) -> Result<Vec<Url>> {
         // Create reader with buffer
         let mut reader = Reader::from_reader(bytes);
         // reader.trim_text(true); // Deprecated in quick_xml 0.37
@@ -345,7 +343,13 @@ impl SitemapParser {
                     // Following own-cow-for-owned-borrowed: unescape returns Cow
                     if let Ok(text) = e.unescape() {
                         // Following security-filter-input: validate URL scheme
-                        if let Ok(url) = Url::parse(&text) {
+                        // Use base_url.join() to resolve relative URLs like /page.html
+                        let resolved = if text.starts_with("http://") || text.starts_with("https://") {
+                            Url::parse(&text).ok()
+                        } else {
+                            base_url.join(&text).ok()
+                        };
+                        if let Some(url) = resolved {
                             // Only http/https schemes allowed
                             if url.scheme() == "http" || url.scheme() == "https" {
                                 urls.insert(url);
