@@ -2,7 +2,7 @@
 
 **Project**: rust-scraper  
 **Repository**: https://github.com/XaviCode1000/rust_scraper  
-**Last Updated**: 2026-03-31  
+**Last Updated**: 2026-04-01  
 **Status**: Production Ready ✅
 
 ---
@@ -11,14 +11,14 @@
 
 | Metric | Value |
 |--------|-------|
-| **Current Version** | v1.0.7 (tagged) |
+| **Current Version** | v1.3.0 (tagged) |
 | **Total Commits** | 90+ |
 | **Commits Since v1.0.0** | 45+ |
 | **Total Contributors** | 2 (XaviCode1000: 76, Xavi: 3) |
-| **Issues Closed** | 10+ |
-| **PRs Merged** | 5+ |
+| **Issues Closed** | 11+ |
+| **PRs Merged** | 6+ |
 | **First Commit** | a70b17c - chore: initialize rust_scraper project structure |
-| **Latest Commit** | HTTP Client validation complete |
+| **Latest Commit** | ef70671 - SPA detection warning + JsRenderer trait stub |
 
 ---
 
@@ -38,10 +38,52 @@
 | 2026-03-10 | **v1.0.4 Release** - AI Features | v1.0.4 tag |
 | 2026-03-10 | AI Semantic Cleaning (Issue #9) | 17cc20c |
 | 2026-03-11 | Embeddings Bug Fix | 528657b |
+| 2026-04-01 | **v1.3.0 Release** - SPA Detection Phase 1 | ef70671 |
+| 2026-04-01 | **v1.3.0 Release** - SPA Detection Phase 1 | ef70671 |
 
 ---
 
 ## 📦 Release History
+
+### [v1.3.0] - 2026-04-01 - SPA Detection Warning + JsRenderer Trait (Phase 1)
+
+**Tag**: v1.3.0  
+**Key Focus**: Forward-compatible SPA detection, Issue #16 Phase 1
+
+#### Changes
+- ✅ **SPA Detection:** `detect_spa_content()` function in `scraper_service.rs`
+  - Warns via `tracing::warn!` when extracted content is below 50 chars
+  - Returns `SpaDetectionResult` with diagnostic info (char count, empty title, SPA markers)
+  - Checks for SPA mount points: `<div id="root">`, `<div id="app">`
+- ✅ **JsRenderer Trait:** New domain trait in `src/domain/js_renderer.rs`
+  - Forward-compatible stub for Phase 2 (headless browser rendering)
+  - Uses native async fn in trait (Rust 1.88+), no `async-trait` crate
+  - `JsRenderError` enum with 4 variants: Browser, Timeout, Navigation, Extraction
+- ✅ **CLI Flag Reserved:** `--force-js-render` (no-op stub, ready for v1.4)
+- ✅ **6 New Tests:** SPA detection heuristics with threshold boundary testing
+- ✅ **README Updated:** "Known Limitations: SPA/JS-rendered Sites" section added
+
+#### Files Added
+- `src/domain/js_renderer.rs` — JsRenderer trait + JsRenderError (92 LOC)
+
+#### Files Modified
+- `src/application/scraper_service.rs` — SPA detection integration (+60 LOC)
+- `src/domain/mod.rs` — js_renderer module export
+- `src/lib.rs` — JsRenderer, JsRenderError, detect_spa_content, SpaDetectionResult re-exports
+- `README.md` — Known Limitations section, roadmap update
+
+#### Detection Heuristics
+A page is flagged as potentially SPA-dependent when:
+- Extracted content < 50 characters after readability/fallback extraction
+- Future phases will add: empty title detection, SPA mount point scanning, semantic HTML analysis
+
+#### Test Results
+```
+cargo nextest run → 271 tests passed
+cargo clippy -- -D warnings → ✅ clean
+```
+
+---
 
 ### [v1.0.7] - 2026-03-31 - Documentation Veracity Audit & Dead Code Cleanup
 

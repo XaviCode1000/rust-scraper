@@ -2,36 +2,20 @@
 
 ## 🎉 Latest Achievements
 
-**Tests:** **265 passing** (nextest)  
+**Tests:** **271 passing** (nextest)  
 **Status:** ✅ **All tests passing, 0 failing**  
-**Version:** v1.0.7 — Indestructible & Lean
+**Version:** v1.3.0 — SPA Detection Phase 1
+
+### v1.3.0 Highlights
+- **SPA Detection:** `detect_spa_content()` heuristic in ScraperService warns when pages return minimal content
+- **JsRenderer Trait:** Forward-compatible domain trait for Phase 2 (headless browser rendering)
+- **6 new tests:** SPA detection unit tests covering threshold, markers, and edge cases
 
 ### v1.0.7 Highlights
 - **SRE Hardening:** WAF/CAPTCHA detection (19 signatures), fs2 file locking, OOM protection, TUI panic safety
 - **Pure Rust:** Zero FFI dependencies (removed zvec-sys stub, bumpalo dead code)
 - **AI Safety:** Fixed P0 bug — `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (was silent in --release)
 - **Network Hardening:** `connect_timeout(10s)` + `pool_max_idle_per_host` for resilient scraping
-**Version:** v1.0.7 — Indestructible & Lean
-
-### v1.0.7 Highlights
-- **SRE Hardening:** WAF/CAPTCHA detection (19 signatures), fs2 file locking, OOM protection, TUI panic safety
-- **Pure Rust:** Zero FFI dependencies (removed zvec-sys stub, bumpalo dead code)
-- **AI Safety:** Fixed P0 bug — `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (was silent in --release)
-- **Network Hardening:** `connect_timeout(10s)` + `pool_max_idle_per_host` for resilient scraping
-**Version:** v1.0.7 — Indestructible & Lean
-
-### v1.0.7 Highlights
-- **SRE Hardening:** WAF/CAPTCHA detection (19 signatures), fs2 file locking, OOM protection, TUI panic safety
-- **Pure Rust:** Zero FFI dependencies (removed zvec-sys stub, bumpalo dead code)
-- **AI Safety:** Fixed P0 bug — `debug_assert_eq!` → `assert_eq!` in `ModelInput::new()` (was silent in --release)
-- **Network Hardening:** `connect_timeout(10s)` + `pool_max_idle_per_host` for resilient scraping
-**Version:** v1.0.7 — Indestructible & Lean
-
-### v1.0.7 Highlights
-- **SRE Hardening:** WAF/CAPTCHA detection, file locking, OOM protection, TUI safety
-- **Pure Rust:** Zero FFI dependencies (removed zvec-sys, bumpalo dead code)
-- **AI Safety:** Fixed P0 bug (`debug_assert_eq!` → `assert_eq!` in production)
-- **Network:** connect_timeout + pool management for resilient scraping
 
 ---
 
@@ -356,7 +340,7 @@ See comments in `Cargo.toml` for details. Do NOT try to unify them.
 
 ---
 
-**Last updated**: 2026-03-31  
+**Last updated**: 2026-04-01  
 **Rust version**: 1.93.0  
 **Stack version**: 2025-26 optimal
-**Tests**: 265 passing (nextest)
+**Tests**: 271 passing (nextest)

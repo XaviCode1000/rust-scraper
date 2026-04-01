@@ -1,7 +1,7 @@
 # Architecture — rust-scraper
 
-**Last Updated:** March 2026  
-**Version:** 1.0.0  
+**Last Updated:** April 2026  
+**Version:** 1.3.0  
 **Clean Architecture:** 4 layers with strict dependency rule
 
 ---
@@ -83,13 +83,13 @@ rg "^use (reqwest|tokio|scraper|tract)" src/domain/  # Returns nothing ✓
 
 ```
 src/domain/
-├── mod.rs                    (20 LOC)   — Module exports
+├── mod.rs                    (22 LOC)   — Module exports
 ├── entities.rs               (311 LOC)  — Core business entities
 ├── value_objects.rs          (148 LOC)  — Type-safe primitives
 ├── exporter.rs               (279 LOC)  — Exporter trait + error types
 ├── semantic_cleaner.rs       (174 LOC)  — AI cleaning trait (feature-gated)
 ├── crawler_entities.rs       (746 LOC)  — Web crawler domain types
-└── crawler_entities.rs       (746 LOC)  — Crawler entities
+└── js_renderer.rs            (92 LOC)   — JsRenderer trait + JsRenderError (SPA stub)
 ```
 
 ### Core Entities (`entities.rs`)
@@ -183,6 +183,62 @@ pub trait SemanticCleaner: private::Sealed + Send + Sync {
 | `DiscoveredUrl` | URL discovered during crawl | ~30 |
 | `ContentType` | HTML, XML, JSON, etc. | ~40 |
 
+### JavaScript Renderer Trait (`js_renderer.rs`)
+
+**Forward-compatible stub for SPA support (Phase 1 of Issue #16)**
+
+```rust
+pub trait JsRenderer: Send + Sync {
+    fn render(
+        &self,
+        url: &url::Url,
+    ) -> impl std::future::Future<Output = Result<String, JsRenderError>> + Send;
+}
+```
+
+| Type | Purpose | LOC |
+|------|---------|-----|
+| `JsRenderer` | Trait for JS rendering of web pages | ~20 |
+| `JsRenderError` | Error enum for JS rendering failures | ~30 |
+
+**Error variants:**
+- `Browser(String)` — Browser launch/communication failure
+- `Timeout { url, timeout_ms }` — Page load timeout
+- `Navigation(String)` — Navigation to URL failed
+- `Extraction(String)` — Content extraction after rendering failed
+
+**Architecture note:** This trait lives in the Domain layer because it defines a business capability (rendering JS-dependent pages), not a specific implementation. The actual renderer (e.g., headless Chrome via `headless_chrome` or `fantoccini`) will be provided by the Infrastructure layer in Phase 2 (v1.4).
+
+**Native async fn in trait** — Uses Rust 1.88+ native async traits, no `async-trait` crate needed.
+
+### JavaScript Renderer Trait (`js_renderer.rs`)
+
+**Forward-compatible stub for SPA support (Phase 1 of Issue #16)**
+
+```rust
+pub trait JsRenderer: Send + Sync {
+    fn render(
+        &self,
+        url: &url::Url,
+    ) -> impl std::future::Future<Output = Result<String, JsRenderError>> + Send;
+}
+```
+
+| Type | Purpose | LOC |
+|------|---------|-----|
+| `JsRenderer` | Trait for JS rendering of web pages | ~20 |
+| `JsRenderError` | Error enum for JS rendering failures | ~30 |
+
+**Error variants:**
+- `Browser(String)` — Browser launch/communication failure
+- `Timeout { url, timeout_ms }` — Page load timeout
+- `Navigation(String)` — Navigation to URL failed
+- `Extraction(String)` — Content extraction after rendering failed
+
+**Architecture note:** This trait lives in the Domain layer because it defines a business capability (rendering JS-dependent pages), not a specific implementation. The actual renderer (e.g., headless Chrome via `headless_chrome` or `fantoccini`) will be provided by the Infrastructure layer in Phase 2 (v1.4).
+
+**Native async fn in trait** — Uses Rust 1.88+ native async traits, no `async-trait` crate needed.
+
 ---
 
 ## Application Layer (`src/application/`)
@@ -196,7 +252,7 @@ pub trait SemanticCleaner: private::Sealed + Send + Sync {
 src/application/
 ├── mod.rs                  (18 LOC)   — Module exports
 ├── http_client.rs          (75 LOC)   — HTTP client factory
-├── scraper_service.rs      (244 LOC)  — Scraping orchestration
+├── scraper_service.rs      (390 LOC)  — Scraping orchestration + SPA detection
 ├── crawler_service.rs      (942 LOC)  — Web crawler service
 └── url_filter.rs           (468 LOC)  — URL filtering logic
 ```
@@ -236,6 +292,16 @@ pub fn create_http_client() -> Result<reqwest_middleware::ClientWithMiddleware> 
 - `scrape_with_readability(url: &str)` — Clean content extraction
 - `scrape_with_config(url: &str, config: &ScraperConfig)` — Scraping with options
 - `scrape_multiple_with_limit(urls: Vec<&str>, limit: usize)` — Bounded concurrency
+- `detect_spa_content(url: &str, content: &str)` — SPA detection heuristic (v1.3.0)
+
+**SPA Detection (v1.3.0):**
+```rust
+pub fn detect_spa_content(url: &str, content: &str) -> Option<SpaDetectionResult>
+```
+
+A page is flagged as potentially SPA-dependent when:
+- Extracted content is below `MIN_CONTENT_CHARS` (50 chars)
+- Future versions will also check for empty titles, SPA mount points (`<div id="root">`), and absence of semantic HTML
 
 **Hardware-aware concurrency:**
 ```rust
@@ -778,21 +844,21 @@ Output: Vec<DocumentChunk> with embeddings
 
 ## Testing Strategy
 
-### Test Counts (Verified: March 2026)
+### Test Counts (Verified: April 2026)
 
 ```bash
-$ cargo test --lib 2>&1 | tail -5
-test result: ok. 217 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out
+$ cargo nextest run 2>&1 | tail -5
+test result: ok. 271 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-**Total:** 217 tests passing
+**Total:** 271 tests passing (includes 6 new SPA detection tests)
 
 ### Test Distribution by Layer
 
 | Layer | Test Count | Test Types |
 |-------|------------|------------|
-| **Domain** | ~50 | Entity creation, value object validation, serialization |
-| **Application** | ~60 | HTTP client creation, service orchestration, URL filtering |
+| **Domain** | ~56 | Entity creation, value object validation, serialization, SPA detection |
+| **Application** | ~66 | HTTP client creation, service orchestration, URL filtering, SPA detection |
 | **Infrastructure** | ~80 | Converter tests, file saver tests, crawler tests |
 | **Adapters** | ~27 | Extractor tests, detector tests, TUI tests |
 
@@ -1087,6 +1153,7 @@ rg "^use rust_scraper::(domain|application)" src/infrastructure/  # Returns matc
 - ✅ err-context-chain — `.context()` for error messages
 - ✅ err-from-impl — `#[from]` for automatic conversion
 - ✅ err-lowercase-msg — Error messages in lowercase
+- ✅ err-custom-type — `JsRenderError` custom error enum for JS rendering
 
 **Memory Optimization (mem-*):**
 - ✅ mem-with-capacity — `Vec::with_capacity()` where size known
@@ -1109,6 +1176,8 @@ rg "^use rust_scraper::(domain|application)" src/infrastructure/  # Returns matc
 - ✅ async-tokio-fs — `tokio::fs` in async code
 - ✅ async-bounded-channel — Bounded channels for backpressure
 - ✅ async-clone-before-await — Clone data before await points
+- ✅ async-native-ait — Native async fn in trait (Rust 1.88+), no `async-trait` crate
+- ✅ async-native-ait — Native async fn in trait (Rust 1.88+), no `async-trait` crate
 
 **Compiler Optimization (opt-*):**
 - ✅ opt-lto-release — LTO enabled in release profile
@@ -1203,6 +1272,6 @@ cargo test --lib --test-threads=2
 cargo clippy --all-targets --all-features -- -D correctness
 ```
 
-**Last verified:** March 11, 2026  
-**Tests passing:** 217/217  
+**Last verified:** April 1, 2026  
+**Tests passing:** 271/271  
 **Clippy:** Clean
