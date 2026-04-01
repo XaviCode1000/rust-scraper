@@ -59,6 +59,8 @@ cargo run -- --help
 | `-v, --verbose` | - | Verbosity level (`-v`, `-vv`, `-vvv`) |
 | `--resume` | - | Skip already processed URLs |
 | `--interactive` | - | TUI mode for URL selection |
+| `--force-js-render` | - | Force JS rendering for SPA sites (reserved, no-op) |
+| `--force-js-render` | - | Force JS rendering for SPA sites (reserved, no-op) |
 
 ### Output Formats
 
@@ -367,6 +369,27 @@ cargo run -- --url https://example.com --delay-ms 3000
 - Check if page uses JavaScript rendering (not supported)
 - Verify page has actual content
 
+#### SPA Detection Warning: `{domain} returned minimal content ({N} chars)`
+
+**Cause:** The page returned less than 50 characters of content after extraction, which typically indicates a Single Page Application (SPA) that requires JavaScript rendering.
+
+**What this means:**
+- The scraper fetched the HTML successfully, but the content is rendered client-side
+- Common with React, Vue, Angular, and other SPA frameworks
+- The HTML likely contains only mount points like `<div id="root">` or `<div id="app">`
+
+**Current behavior (v1.3.0):**
+- A warning is logged via `tracing::warn!` during scraping
+- The minimal content is still returned (not discarded)
+- The `--force-js-render` flag is reserved but has no effect yet
+
+**Workarounds:**
+- Check if the site has a public API you can query directly
+- Use the site's sitemap if available (may have SSR versions)
+- Wait for v1.4 which will include headless browser rendering
+
+**Track implementation:** [Issue #16](https://github.com/XaviCode1000/rust-scraper/issues/16)
+
 #### `Modo offline: modelo '<repo>' no está en caché`
 
 **Cause:** AI feature enabled but model not downloaded.
@@ -566,5 +589,5 @@ MIT License — See [LICENSE](../LICENSE) for details.
 
 ---
 
-**Last updated:** March 2026  
-**Version:** rust-scraper v0.4.0
+**Last updated:** April 2026  
+**Version:** rust-scraper v1.3.0

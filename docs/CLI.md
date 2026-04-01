@@ -1,8 +1,8 @@
 # CLI Reference — rust-scraper
 
-**Version:** 1.0.0  
-**MSRV:** 1.80  
-**Last Updated:** 2026-03-11
+**Version:** 1.3.0  
+**MSRV:** 1.88  
+**Last Updated:** 2026-04-01
 
 ---
 
@@ -340,6 +340,58 @@ cargo run --features ai -- --url "https://example.com" --clean-ai
 - HuggingFace Hub for model downloads
 - Memory-mapped file loading (zero-copy)
 - Multi-dimensional arrays for embeddings
+
+---
+
+## JavaScript Rendering (Reserved for v1.4)
+
+| Flag | Default | Description | Status |
+|------|---------|-------------|--------|
+| `--force-js-render` | `false` | Force JS rendering for SPA sites | ⏳ Reserved (no-op) |
+
+### JavaScript Rendering (`--force-js-render`)
+
+**⚠️ Not yet implemented.** This flag is reserved for future use (v1.4) when headless browser rendering will be available.
+
+```bash
+# Currently has no effect — reserved for v1.4
+cargo run -- --url "https://example.com/spa" --force-js-render
+```
+
+**What it will do (v1.4):**
+- Enable headless browser rendering for sites that require JavaScript
+- Use the `JsRenderer` trait (defined in domain layer)
+- Automatically detect SPA sites and fallback to JS rendering
+
+**Current behavior:** The flag is accepted but has no effect. SPA sites are detected and a warning is emitted via `tracing::warn!`.
+
+**Track implementation:** [Issue #16](https://github.com/XaviCode1000/rust-scraper/issues/16)
+
+---
+
+## JavaScript Rendering (Reserved for v1.4)
+
+| Flag | Default | Description | Status |
+|------|---------|-------------|--------|
+| `--force-js-render` | `false` | Force JS rendering for SPA sites | ⏳ Reserved (no-op) |
+
+### JavaScript Rendering (`--force-js-render`)
+
+**⚠️ Not yet implemented.** This flag is reserved for future use (v1.4) when headless browser rendering will be available.
+
+```bash
+# Currently has no effect — reserved for v1.4
+cargo run -- --url "https://example.com/spa" --force-js-render
+```
+
+**What it will do (v1.4):**
+- Enable headless browser rendering for sites that require JavaScript
+- Use the `JsRenderer` trait (defined in domain layer)
+- Automatically detect SPA sites and fallback to JS rendering
+
+**Current behavior:** The flag is accepted but has no effect. SPA sites are detected and a warning is emitted via `tracing::warn!`.
+
+**Track implementation:** [Issue #16](https://github.com/XaviCode1000/rust-scraper/issues/16)
 
 ---
 
@@ -779,6 +831,12 @@ Options:
 ---
 
 ## Version History
+
+### v1.3.0 (2026-04-01)
+
+- ✅ `--force-js-render` flag reserved (no-op, ready for v1.4)
+- ✅ SPA detection warnings via `detect_spa_content()`
+- ✅ `JsRenderer` trait defined in domain layer
 
 ### v1.0.0 (2026-03-11)
 
