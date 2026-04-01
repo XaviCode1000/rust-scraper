@@ -651,13 +651,17 @@ By contributing to this project, you agree that your contributions will be licen
 - [x] **v1.0.5** — Performance optimization (eliminated unnecessary cloning)
 - [x] **v1.0.6** — HTTP Client improvements (Option A: headers, cookies, retry, backoff)
 - [x] **v1.0.6** — Real site validation (books.toscrape.com, quotes.toscrape.com, webscraper.io)
-- [x] **v1.0.7** — Dead code cleanup (bumpalo, zvec stub removed)
+- [x] **v1.0.7** — SRE Hardening: WAF/CAPTCHA detection (19 signatures), fs2 file locking, OOM protection, TUI panic safety
+- [x] **v1.0.7** — Dead code cleanup (bumpalo, zvec stub removed — Pure Rust, zero FFI)
 - [x] **v1.0.7** — Production assertion fix (`debug_assert_eq!` → `assert_eq!` in inference)
+- [x] **v1.0.7** — Robust URL resolution (`resolve_url()` with RFC 3986, Content-Type validation)
+- [x] **v1.0.7** — Network hardening (`connect_timeout`, `pool_max_idle_per_host`)
 
 ### Planned 🚧
 
-- [ ] **v1.1.0** — Multi-domain crawling
-- [ ] **v1.2.0** — JavaScript rendering (headless browser) - for SPA sites
+- [ ] **v1.1.0** — TLS fingerprint impersonation via `wreq` + BoringSSL ([Issue #14](https://github.com/XaviCode1000/rust-scraper/issues/14))
+- [ ] **v1.2.0** — Vector DB integration (LanceDB or Qdrant for RAG export)
+- [ ] **v1.3.0** — JavaScript rendering (headless browser) — for SPA sites
 - [ ] **v2.0.0** — Distributed scraping
 
 ---
