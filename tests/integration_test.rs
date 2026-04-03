@@ -81,6 +81,10 @@ fn test_args_has_required_fields() {
         resume: false,
         state_dir: None,
         clean_ai: false,
+        force_js_render: false,
+        dry_run: false,
+        quiet: false,
+        subcommand: None,
     };
 
     assert_eq!(args.url, "https://example.com");
@@ -264,6 +268,7 @@ async fn test_download_images_from_website() {
         download_documents: false,
         output_dir: output_dir.clone(),
         max_file_size: Some(10 * 1024 * 1024), // 10MB max
+        scraper_concurrency: 3,
     };
 
     // Act
@@ -329,6 +334,8 @@ async fn test_download_documents_from_website() {
         download_documents: true,
         output_dir: output_dir.clone(),
         max_file_size: Some(50 * 1024 * 1024), // 50MB max
+        scraper_concurrency: 3,
+        scraper_concurrency: 3,
     };
 
     // Act

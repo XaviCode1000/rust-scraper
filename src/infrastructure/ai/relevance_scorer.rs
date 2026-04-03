@@ -122,10 +122,8 @@ impl RelevanceScorer {
     #[must_use]
     pub fn score(&self, embedding: &[f32], reference: Option<&[f32]>) -> f32 {
         let reference = reference
-            .or_else(|| self.reference.as_deref())
-            .unwrap_or_else(|| {
-                panic!("No reference embedding provided or stored");
-            });
+            .or(self.reference.as_deref())
+            .expect("No reference embedding provided or stored");
 
         cosine_similarity(embedding, reference)
     }
@@ -353,7 +351,7 @@ mod tests {
         };
 
         // Create a simple embedding (normalized)
-        let embedding = vec![0.5f32; 8];
+        let embedding = [0.5f32; 8];
         let magnitude: f32 = embedding.iter().map(|&x| x * x).sum::<f32>().sqrt();
         let normalized: Vec<f32> = embedding.iter().map(|&x| x / magnitude).collect();
 

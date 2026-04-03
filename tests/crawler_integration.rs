@@ -21,14 +21,8 @@ fn test_matches_pattern_wildcard() {
 
 #[test]
 fn test_matches_pattern_domain_wildcard() {
-    assert!(matches_pattern(
-        "https://blog.example.com/post",
-        "*.example.com/*"
-    ));
-    assert!(matches_pattern(
-        "https://sub.example.com/page",
-        "*.example.com"
-    ));
+    assert!(matches_pattern("https://blog.example.com/post", "*.example.com/*"));
+    assert!(matches_pattern("https://sub.example.com/page", "*.example.com"));
     assert!(!matches_pattern("https://other.com/page", "*.example.com"));
 }
 
@@ -36,24 +30,12 @@ fn test_matches_pattern_domain_wildcard() {
 fn test_matches_pattern_prefix_wildcard() {
     // Note: matches_pattern compares HOSTS only, not paths
     // Pattern "*.example.com/*" matches any subdomain of example.com
-    assert!(matches_pattern(
-        "https://blog.example.com/post",
-        "*.example.com/*"
-    ));
-    assert!(matches_pattern(
-        "https://admin.example.com/users",
-        "*.example.com/*"
-    ));
+    assert!(matches_pattern("https://blog.example.com/post", "*.example.com/*"));
+    assert!(matches_pattern("https://admin.example.com/users", "*.example.com/*"));
     // Different domain should not match
-    assert!(!matches_pattern(
-        "https://other.com/page",
-        "*.example.com/*"
-    ));
+    assert!(!matches_pattern("https://other.com/page", "*.example.com/*"));
     // example.com itself should NOT match *.example.com/* (needs subdomain)
-    assert!(!matches_pattern(
-        "https://example.com/admin/users",
-        "*.example.com/*"
-    ));
+    assert!(!matches_pattern("https://example.com/admin/users", "*.example.com/*"));
 }
 
 #[test]
@@ -82,14 +64,8 @@ fn test_is_excluded() {
 #[test]
 fn test_is_internal_link() {
     assert!(is_internal_link("https://example.com/page", "example.com"));
-    assert!(is_internal_link(
-        "https://www.example.com/page",
-        "example.com"
-    ));
-    assert!(is_internal_link(
-        "https://blog.example.com/post",
-        "example.com"
-    ));
+    assert!(is_internal_link("https://www.example.com/page", "example.com"));
+    assert!(is_internal_link("https://blog.example.com/post", "example.com"));
     assert!(!is_internal_link("https://other.com/page", "example.com"));
 }
 

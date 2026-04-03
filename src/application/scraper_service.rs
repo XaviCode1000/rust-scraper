@@ -191,7 +191,7 @@ pub async fn scrape_with_config(
                 html: Some(html),
                 assets,
             });
-        }
+        },
         Err(e) => {
             warn!("⚠️  Readability failed for {}: {}", url, e);
             let fallback_content = crate::infrastructure::scraper::fallback::extract_text(&html);
@@ -218,7 +218,7 @@ pub async fn scrape_with_config(
                 html: Some(html),
                 assets,
             });
-        }
+        },
     }
 
     info!(
@@ -288,11 +288,7 @@ pub async fn scrape_multiple_with_limit(
         }
     }
 
-    info!(
-        "✅ Scraped {} pages from {} URLs",
-        all_content.len(),
-        urls.len()
-    );
+    info!("✅ Scraped {} pages from {} URLs", all_content.len(), urls.len());
     Ok(all_content)
 }
 

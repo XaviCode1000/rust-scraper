@@ -840,11 +840,7 @@ async fn test_semantic_cleaner_full_pipeline() {
         let chunks = cleaner.clean(html).await;
 
         // Pipeline should succeed
-        assert!(
-            chunks.is_ok(),
-            "Pipeline should succeed: {:?}",
-            chunks.err()
-        );
+        assert!(chunks.is_ok(), "Pipeline should succeed: {:?}", chunks.err());
 
         let chunks = chunks.unwrap();
 
@@ -898,11 +894,7 @@ async fn test_semantic_cleaner_long_content() {
 
         let chunks = cleaner.clean(html).await;
 
-        assert!(
-            chunks.is_ok(),
-            "Pipeline should succeed: {:?}",
-            chunks.err()
-        );
+        assert!(chunks.is_ok(), "Pipeline should succeed: {:?}", chunks.err());
 
         let chunks = chunks.unwrap();
         eprintln!("Generated {} chunks from long content", chunks.len());
@@ -1024,13 +1016,13 @@ async fn test_error_chunk_too_large() {
                 for chunk in &chunks {
                     assert!(chunk.content.len() <= 2048, "Chunk content too large");
                 }
-            }
+            },
             Err(SemanticError::ChunkTooLarge { .. }) => {
                 eprintln!("Correctly detected chunk too large");
-            }
+            },
             Err(e) => {
                 eprintln!("Other error (acceptable): {}", e);
-            }
+            },
         }
     } else {
         eprintln!("SKIP: cleaner creation failed");
@@ -1040,10 +1032,8 @@ async fn test_error_chunk_too_large() {
 /// Test offline mode error
 #[tokio::test]
 async fn test_offline_mode_error() {
-    let temp_cache_dir = PathBuf::from(format!(
-        "/tmp/rust_scraper_test_cache_{}",
-        std::process::id()
-    ));
+    let temp_cache_dir =
+        PathBuf::from(format!("/tmp/rust_scraper_test_cache_{}", std::process::id()));
 
     let config = ModelConfig::new()
         .with_cache_dir(temp_cache_dir)
@@ -1114,10 +1104,7 @@ async fn test_pipeline_html_only() {
 
         assert!(chunks.is_ok(), "HTML-only input should not fail");
         let chunks = chunks.unwrap();
-        assert!(
-            chunks.is_empty(),
-            "HTML-only input should produce no chunks"
-        );
+        assert!(chunks.is_empty(), "HTML-only input should produce no chunks");
     } else {
         eprintln!("SKIP: cleaner creation failed");
     }

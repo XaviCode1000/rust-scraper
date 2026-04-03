@@ -75,25 +75,29 @@ cargo run -- --url "https://example.com" -f json
 cargo run -- --url "https://example.com" -f text
 ```
 
-### RAG Pipeline Export (`--export-format`)
+##### RAG Pipeline Export (`--export-format`)
 
 Creates batch export suitable for LLM/RAG pipelines.
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--export-format <FORMAT>` | `jsonl`, `auto` | `jsonl` | Export format for RAG pipeline |
+| `--export-format <FORMAT>` | `jsonl`, `vector`, `auto` | `jsonl` | Export format for RAG pipeline |
 
 **Formats:**
 
 | Format | Description | Feature Required |
 |--------|-------------|------------------|
 | `jsonl` | JSON Lines (one JSON per line), optimal for RAG | None (default) |
+| `vector` | JSON with metadata header, embeddings support | None |
 | `auto` | Auto-detect from existing export files | None |
 
 **Example:**
 ```bash
 # JSONL export (default)
 cargo run -- --url "https://example.com" --export-format jsonl
+
+# Vector export with embeddings (for vector DB ingestion)
+cargo run -- --url "https://example.com" --export-format vector
 
 # Auto-detect format
 cargo run -- --url "https://example.com" --export-format auto

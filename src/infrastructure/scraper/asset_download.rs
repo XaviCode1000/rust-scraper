@@ -76,7 +76,7 @@ async fn download_image_batch(
                 Err(e) => {
                     warn!("Failed to download image: {}", e);
                     None
-                }
+                },
             }
         })
         .collect()
@@ -101,7 +101,7 @@ async fn download_document_batch(
                 Err(e) => {
                     warn!("Failed to download document: {}", e);
                     None
-                }
+                },
             }
         })
         .collect()

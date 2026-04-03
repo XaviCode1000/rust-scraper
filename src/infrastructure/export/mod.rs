@@ -8,7 +8,9 @@
 
 pub mod jsonl_exporter;
 pub mod state_store;
+pub mod vector_exporter;
 
 // Re-export for convenience
 pub use jsonl_exporter::JsonlExporter;
 pub use state_store::StateStore;
+pub use vector_exporter::VectorExporter;

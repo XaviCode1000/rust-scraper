@@ -97,7 +97,7 @@ impl std::fmt::Display for HttpError {
             HttpError::Forbidden => write!(f, "403 Forbidden - site blocking"),
             HttpError::RateLimited(retry_after) => {
                 write!(f, "429 Rate Limited - retry after {} seconds", retry_after)
-            }
+            },
             HttpError::ClientError(code) => write!(f, "Client Error {}", code),
             HttpError::ServerError(code) => write!(f, "Server Error {}", code),
             HttpError::Timeout => write!(f, "Request Timeout"),
@@ -105,7 +105,7 @@ impl std::fmt::Display for HttpError {
             HttpError::Request(msg) => write!(f, "Request Error: {}", msg),
             HttpError::WafChallenge(provider) => {
                 write!(f, "WAF/CAPTCHA challenge detected ({})", provider)
-            }
+            },
         }
     }
 }
@@ -224,6 +224,15 @@ impl HttpClient {
         })
     }
 
+    /// Get a reference to the inner `wreq::Client`.
+    ///
+    /// Useful when the client needs to be passed to application-layer
+    /// functions that expect a raw `&wreq::Client`.
+    #[must_use]
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Perform GET request with retry logic
     ///
     /// Handles status codes as follows:
@@ -284,10 +293,7 @@ impl HttpClient {
 
                     // Detect WAF/CAPTCHA challenges disguised as HTTP 200
                     if let Some(provider) = detect_waf_challenge(&body) {
-                        warn!(
-                            "WAF challenge detected from {} ({}), rotating UA",
-                            url, provider
-                        );
+                        warn!("WAF challenge detected from {} ({}), rotating UA", url, provider);
                         // Same retry logic as 403: rotate UA once
                         if ua_index == 0 {
                             ua_index += 1;
@@ -297,7 +303,7 @@ impl HttpClient {
                     }
 
                     return Ok(body);
-                }
+                },
                 403 => {
                     warn!("403 Forbidden from {}", url);
                     // Retry once with different UA
@@ -306,7 +312,7 @@ impl HttpClient {
                         continue;
                     }
                     return Err(HttpError::Forbidden);
-                }
+                },
                 429 => {
                     // Try to get Retry-After header
                     let retry_after = response
@@ -363,19 +369,19 @@ impl HttpClient {
                                     // Client error (other than 429/403)
                                     return Err(HttpError::ClientError(resp.status().as_u16()));
                                 }
-                            }
+                            },
                             Err(e) => {
                                 if e.is_timeout() {
                                     return Err(HttpError::Timeout);
                                 }
                                 // Connection error, continue retrying
                                 continue;
-                            }
+                            },
                         }
                     }
                     // Exhausted retries
                     return Err(HttpError::RateLimited(retry_after));
-                }
+                },
                 500..=599 => {
                     debug!("{} from {}", status, url);
 
@@ -417,25 +423,25 @@ impl HttpClient {
                                     // Client error (4xx)
                                     return Err(HttpError::ClientError(resp.status().as_u16()));
                                 }
-                            }
+                            },
                             Err(e) => {
                                 if e.is_timeout() {
                                     return Err(HttpError::Timeout);
                                 }
                                 // Connection error, continue retrying
                                 continue;
-                            }
+                            },
                         }
                     }
                     // Exhausted retries
                     return Err(HttpError::ServerError(status.as_u16()));
-                }
+                },
                 code if (400..=499).contains(&code) => {
                     return Err(HttpError::ClientError(code));
-                }
+                },
                 code => {
                     return Err(HttpError::ServerError(code));
-                }
+                },
             }
         }
     }
@@ -577,22 +583,13 @@ mod tests {
 
     #[test]
     fn test_http_error_display() {
-        assert_eq!(
-            format!("{}", HttpError::Forbidden),
-            "403 Forbidden - site blocking"
-        );
+        assert_eq!(format!("{}", HttpError::Forbidden), "403 Forbidden - site blocking");
         assert_eq!(
             format!("{}", HttpError::RateLimited(30)),
             "429 Rate Limited - retry after 30 seconds"
         );
-        assert_eq!(
-            format!("{}", HttpError::ClientError(404)),
-            "Client Error 404"
-        );
-        assert_eq!(
-            format!("{}", HttpError::ServerError(500)),
-            "Server Error 500"
-        );
+        assert_eq!(format!("{}", HttpError::ClientError(404)), "Client Error 404");
+        assert_eq!(format!("{}", HttpError::ServerError(500)), "Server Error 500");
         assert_eq!(format!("{}", HttpError::Timeout), "Request Timeout");
     }
 

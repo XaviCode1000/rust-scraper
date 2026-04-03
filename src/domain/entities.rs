@@ -71,16 +71,30 @@ pub enum ExportFormat {
     /// JSONL format (JSON Lines - one JSON object per line)
     /// Optimal for RAG pipelines and vector database ingestion
     Jsonl,
+    /// Vector format (JSON with metadata header)
+    /// Supports embeddings and cosine similarity
+    Vector,
     /// Auto-detect format from existing export files
     Auto,
 }
 
 impl ExportFormat {
+    /// Parse from string (case-insensitive).
+    /// Note: Named `parse_str` to avoid confusion with `FromStr::from_str`.
+    pub fn parse_str(s: &str) -> Result<Self, &'static str> {
+        match s.to_lowercase().as_str() {
+            "jsonl" => Ok(ExportFormat::Jsonl),
+            "vector" => Ok(ExportFormat::Vector),
+            "auto" => Ok(ExportFormat::Auto),
+            _ => Err("Invalid export format. Use 'jsonl', 'vector', or 'auto'"),
+        }
+    }
     /// Returns the file extension for this format
     #[must_use]
     pub fn extension(&self) -> &'static str {
         match self {
             Self::Jsonl => "jsonl",
+            Self::Vector => "json",
             Self::Auto => "auto",
         }
     }
@@ -90,6 +104,7 @@ impl ExportFormat {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Jsonl => "JSONL",
+            Self::Vector => "Vector",
             Self::Auto => "Auto",
         }
     }
@@ -300,5 +315,15 @@ mod tests {
         assert_eq!(content.author, Some("John Doe".to_string()));
         assert_eq!(content.assets.len(), 1);
         assert_eq!(content.assets[0].size, 2048);
+    }
+
+    #[test]
+    fn test_export_format_vector_extension() {
+        assert_eq!(ExportFormat::Vector.extension(), "json");
+    }
+
+    #[test]
+    fn test_export_format_vector_name() {
+        assert_eq!(ExportFormat::Vector.name(), "Vector");
     }
 }

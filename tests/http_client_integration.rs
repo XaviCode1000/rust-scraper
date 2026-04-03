@@ -22,11 +22,7 @@ async fn test_books_toscrape() {
 
     let result = client.get("https://books.toscrape.com/").await;
 
-    assert!(
-        result.is_ok(),
-        "Failed to fetch books.toscrape.com: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to fetch books.toscrape.com: {:?}", result);
 
     let body = result.unwrap();
 
@@ -53,19 +49,12 @@ async fn test_quotes_toscrape() {
 
     let result = client.get("https://quotes.toscrape.com/").await;
 
-    assert!(
-        result.is_ok(),
-        "Failed to fetch quotes.toscrape.com: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to fetch quotes.toscrape.com: {:?}", result);
 
     let body = result.unwrap();
 
     // Verify content
-    assert!(
-        body.contains("quote") || body.contains("Quote"),
-        "Should contain quote content"
-    );
+    assert!(body.contains("quote") || body.contains("Quote"), "Should contain quote content");
     assert!(body.len() > 500, "Body should have substantial content");
 }
 
@@ -82,19 +71,12 @@ async fn test_webscraper_static() {
         .get("https://webscraper.io/test-sites/e-commerce/static")
         .await;
 
-    assert!(
-        result.is_ok(),
-        "Failed to fetch webscraper.io: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Failed to fetch webscraper.io: {:?}", result);
 
     let body = result.unwrap();
 
     // Should contain HTML
-    assert!(
-        body.contains("html") || body.contains("HTML"),
-        "Should be HTML"
-    );
+    assert!(body.contains("html") || body.contains("HTML"), "Should be HTML");
     assert!(body.len() > 500, "Body should have content");
 }
 

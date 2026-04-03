@@ -33,7 +33,7 @@ ai = [
 
 [dependencies]
 # CLI - Argument parsing obligatorio
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # HTTP & Networking - wreq with TLS fingerprint impersonation (Layer 2 WAF Evasion)
 # wreq 6.0.0-rc.28 is required for prefix-symbols feature (avoids openssl-sys conflicts on Linux)
@@ -137,6 +137,15 @@ flate2 = "1"
 # CPU detection for hardware-aware concurrency
 num_cpus = "1"
 
+# Progress bars
+indicatif = { version = "0.17", features = ["improved_unicode"] }
+
+# Shell completions
+clap_complete = "4"
+
+# Config file parsing
+toml = "0.8"
+
 # UUID for temp file generation (production-ready streaming)
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
@@ -177,6 +186,9 @@ tokio-test = "0.4"
 tempfile = "3"
 walkdir = "2"
 wiremock = "0.6"
+
+[build-dependencies]
+built = { version = "0.7", features = ["git2", "chrono"] }
 
 [profile.dev]
 # Compilación rápida para desarrollo - máximo speed

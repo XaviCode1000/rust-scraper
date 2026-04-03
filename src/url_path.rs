@@ -325,10 +325,7 @@ mod tests {
     fn test_output_path_full_url() {
         let output = OutputPath::from_url("https://geminicli.com/docs/api/").unwrap();
         assert_eq!(output.to_folder_path(), "./output/geminicli.com/docs/");
-        assert_eq!(
-            output.to_full_path(),
-            "./output/geminicli.com/docs/index.md"
-        );
+        assert_eq!(output.to_full_path(), "./output/geminicli.com/docs/index.md");
     }
 
     #[test]

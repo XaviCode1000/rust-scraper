@@ -192,7 +192,7 @@ pub async fn scrape_urls_for_tui(
     // Stream processing with concurrency control
     // Following async-no-lock-across-await: buffer_unordered handles concurrency
     let results = stream::iter(urls)
-        .map(|url| async { scrape_single_url(&client, url, config).await })
+        .map(|url| async { scrape_single_url_for_tui(&client, url, config).await })
         .buffered(config.scraper_concurrency)
         .collect::<Vec<_>>()
         .await;
@@ -203,8 +203,20 @@ pub async fn scrape_urls_for_tui(
 
 /// Scrape a single URL
 ///
-/// Helper function for scrape_urls_for_tui.
-async fn scrape_single_url(
+/// Following **own-borrow-over-clone**: Accepts `&Url` not `&String`.
+/// Following **err-anyhow-for-applications**: Uses anyhow::Result.
+///
+/// # Arguments
+///
+/// * `client` - HTTP client to use for requests
+/// * `url` - URL to scrape
+/// * `config` - Scraper configuration
+///
+/// # Returns
+///
+/// * `Ok(ScrapedContent)` - Scraped content from the URL
+/// * `Err(ScraperError)` - Error during scraping
+pub async fn scrape_single_url_for_tui(
     client: &wreq::Client,
     url: &Url,
     config: &ScraperConfig,
@@ -228,43 +240,43 @@ async fn scrape_single_url(
         .await
         .map_err(|e| ScraperError::Network(e.to_string()))?;
 
-    // Try Readability first, fallback to plain text extraction
-    match readability::parse(&html, Some(url.as_str())) {
-        Ok(article) => {
-            let assets = download_assets_if_enabled(&html, url, config).await?;
+     // Try Readability first, fallback to plain text extraction
+     match readability::parse(&html, Some(url.as_str())) {
+         Ok(article) => {
+             let assets = download_assets_if_enabled(&html, url, config).await?;
 
-            Ok(ScrapedContent {
-                title: article.title,
-                content: article.text_content,
-                url: ValidUrl::new(url.clone()),
-                excerpt: article.excerpt,
-                author: article.byline,
-                date: article.published_time,
-                html: Some(html),
-                assets,
-            })
-        }
-        Err(e) => {
-            warn!("⚠️  Readability failed for {}: {}", url, e);
-            let fallback_content = fallback::extract_text(&html);
-            let assets = download_assets_if_enabled(&html, url, config).await?;
+             Ok(ScrapedContent {
+                 title: article.title,
+                 content: article.text_content,
+                 url: ValidUrl::new(url.clone()),
+                 excerpt: article.excerpt,
+                 author: article.byline,
+                 date: article.published_time,
+                 html: Some(html),
+                 assets,
+             })
+         },
+         Err(e) => {
+             warn!("⚠️  Readability failed for {}: {}", url, e);
+             let fallback_content = fallback::extract_text(&html);
+             let assets = download_assets_if_enabled(&html, url, config).await?;
 
-            Ok(ScrapedContent {
-                title: url
-                    .host_str()
-                    .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {}", url)))?
-                    .to_string(),
-                content: fallback_content,
-                url: ValidUrl::new(url.clone()),
-                excerpt: None,
-                author: None,
-                date: None,
-                html: Some(html),
-                assets,
-            })
-        }
-    }
-}
+             Ok(ScrapedContent {
+                 title: url
+                     .host_str()
+                     .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {}", url)))?
+                     .to_string(),
+                 content: fallback_content,
+                 url: ValidUrl::new(url.clone()),
+                 excerpt: None,
+                 author: None,
+                 date: None,
+                 html: Some(html),
+                 assets,
+             })
+         },
+     }
+ }
 
 /// Download assets if enabled in config
 ///
@@ -354,11 +366,8 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     let queue = Arc::new(UrlQueue::new());
 
     // Add seed URL to queue
-    let seed_discovered = DiscoveredUrl::html(
-        config_clone.seed_url.clone(),
-        0,
-        config_clone.seed_url.clone(),
-    );
+    let seed_discovered =
+        DiscoveredUrl::html(config_clone.seed_url.clone(), 0, config_clone.seed_url.clone());
     queue.push(seed_discovered);
 
     // Track visited URLs
@@ -475,20 +484,20 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
                                             }
                                         }
                                     }
-                                }
+                                },
                                 Err(e) => {
                                     warn!("Failed to extract links from {}: {}", url_str, e);
                                     error_count_task
                                         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                                }
+                                },
                             }
                         }
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to fetch {}: {}", url_str, e);
                         error_count_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         return Err(e);
-                    }
+                    },
                 }
 
                 Ok(())
@@ -528,15 +537,15 @@ fn handle_crawl_result(
     match result {
         Ok(Ok(())) => {
             // Task completed successfully
-        }
+        },
         Ok(Err(e)) => {
             warn!("Task error: {}", e);
             error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
+        },
         Err(e) => {
             warn!("Task panicked: {}", e);
             error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
+        },
     }
 }
 
@@ -644,21 +653,21 @@ pub async fn crawl_with_sitemap(
         Some(url) if !url.is_empty() => {
             tracing::info!("Sitemap URL provided: {}", url);
             url.to_string()
-        }
+        },
         _ => {
             tracing::info!("Auto-discovering sitemap URL for {}", base_url);
             match discover_sitemap_url(base_url).await {
                 Ok(url) => {
                     tracing::info!("Discovered sitemap URL: {}", url);
                     url
-                }
+                },
                 Err(CrawlError::SitemapNotFound(_)) => {
                     tracing::warn!("no sitemap found, switching to standard crawling");
                     return Ok(Vec::new());
-                }
+                },
                 Err(e) => return Err(e),
             }
-        }
+        },
     };
 
     tracing::info!("Using sitemap: {}", sitemap_url);
@@ -827,15 +836,15 @@ pub async fn fetch_sitemap(base_url: &str) -> Result<Vec<String>, CrawlError> {
                     Ok(urls) => {
                         info!("Found {} URLs in {}", urls.len(), sitemap_url);
                         all_urls.extend(urls);
-                    }
+                    },
                     Err(e) => {
                         warn!("Failed to parse sitemap {}: {}", sitemap_url, e);
-                    }
+                    },
                 }
-            }
+            },
             Err(e) => {
                 debug!("Sitemap not found at {}: {}", sitemap_url, e);
-            }
+            },
         }
     }
 
@@ -875,12 +884,12 @@ fn parse_sitemap(xml_content: &str, base_url: &Url) -> Result<Vec<String>, Crawl
                 if e.name().as_ref() == b"loc" {
                     in_loc = true;
                 }
-            }
+            },
             Ok(Event::End(ref e)) => {
                 if e.name().as_ref() == b"loc" {
                     in_loc = false;
                 }
-            }
+            },
             Ok(Event::Text(ref e)) if in_loc => {
                 let text = e.unescape().map_err(|e| CrawlError::Parse(e.to_string()))?;
                 let url_str = text.trim();
@@ -897,7 +906,7 @@ fn parse_sitemap(xml_content: &str, base_url: &Url) -> Result<Vec<String>, Crawl
                         urls.push(url.to_string());
                     }
                 }
-            }
+            },
             Ok(Event::CData(ref e)) if in_loc => {
                 // Handle CDATA sections - BytesCData derefs to [u8]
                 let url_str = String::from_utf8_lossy(e).trim().to_string();
@@ -913,10 +922,10 @@ fn parse_sitemap(xml_content: &str, base_url: &Url) -> Result<Vec<String>, Crawl
                         urls.push(url.to_string());
                     }
                 }
-            }
+            },
             Ok(Event::Eof) => break,
             Err(e) => return Err(CrawlError::Parse(e.to_string())),
-            _ => {}
+            _ => {},
         }
     }
 

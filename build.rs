@@ -17,4 +17,7 @@ fn main() {
 
     // Indicamos a Cargo que re-run si el feature cambia
     println!("cargo:rerun-if-changed=build.rs");
+
+    // T-005: Generate build metadata for version string
+    built::write_built_file().expect("Failed to acquire build-time information");
 }
