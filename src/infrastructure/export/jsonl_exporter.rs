@@ -39,7 +39,7 @@ impl JsonlExporter {
     }
 
     /// Get the file handle, creating directory if needed
-    fn get_writer(&self) -> ExportResult<BufWriter<std::fs::File>> {
+    fn writer(&self) -> ExportResult<BufWriter<std::fs::File>> {
         let path = self.config.output_path();
 
         // Create parent directory if it doesn't exist
@@ -78,7 +78,7 @@ impl JsonlExporter {
 impl crate::domain::exporter::Exporter for JsonlExporter {
     fn export(&self, document: DocumentChunk) -> ExportResult<()> {
         let line = self.serialize_line(&document)?;
-        let mut writer = self.get_writer()?;
+        let mut writer = self.writer()?;
         writer.write_all(line.as_bytes())?;
         writer.write_all(b"\n")?;
         writer.flush()?;
@@ -88,7 +88,7 @@ impl crate::domain::exporter::Exporter for JsonlExporter {
 
     fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> {
         let count = documents.len();
-        let mut writer = self.get_writer()?;
+        let mut writer = self.writer()?;
 
         for doc in documents {
             let line = self.serialize_line(doc)?;

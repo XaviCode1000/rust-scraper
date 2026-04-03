@@ -91,7 +91,7 @@ impl VectorExporter {
     ///
     /// In append mode with an existing file, finds and truncates at the
     /// closing `]` so the writer can append documents and re-close.
-    fn get_writer(&self) -> ExportResult<(File, BufWriter<File>)> {
+    fn writer(&self) -> ExportResult<(File, BufWriter<File>)> {
         // Create output directory if it doesn't exist
         fs::create_dir_all(&self.config.output_dir)?;
 
@@ -148,7 +148,7 @@ impl VectorExporter {
         }
 
         if self.config.append && file.metadata()?.len() > 0 {
-            // File already truncated at `]` by get_writer() — just seek back to it
+            // File already truncated at `]` by writer() — just seek back to it
             file.seek(SeekFrom::End(0))?;
         } else {
             // New file or overwrite mode - write complete header
@@ -212,7 +212,7 @@ impl VectorExporter {
 
 impl Exporter for VectorExporter {
     fn export(&self, document: DocumentChunk) -> ExportResult<()> {
-        let (mut file, mut writer) = self.get_writer()?;
+        let (mut file, mut writer) = self.writer()?;
         let is_first_doc =
             !self.config.append || file.metadata().map(|m| m.len() == 0).unwrap_or(true);
 
@@ -238,7 +238,7 @@ impl Exporter for VectorExporter {
             return Ok(());
         }
 
-        let (mut file, mut writer) = self.get_writer()?;
+        let (mut file, mut writer) = self.writer()?;
         let is_first_doc =
             !self.config.append || file.metadata().map(|m| m.len() == 0).unwrap_or(true);
 

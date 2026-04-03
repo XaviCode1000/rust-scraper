@@ -14,27 +14,27 @@ use crate::domain::entities::{DocumentChunk, ExportFormat};
 #[derive(Error, Debug)]
 pub enum ExporterError {
     /// Failed to create output directory
-    #[error("No se pudo crear el directorio de salida: {0}")]
+    #[error("failed to create output directory: {0}")]
     DirectoryCreation(#[from] std::io::Error),
 
     /// Failed to open or write to file
-    #[error("Error de escritura: {0}")]
+    #[error("write error: {0}")]
     WriteError(String),
 
     /// Invalid configuration
-    #[error("Configuración inválida: {0}")]
+    #[error("invalid config: {0}")]
     InvalidConfig(String),
 
     /// Serialization failed
-    #[error("Error de serialización: {0}")]
+    #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
     /// Batch operation failed (partial success)
-    #[error("Error en batch: {0}")]
+    #[error("batch error: {0}")]
     BatchError(String),
 
     /// State store operation failed
-    #[error("Error en state store: {0}")]
+    #[error("state store error: {0}")]
     StateStore(#[from] crate::error::ScraperError),
 
     /// Embedding dimensions don't match expected size
@@ -139,8 +139,8 @@ impl Default for ExporterConfig {
 /// }
 ///
 /// impl Exporter for JsonlExporter {
-///     fn export(&self, documents: Vec<DocumentChunk>) -> ExportResult<()> { ... }
-///     fn export_batch(&self, documents: Vec<DocumentChunk>) -> ExportResult<()> { ... }
+///     fn export(&self, document: DocumentChunk) -> ExportResult<()> { ... }
+///     fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> { ... }
 /// }
 /// ```
 pub trait Exporter: Send + Sync + 'static {
@@ -264,12 +264,14 @@ mod tests {
     fn test_exporter_error_messages() {
         let io_error = std::io::Error::other("path error");
         let err = ExporterError::DirectoryCreation(io_error);
-        assert!(err.to_string().to_lowercase().contains("directorio"));
+        assert!(err
+            .to_string()
+            .contains("failed to create output directory"));
 
         let err = ExporterError::WriteError("disk full".to_string());
-        assert!(err.to_string().to_lowercase().contains("escritura"));
+        assert!(err.to_string().contains("write error: disk full"));
 
         let err = ExporterError::InvalidConfig("missing path".to_string());
-        assert!(err.to_string().to_lowercase().contains("inválida"));
+        assert!(err.to_string().contains("invalid config"));
     }
 }
