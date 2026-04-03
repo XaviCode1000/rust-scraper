@@ -791,7 +791,11 @@ pub struct Args {
     /// to `<vault>/_inbox/`. Ideal for one-command clipping.
     ///
     /// Requires --obsidian-wiki-links to be enabled.
-    #[arg(long, default_value = "false", env = "RUST_SCRAPER_OBSIDIAN_QUICK_SAVE")]
+    #[arg(
+        long,
+        default_value = "false",
+        env = "RUST_SCRAPER_OBSIDIAN_QUICK_SAVE"
+    )]
     #[clap(next_help_heading = "Obsidian")]
     pub quick_save: bool,
 
@@ -799,7 +803,11 @@ pub struct Args {
     ///
     /// Adds wordCount, readingTime, language, contentType, scrapeDate,
     /// source, and status fields to YAML frontmatter for Dataview compatibility.
-    #[arg(long, default_value = "false", env = "RUST_SCRAPER_OBSIDIAN_RICH_METADATA")]
+    #[arg(
+        long,
+        default_value = "false",
+        env = "RUST_SCRAPER_OBSIDIAN_RICH_METADATA"
+    )]
     #[clap(next_help_heading = "Obsidian")]
     pub obsidian_rich_metadata: bool,
 

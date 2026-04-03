@@ -31,6 +31,7 @@
 
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use rust_scraper::infrastructure::obsidian::{detect_vault, open_note};
 use rust_scraper::{
     adapters::tui,
     application::{
@@ -47,7 +48,6 @@ use rust_scraper::{
     export_factory, save_results, validate_and_parse_url, Args, Commands, CrawlerConfig,
     ObsidianOptions, ScraperConfig, UserAgentCache,
 };
-use rust_scraper::infrastructure::obsidian::{detect_vault, open_note};
 use slug::slugify;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -495,7 +495,7 @@ async fn main() -> CliExit {
     // =========================================================================
     // 16b. Save individual files (Markdown/Text/JSON with Obsidian support)
     // =========================================================================
-    
+
     // Determine output directory (vault _inbox for quick-save mode)
     let output_dir = if args.quick_save {
         if let Some(ref vault) = vault_path {
