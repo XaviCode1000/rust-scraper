@@ -169,7 +169,10 @@ pub fn process_results(
         }
     }
 
-    info!("✅ Export completed: {} documents processed", processed_urls.len());
+    info!(
+        "✅ Export completed: {} documents processed",
+        processed_urls.len()
+    );
     Ok(processed_urls)
 }
 

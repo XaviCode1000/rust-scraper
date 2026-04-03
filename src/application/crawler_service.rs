@@ -240,43 +240,43 @@ pub async fn scrape_single_url_for_tui(
         .await
         .map_err(|e| ScraperError::Network(e.to_string()))?;
 
-     // Try Readability first, fallback to plain text extraction
-     match readability::parse(&html, Some(url.as_str())) {
-         Ok(article) => {
-             let assets = download_assets_if_enabled(&html, url, config).await?;
+    // Try Readability first, fallback to plain text extraction
+    match readability::parse(&html, Some(url.as_str())) {
+        Ok(article) => {
+            let assets = download_assets_if_enabled(&html, url, config).await?;
 
-             Ok(ScrapedContent {
-                 title: article.title,
-                 content: article.text_content,
-                 url: ValidUrl::new(url.clone()),
-                 excerpt: article.excerpt,
-                 author: article.byline,
-                 date: article.published_time,
-                 html: Some(html),
-                 assets,
-             })
-         },
-         Err(e) => {
-             warn!("⚠️  Readability failed for {}: {}", url, e);
-             let fallback_content = fallback::extract_text(&html);
-             let assets = download_assets_if_enabled(&html, url, config).await?;
+            Ok(ScrapedContent {
+                title: article.title,
+                content: article.text_content,
+                url: ValidUrl::new(url.clone()),
+                excerpt: article.excerpt,
+                author: article.byline,
+                date: article.published_time,
+                html: Some(html),
+                assets,
+            })
+        },
+        Err(e) => {
+            warn!("⚠️  Readability failed for {}: {}", url, e);
+            let fallback_content = fallback::extract_text(&html);
+            let assets = download_assets_if_enabled(&html, url, config).await?;
 
-             Ok(ScrapedContent {
-                 title: url
-                     .host_str()
-                     .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {}", url)))?
-                     .to_string(),
-                 content: fallback_content,
-                 url: ValidUrl::new(url.clone()),
-                 excerpt: None,
-                 author: None,
-                 date: None,
-                 html: Some(html),
-                 assets,
-             })
-         },
-     }
- }
+            Ok(ScrapedContent {
+                title: url
+                    .host_str()
+                    .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {}", url)))?
+                    .to_string(),
+                content: fallback_content,
+                url: ValidUrl::new(url.clone()),
+                excerpt: None,
+                author: None,
+                date: None,
+                html: Some(html),
+                assets,
+            })
+        },
+    }
+}
 
 /// Download assets if enabled in config
 ///
@@ -366,8 +366,11 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     let queue = Arc::new(UrlQueue::new());
 
     // Add seed URL to queue
-    let seed_discovered =
-        DiscoveredUrl::html(config_clone.seed_url.clone(), 0, config_clone.seed_url.clone());
+    let seed_discovered = DiscoveredUrl::html(
+        config_clone.seed_url.clone(),
+        0,
+        config_clone.seed_url.clone(),
+    );
     queue.push(seed_discovered);
 
     // Track visited URLs

@@ -41,7 +41,11 @@ impl ConfigDefaults {
             return Self::default();
         };
         toml::from_str(&content).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to parse config {}: {}, using defaults", path.display(), e);
+            eprintln!(
+                "Warning: Failed to parse config {}: {}, using defaults",
+                path.display(),
+                e
+            );
             Self::default()
         })
     }

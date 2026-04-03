@@ -44,8 +44,8 @@ use rust_scraper::{
         error::{format_cli_error, CliError, CliExit},
         summary::ScrapeSummary,
     },
-    export_factory, validate_and_parse_url, Args, Commands, CrawlerConfig, ObsidianOptions,
-    ScraperConfig, UserAgentCache, save_results,
+    export_factory, save_results, validate_and_parse_url, Args, Commands, CrawlerConfig,
+    ObsidianOptions, ScraperConfig, UserAgentCache,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -110,7 +110,10 @@ async fn main() -> CliExit {
     let warn_icon = icon("⚠️", "WARN");
     let info_icon = icon("📌", "INFO");
 
-    info!("Rust Scraper {} - Clean Architecture", rust_scraper::version_string());
+    info!(
+        "Rust Scraper {} - Clean Architecture",
+        rust_scraper::version_string()
+    );
     info!("{} Target: {}", info_icon, args.url);
     info!("{} Output: {}", info_icon, args.output.display());
 
@@ -119,7 +122,11 @@ async fn main() -> CliExit {
     // =========================================================================
     info!("Loading user agents (cache check)...");
     let user_agents = UserAgentCache::load().await;
-    info!("{} User agent loaded: {} agents available", ok, user_agents.len());
+    info!(
+        "{} User agent loaded: {} agents available",
+        ok,
+        user_agents.len()
+    );
 
     // =========================================================================
     // 7. Validate URL
@@ -148,7 +155,10 @@ async fn main() -> CliExit {
             info!("{} Connectivity check passed", ok);
         },
         PreflightResult::Warning(status) => {
-            warn!("{} Server returned {} but connectivity OK", warn_icon, status);
+            warn!(
+                "{} Server returned {} but connectivity OK",
+                warn_icon, status
+            );
         },
         PreflightResult::Failed(msg) => {
             let suggestion = "Check your network connection and URL. Verify the host is reachable";
@@ -273,7 +283,10 @@ async fn main() -> CliExit {
             },
         }
     } else {
-        info!("Headless mode: will scrape all {} URLs", discovered_urls.len());
+        info!(
+            "Headless mode: will scrape all {} URLs",
+            discovered_urls.len()
+        );
         discovered_urls
     };
 
@@ -406,8 +419,11 @@ async fn main() -> CliExit {
         let success_count = results.len();
         let fail_count = failures.len();
         pb.finish_with_message(
-            format!("Scraping complete: {} succeeded, {} failed", success_count, fail_count)
-                .to_owned(),
+            format!(
+                "Scraping complete: {} succeeded, {} failed",
+                success_count, fail_count
+            )
+            .to_owned(),
         );
     }
 
@@ -429,7 +445,11 @@ async fn main() -> CliExit {
         return CliExit::Success;
     }
 
-    info!("{} Scraping completed: {} elements extracted", ok, results.len());
+    info!(
+        "{} Scraping completed: {} elements extracted",
+        ok,
+        results.len()
+    );
 
     // =========================================================================
     // 16. Export results
@@ -468,7 +488,10 @@ async fn main() -> CliExit {
     // Summary of downloaded assets
     let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
     if total_assets > 0 {
-        info!("Total assets downloaded: {} (images and documents)", total_assets);
+        info!(
+            "Total assets downloaded: {} (images and documents)",
+            total_assets
+        );
     }
 
     // =========================================================================

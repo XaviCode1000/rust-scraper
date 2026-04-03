@@ -191,7 +191,10 @@ impl StateStore {
         let lock_path = path.with_extension("json.lock");
         let lock_file = fs::File::create(&lock_path).map_err(ScraperError::Io)?;
         lock_file.lock_exclusive().map_err(|e| {
-            ScraperError::Io(std::io::Error::other(format!("failed to acquire state lock: {}", e)))
+            ScraperError::Io(std::io::Error::other(format!(
+                "failed to acquire state lock: {}",
+                e
+            )))
         })?;
 
         // Serialize to JSON

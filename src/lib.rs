@@ -743,7 +743,11 @@ pub struct Args {
     /// are converted. External links remain as standard Markdown links.
     ///
     /// Example: [Read more](https://example.com/about) -> [[about|Read more]]
-    #[arg(long, default_value = "false", env = "RUST_SCRAPER_OBSIDIAN_WIKI_LINKS")]
+    #[arg(
+        long,
+        default_value = "false",
+        env = "RUST_SCRAPER_OBSIDIAN_WIKI_LINKS"
+    )]
     #[clap(next_help_heading = "Output")]
     pub obsidian_wiki_links: bool,
 
@@ -764,7 +768,11 @@ pub struct Args {
     /// paths so they display correctly in Obsidian.
     ///
     /// Requires --download-images or --download-documents to have effect.
-    #[arg(long, default_value = "false", env = "RUST_SCRAPER_OBSIDIAN_RELATIVE_ASSETS")]
+    #[arg(
+        long,
+        default_value = "false",
+        env = "RUST_SCRAPER_OBSIDIAN_RELATIVE_ASSETS"
+    )]
     #[clap(next_help_heading = "Output")]
     pub obsidian_relative_assets: bool,
 

@@ -335,8 +335,14 @@ impl SitemapParser {
             let chunk = chunk.map_err(|e| SitemapError::HttpError(e.to_string()))?;
             total_bytes += chunk.len();
             if total_bytes > self.config.max_response_size {
-                tracing::warn!("Sitemap response too large: {} bytes from {}", total_bytes, url);
-                return Err(SitemapError::ResponseTooLarge(self.config.max_response_size));
+                tracing::warn!(
+                    "Sitemap response too large: {} bytes from {}",
+                    total_bytes,
+                    url
+                );
+                return Err(SitemapError::ResponseTooLarge(
+                    self.config.max_response_size,
+                ));
             }
             raw_bytes.extend_from_slice(&chunk);
         }
@@ -378,7 +384,9 @@ impl SitemapParser {
                 "Gzip decompression hit size limit ({} bytes) — possible decompression bomb",
                 decompressed.len()
             );
-            return Err(SitemapError::DecompressedTooLarge(self.config.max_decompressed_size));
+            return Err(SitemapError::DecompressedTooLarge(
+                self.config.max_decompressed_size,
+            ));
         }
 
         // Parse XML

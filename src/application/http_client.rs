@@ -293,7 +293,10 @@ impl HttpClient {
 
                     // Detect WAF/CAPTCHA challenges disguised as HTTP 200
                     if let Some(provider) = detect_waf_challenge(&body) {
-                        warn!("WAF challenge detected from {} ({}), rotating UA", url, provider);
+                        warn!(
+                            "WAF challenge detected from {} ({}), rotating UA",
+                            url, provider
+                        );
                         // Same retry logic as 403: rotate UA once
                         if ua_index == 0 {
                             ua_index += 1;
@@ -583,13 +586,22 @@ mod tests {
 
     #[test]
     fn test_http_error_display() {
-        assert_eq!(format!("{}", HttpError::Forbidden), "403 Forbidden - site blocking");
+        assert_eq!(
+            format!("{}", HttpError::Forbidden),
+            "403 Forbidden - site blocking"
+        );
         assert_eq!(
             format!("{}", HttpError::RateLimited(30)),
             "429 Rate Limited - retry after 30 seconds"
         );
-        assert_eq!(format!("{}", HttpError::ClientError(404)), "Client Error 404");
-        assert_eq!(format!("{}", HttpError::ServerError(500)), "Server Error 500");
+        assert_eq!(
+            format!("{}", HttpError::ClientError(404)),
+            "Client Error 404"
+        );
+        assert_eq!(
+            format!("{}", HttpError::ServerError(500)),
+            "Server Error 500"
+        );
         assert_eq!(format!("{}", HttpError::Timeout), "Request Timeout");
     }
 

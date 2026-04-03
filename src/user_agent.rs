@@ -166,7 +166,11 @@ impl UserAgentCache {
             let _ = fs::write(Self::cache_path(), json);
         }
 
-        tracing::info!("Cached {} user agents (Chrome {})", agents.len(), chrome_version);
+        tracing::info!(
+            "Cached {} user agents (Chrome {})",
+            agents.len(),
+            chrome_version
+        );
 
         Ok(agents)
     }
@@ -257,7 +261,11 @@ mod tests {
         let mut unique_agents = agents.clone();
         unique_agents.sort();
         unique_agents.dedup();
-        assert_eq!(agents.len(), unique_agents.len(), "Fallback agents should be unique");
+        assert_eq!(
+            agents.len(),
+            unique_agents.len(),
+            "Fallback agents should be unique"
+        );
     }
 
     #[test]
