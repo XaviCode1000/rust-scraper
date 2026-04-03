@@ -333,7 +333,7 @@ pub async fn run_selector(urls: &[Url]) -> Result<Vec<Url>> {
                         KeyCode::Char('q') => {
                             restore_terminal()?;
                             return Err(TuiError::Interrupted);
-                        }
+                        },
 
                         // Navigation
                         KeyCode::Up => state.cursor_up(),
@@ -349,22 +349,22 @@ pub async fn run_selector(urls: &[Url]) -> Result<Vec<Url>> {
                             if state.has_selections() {
                                 state.enter_confirm_mode();
                             }
-                        }
+                        },
 
                         // Confirmation responses
                         KeyCode::Char('y') | KeyCode::Char('Y') if state.confirm_mode => {
                             restore_terminal()?;
                             return Ok(state.get_selected_urls());
-                        }
+                        },
 
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc
                             if state.confirm_mode =>
                         {
                             state.exit_confirm_mode();
-                        }
+                        },
 
                         // No-op for other keys
-                        _ => {}
+                        _ => {},
                     }
                 }
             }

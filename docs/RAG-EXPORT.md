@@ -1,21 +1,22 @@
 # RAG Export Pipeline
 
 **Status:** ✅ Complete (Issue #1 - 100%)
-**Format:** JSON Lines (JSONL)
-**Feature:** State management with resume support
-**Tests:** ✅ 3/3 JSONL tests passing, ✅ 9/9 State tests passing
+**Formats:** JSON Lines (JSONL) + Vector JSON
+**Features:** State management with resume support, Vector export with embeddings
+**Tests:** ✅ 3/3 JSONL tests, ✅ 9/9 State tests, ✅ 14/14 Vector tests
 
 ---
 
 ## Overview
 
-The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** format, optimized for ingestion into vector databases and RAG (Retrieval-Augmented Generation) systems.
+The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** and **Vector JSON** formats, optimized for ingestion into vector databases and RAG (Retrieval-Augmented Generation) systems.
 
 ### Implementation Status
 
 | Component | Status | Lines | Tests |
 |-----------|--------|-------|-------|
 | `JsonlExporter` | ✅ Complete | 207 lines | 3/3 passing |
+| `VectorExporter` | ✅ Complete | 350+ lines | 14/14 passing |
 | `StateStore` | ✅ Complete | 433 lines | 9/9 passing |
 | `ExportState` | ✅ Complete | Domain entity | Integrated |
 
@@ -25,6 +26,7 @@ The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** format
 - **Resume support**: `--resume` flag tracks processed URLs
 - **State persistence**: Atomic saves with crash recovery
 - **RAG-ready**: Compatible with Qdrant, Weaviate, Pinecone, LangChain
+- **Vector Export**: JSON with metadata header, embeddings, cosine similarity
 
 ---
 
@@ -36,7 +38,8 @@ The RAG Export Pipeline exports scraped content in **JSON Lines (JSONL)** format
 src/infrastructure/export/
 ├── mod.rs              # Module exports
 ├── jsonl_exporter.rs   # JSONL exporter (207 lines)
-└── state_store.rs      # State persistence (433 lines)
+├── state_store.rs      # State persistence (433 lines)
+└── vector_exporter.rs  # Vector export + cosine similarity (350+ lines)
 
 src/infrastructure/output/
 ├── mod.rs              # Module exports
@@ -161,6 +164,118 @@ wc -l export.jsonl
 
 # Pretty print first document
 head -1 export.jsonl | jq .
+```
+
+---
+
+## Vector Export (JSON with Embeddings)
+
+### Output JSON Schema
+
+The Vector export format produces structured JSON with a metadata header and documents array:
+
+```json
+{
+  "metadata": {
+    "format_version": 1,
+    "model_name": "all-MiniLM-L6-v2",
+    "dimensions": 384,
+    "total_documents": 0,
+    "created_at": "2026-04-01T00:00:00Z"
+  },
+  "documents": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "url": "https://example.com/page",
+      "title": "Page Title",
+      "content": "Clean text content...",
+      "metadata": {
+        "author": "John Doe",
+        "domain": "example.com"
+      },
+      "timestamp": "2026-04-01T00:00:00Z",
+      "embeddings": [0.012, -0.034, 0.056, ...]
+    }
+  ]
+}
+```
+
+### VectorExporter Implementation
+
+```rust
+// src/infrastructure/export/vector_exporter.rs
+pub struct VectorExporter {
+    config: ExporterConfig,
+    dimensions: Mutex<Option<usize>>,
+}
+
+impl Exporter for VectorExporter {
+    fn export(&self, document: DocumentChunk) -> ExportResult<()>;
+    fn export_batch(&self, documents: Vec<DocumentChunk>) -> ExportResult<()>;
+    fn config(&self) -> &ExporterConfig;
+}
+
+// Cosine similarity for vector comparison
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32;
+```
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Metadata Header** | Format version, model name, dimensions, total documents, creation timestamp |
+| **Embedding Support** | Stores `Option<Vec<f32>>` embedding vectors in each document |
+| **Cosine Similarity** | Pure Rust scalar function for vector comparison |
+| **Dimension Validation** | Rejects documents with mismatched embedding dimensions |
+| **File Locking** | `fs2` exclusive locks prevent concurrent write corruption |
+| **Append Mode** | Can append to existing files without rewriting metadata |
+| **Directory Creation** | Auto-creates output directories if missing |
+
+### Usage
+
+```bash
+# Export with embeddings (after AI semantic cleaning)
+cargo run --features ai -- \
+  --url "https://example.com" \
+  --export-format vector \
+  --clean-ai \
+  -o ./vector_data
+
+# Append to existing vector export
+cargo run --features ai -- \
+  --url "https://example.com" \
+  --export-format vector \
+  --output ./vector_data \
+  --resume
+```
+
+### Cosine Similarity
+
+```rust
+use rust_scraper::infrastructure::export::vector_exporter::cosine_similarity;
+
+let a = [1.0, 0.0, 0.0];
+let b = [0.0, 1.0, 0.0];
+let sim = cosine_similarity(&a, &b);
+assert!(sim.abs() < f32::EPSILON); // orthogonal vectors = 0.0
+```
+
+### Vector Export in Python
+
+```python
+import json
+
+# Load vector export
+with open('./vector_data/export.json', 'r') as f:
+    data = json.load(f)
+
+print(f"Model: {data['metadata']['model_name']}")
+print(f"Vectors: {len(data['documents'])} documents")
+print(f"Dimensions: {data['metadata']['dimensions']}d")
+
+# Access first document's embedding
+doc = data['documents'][0]
+print(f"Embedding: {len(doc['embeddings'])} dimensions")
 ```
 
 ---

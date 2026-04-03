@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Added
 
+#### Vector Exporter — v1.4.0
+- **`ExportFormat::Vector`** variant — JSON format with metadata header and embeddings
+- **`VectorExporter`** implementation — full `Exporter` trait impl with streaming writes
+- **Cosine similarity** — pure Rust `cosine_similarity(a, b)` module function
+- **Append mode support** — preserves existing documents when appending
+- **Dimension validation** — rejects documents with mismatched embedding dimensions
+- **File locking** — `fs2` exclusive locks prevent concurrent write corruption
+- **Directory auto-creation** — creates output directories if missing
+- **CLI integration** — `--export-format vector` now available
+- **Auto-detection** — `auto` mode detects existing `.json` vector export files
+
 #### AI Semantic Cleaning (Issue #9)
 - **Module 1+2**: Core inference with `tract-onnx` and `tokenizers`
 - **Module 3+4**: Semantic chunking with relevance scoring
@@ -374,7 +385,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commits | Key Feature |
 |---------|------|---------|-------------|
-| [Unreleased] | - | 15+ | AI Semantic Cleaning + Embedding Preservation |
+| [Unreleased] | - | 15+ | AI Semantic Cleaning + Vector Exporter + Embedding Preservation |
 | [1.0.7] | 2026-03-31 | — | WAF Detection, File Locking, OOM Protection |
 | [1.0.4] | 2026-03-10 | 20 | RAG Export Pipeline + AI Foundation |
 | [1.0.0] | 2026-03-08 | 79 | Production Ready Release |

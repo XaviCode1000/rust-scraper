@@ -191,10 +191,7 @@ impl StateStore {
         let lock_path = path.with_extension("json.lock");
         let lock_file = fs::File::create(&lock_path).map_err(ScraperError::Io)?;
         lock_file.lock_exclusive().map_err(|e| {
-            ScraperError::Io(std::io::Error::other(format!(
-                "failed to acquire state lock: {}",
-                e
-            )))
+            ScraperError::Io(std::io::Error::other(format!("failed to acquire state lock: {}", e)))
         })?;
 
         // Serialize to JSON
@@ -292,7 +289,7 @@ impl StateStore {
             Ok(state) => {
                 info!("Loaded existing state for domain: {}", self.domain);
                 Ok(state)
-            }
+            },
             Err(ScraperError::Io(io_err)) => {
                 // If it's an IO error, check if it's a "file not found" error
                 // For "file not found", return a new state; otherwise propagate the error
@@ -303,11 +300,11 @@ impl StateStore {
                     // Propagate other IO errors (permissions, disk full, etc.)
                     Err(ScraperError::Io(io_err))
                 }
-            }
+            },
             Err(e) => {
                 // If it's another kind of error (like serialization), return it
                 Err(e)
-            }
+            },
         }
     }
 }

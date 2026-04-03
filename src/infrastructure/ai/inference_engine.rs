@@ -219,9 +219,7 @@ impl InferenceEngine {
 
         // Read model bytes (async I/O)
         let model_data = tokio::fs::read(model_path).await.map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to read model file: {}", e),
+            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to read model file: {}", e),
             ))
         })?;
 
@@ -230,26 +228,20 @@ impl InferenceEngine {
         let model = tract_onnx::onnx()
             .model_for_read(&mut &model_data[..])
             .map_err(|e| {
-                SemanticError::ModelLoad(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to parse ONNX model: {}", e),
+                SemanticError::ModelLoad(std::io::Error::other(format!("Failed to parse ONNX model: {}", e),
                 ))
             })?;
 
         // Optimize the model graph (operator fusion, constant folding, etc.)
         let optimized = model.into_optimized().map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to optimize model: {}", e),
+            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to optimize model: {}", e),
             ))
         })?;
 
         // Build executable plan (TypedSimplePlan<TypedModel>)
         // This is the correct method - into_runnable() returns the plan
         let plan = optimized.into_runnable().map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create runnable plan: {}", e),
+            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to create runnable plan: {}", e),
             ))
         })?;
 

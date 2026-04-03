@@ -46,7 +46,7 @@ impl DownloadProgress {
     /// Check if download is complete
     #[must_use]
     pub fn is_complete(&self) -> bool {
-        self.total.map_or(false, |total| self.downloaded >= total)
+        self.total.is_some_and(|total| self.downloaded >= total)
     }
 }
 

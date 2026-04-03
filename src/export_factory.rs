@@ -8,7 +8,9 @@ use tracing::info;
 
 use crate::{
     domain::{entities::ExportFormat, Exporter, ExporterConfig, ExporterError},
-    infrastructure::export::{jsonl_exporter, state_store::StateStore},
+    infrastructure::export::{
+        jsonl_exporter, state_store::StateStore, vector_exporter::VectorExporter,
+    },
 };
 
 /// Create exporter based on output format
@@ -24,13 +26,25 @@ pub fn create_exporter(
             info!("Creating JSONL exporter: {:?}", config.output_path());
             let exporter = jsonl_exporter::JsonlExporter::new(config);
             Ok(Box::new(exporter))
-        }
+        },
+        ExportFormat::Vector => {
+            info!("Creating Vector exporter: {:?}", config.output_path());
+            let exporter = VectorExporter::new(config);
+            Ok(Box::new(exporter))
+        },
         ExportFormat::Auto => {
-            // Auto-detect: checks if export.jsonl exists, then uses Jsonl
+            // Auto-detect: checks if export.jsonl or export.json exists
             info!("Auto-detecting format...");
 
             let jsonl_path = output_dir.join(format!("{}.jsonl", filename));
-            if jsonl_path.exists() {
+            let vector_path = output_dir.join(format!("{}.json", filename));
+
+            if vector_path.exists() {
+                info!("Detected Vector format - {:?} exists", vector_path);
+                let config = ExporterConfig::new(output_dir, ExportFormat::Vector, filename);
+                let exporter = VectorExporter::new(config);
+                Ok(Box::new(exporter))
+            } else if jsonl_path.exists() {
                 info!("Detected JSONL format - {:?} exists", jsonl_path);
                 let config = ExporterConfig::new(output_dir, ExportFormat::Jsonl, filename);
                 let exporter = jsonl_exporter::JsonlExporter::new(config);
@@ -42,7 +56,7 @@ pub fn create_exporter(
                 let exporter = jsonl_exporter::JsonlExporter::new(config);
                 Ok(Box::new(exporter))
             }
-        }
+        },
     }
 }
 
@@ -155,10 +169,7 @@ pub fn process_results(
         }
     }
 
-    info!(
-        "✅ Export completed: {} documents processed",
-        processed_urls.len()
-    );
+    info!("✅ Export completed: {} documents processed", processed_urls.len());
     Ok(processed_urls)
 }
 

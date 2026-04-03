@@ -54,7 +54,7 @@ fn save_as_markdown(results: &[ScrapedContent], output_dir: &Path) -> Result<()>
                 let content = format!("# {}\n\n{}", item.title, item.content);
                 fs::write(&fallback_path, content)?;
                 continue;
-            }
+            },
         };
 
         let full_path_str = output_path.to_full_path();
@@ -100,7 +100,7 @@ fn save_as_text(results: &[ScrapedContent], output_dir: &Path) -> Result<()> {
                 let fallback_path = output_dir.join("index.txt");
                 fs::write(&fallback_path, &item.content)?;
                 continue;
-            }
+            },
         };
 
         let full_path = output_dir.join(

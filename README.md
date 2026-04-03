@@ -39,10 +39,11 @@
   - Checkbox selection (`[✅]` / `[⬜]`)
   - Keyboard navigation (↑↓, Space, Enter)
   - Confirmation mode (Y/N) before download
-- **RAG Export Pipeline** — JSONL format optimized for Retrieval-Augmented Generation
+- **RAG Export Pipeline** — JSONL and Vector formats optimized for Retrieval-Augmented Generation
   - State management with resume capability
   - Atomic saves (write to tmp + rename)
   - Compatible with Qdrant, Weaviate, Pinecone, LangChain
+  - **Vector Export** — JSON format with metadata header, embeddings support, cosine similarity
 
 ### 🧠 AI-Powered (v1.0.5+)
 
@@ -193,9 +194,9 @@ cargo build --release --features ai
 
 **Requirements:** Compile with `--features ai`
 
-### RAG Export Pipeline (JSONL Format)
+## RAG Export Pipeline (JSONL and Vector Format)
 
-Export content in JSON Lines format, optimized for RAG (Retrieval-Augmented Generation) pipelines.
+Export content in JSON Lines format, optimized for RAG (Retrieval-Augmented Generation) pipelines, or in Vector JSON format for vector database ingestion.
 
 ```bash
 # Export to JSONL (one JSON object per line)
@@ -203,6 +204,13 @@ Export content in JSON Lines format, optimized for RAG (Retrieval-Augmented Gene
   --url https://example.com \
   --export-format jsonl \
   --output ./rag_data
+
+# Export to Vector JSON with embeddings (after AI semantic cleaning)
+./target/release/rust_scraper \
+  --url https://example.com \
+  --export-format vector \
+  --clean-ai \
+  --output ./vector_data
 
 # Resume interrupted scraping (skip already processed URLs)
 ./target/release/rust_scraper \
@@ -684,6 +692,7 @@ By contributing to this project, you agree that your contributions will be licen
 - [x] **v1.0.7** — Production assertion fix (`debug_assert_eq!` → `assert_eq!` in inference)
 - [x] **v1.0.7** — Robust URL resolution (`resolve_url()` with RFC 3986, Content-Type validation)
 - [x] **v1.0.7** — Network hardening (`connect_timeout`, `pool_max_idle_per_host`)
+- [x] **v1.1** — Vector Exporter: JSON with embeddings, cosine similarity, dimension validation, `--export-format vector`
 
 ### Planned 🚧
 

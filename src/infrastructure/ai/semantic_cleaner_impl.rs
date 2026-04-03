@@ -322,9 +322,7 @@ impl SemanticCleanerImpl {
             InferenceEngine::load_from_file(&model_path)
                 .await
                 .map_err(|e| {
-                    SemanticError::ModelLoad(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to load inference engine: {}", e),
+                    SemanticError::ModelLoad(std::io::Error::other(format!("Failed to load inference engine: {}", e),
                     ))
                 })?,
         );
@@ -448,10 +446,7 @@ impl SemanticCleaner for SemanticCleanerImpl {
             token_buffers.push(input);
         }
 
-        debug!(
-            tokens_generated = token_buffers.len(),
-            "Step 2: Tokenization complete"
-        );
+        debug!(tokens_generated = token_buffers.len(), "Step 2: Tokenization complete");
 
         // Step 3: Generate embeddings CONCURRENTLY (async-join-parallel)
         // Following `async-join-parallel`: use try_join_all for concurrent independent operations

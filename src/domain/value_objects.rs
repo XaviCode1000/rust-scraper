@@ -51,9 +51,9 @@ impl ValidUrl {
     /// assert!(invalid.is_err());
     /// ```
     pub fn parse(s: &str) -> crate::Result<Self> {
-        Ok(Self(url::Url::parse(s).map_err(|e| {
-            crate::ScraperError::invalid_url(e.to_string())
-        })?))
+        Ok(Self(
+            url::Url::parse(s).map_err(|e| crate::ScraperError::invalid_url(e.to_string()))?,
+        ))
     }
 
     /// Get reference to inner url::Url

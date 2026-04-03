@@ -283,7 +283,7 @@ impl HtmlChunker {
                 current_title = chunk.title;
             } else if current_content.len() + chunk.content.len() <= self.max_chunk_size {
                 // Merge if under max size
-                current_content.push_str(" ");
+                current_content.push(' ');
                 current_content.push_str(&chunk.content);
             } else {
                 // Push current and start new

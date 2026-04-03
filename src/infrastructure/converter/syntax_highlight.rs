@@ -64,7 +64,7 @@ pub fn highlight_code_blocks(markdown: &str) -> String {
                         Ok(html) => html,              // HTML replaces backticks completely (no wrapping)
                         Err(_) => caps[0].to_string(), // Fallback: keep original Markdown
                     }
-                }
+                },
                 None => caps[0].to_string(), // Unknown language: keep original
             }
         })

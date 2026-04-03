@@ -335,14 +335,8 @@ impl SitemapParser {
             let chunk = chunk.map_err(|e| SitemapError::HttpError(e.to_string()))?;
             total_bytes += chunk.len();
             if total_bytes > self.config.max_response_size {
-                tracing::warn!(
-                    "Sitemap response too large: {} bytes from {}",
-                    total_bytes,
-                    url
-                );
-                return Err(SitemapError::ResponseTooLarge(
-                    self.config.max_response_size,
-                ));
+                tracing::warn!("Sitemap response too large: {} bytes from {}", total_bytes, url);
+                return Err(SitemapError::ResponseTooLarge(self.config.max_response_size));
             }
             raw_bytes.extend_from_slice(&chunk);
         }
@@ -384,9 +378,7 @@ impl SitemapParser {
                 "Gzip decompression hit size limit ({} bytes) — possible decompression bomb",
                 decompressed.len()
             );
-            return Err(SitemapError::DecompressedTooLarge(
-                self.config.max_decompressed_size,
-            ));
+            return Err(SitemapError::DecompressedTooLarge(self.config.max_decompressed_size));
         }
 
         // Parse XML
@@ -411,7 +403,7 @@ impl SitemapParser {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"loc" => {
                     in_loc = true;
-                }
+                },
                 Ok(Event::Text(ref e)) if in_loc => {
                     // Following own-cow-for-owned-borrowed: unescape returns Cow
                     if let Ok(text) = e.unescape() {
@@ -430,13 +422,13 @@ impl SitemapParser {
                             }
                         }
                     }
-                }
+                },
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"loc" => {
                     in_loc = false;
-                }
+                },
                 Ok(Event::Eof) => break,
                 Err(e) => return Err(SitemapError::XmlError(e)),
-                _ => {}
+                _ => {},
             }
             // Following mem-no-clone-in-loop: clear buffer, don't reallocate
             buf.clear();

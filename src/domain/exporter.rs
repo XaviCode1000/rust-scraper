@@ -36,6 +36,10 @@ pub enum ExporterError {
     /// State store operation failed
     #[error("Error en state store: {0}")]
     StateStore(#[from] crate::error::ScraperError),
+
+    /// Embedding dimensions don't match expected size
+    #[error("dimension mismatch: expected {expected}, got {actual}")]
+    DimensionMismatch { expected: usize, actual: usize },
 }
 
 /// Result type for exporter operations
@@ -238,15 +242,9 @@ mod tests {
 
     #[test]
     fn test_exporter_config_output_path() {
-        let config = ExporterConfig::new(
-            PathBuf::from("/tmp/output"),
-            ExportFormat::Jsonl,
-            "test_export",
-        );
-        assert_eq!(
-            config.output_path(),
-            PathBuf::from("/tmp/output/test_export.jsonl")
-        );
+        let config =
+            ExporterConfig::new(PathBuf::from("/tmp/output"), ExportFormat::Jsonl, "test_export");
+        assert_eq!(config.output_path(), PathBuf::from("/tmp/output/test_export.jsonl"));
     }
 
     #[test]

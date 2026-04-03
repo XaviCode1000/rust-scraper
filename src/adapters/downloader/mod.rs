@@ -265,15 +265,15 @@ fn mime_type_to_extension(mime: &str) -> Option<String> {
         "application/msword" => Some("doc".to_string()),
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
             Some("docx".to_string())
-        }
+        },
         "application/vnd.ms-excel" => Some("xls".to_string()),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
             Some("xlsx".to_string())
-        }
+        },
         "application/vnd.ms-powerpoint" => Some("ppt".to_string()),
         "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
             Some("pptx".to_string())
-        }
+        },
         "text/csv" => Some("csv".to_string()),
         "application/vnd.oasis.opendocument.text" => Some("odt".to_string()),
         "application/vnd.oasis.opendocument.spreadsheet" => Some("ods".to_string()),
@@ -335,14 +335,8 @@ mod tests {
         let images_path = temp_dir.path().join("test_images");
         let docs_path = temp_dir.path().join("test_docs");
 
-        assert!(
-            images_path.exists(),
-            "Images directory should be pre-created"
-        );
-        assert!(
-            docs_path.exists(),
-            "Documents directory should be pre-created"
-        );
+        assert!(images_path.exists(), "Images directory should be pre-created");
+        assert!(docs_path.exists(), "Documents directory should be pre-created");
     }
 
     #[test]
@@ -376,14 +370,8 @@ mod tests {
     #[test]
     fn test_mime_type_to_extension() {
         assert_eq!(mime_type_to_extension("image/png"), Some("png".to_string()));
-        assert_eq!(
-            mime_type_to_extension("image/jpeg"),
-            Some("jpg".to_string())
-        );
-        assert_eq!(
-            mime_type_to_extension("application/pdf"),
-            Some("pdf".to_string())
-        );
+        assert_eq!(mime_type_to_extension("image/jpeg"), Some("jpg".to_string()));
+        assert_eq!(mime_type_to_extension("application/pdf"), Some("pdf".to_string()));
         assert_eq!(mime_type_to_extension("application/unknown"), None);
         assert_eq!(mime_type_to_extension(""), None);
     }
@@ -398,22 +386,14 @@ mod tests {
         let downloader = Downloader::new(config).unwrap();
 
         let filename = downloader.generate_filename_from_hash("abc123def456789", Some("image/png"));
-        assert!(
-            filename.ends_with(".png"),
-            "Expected .png but got: {}",
-            filename
-        );
+        assert!(filename.ends_with(".png"), "Expected .png but got: {}", filename);
         assert!(
             filename.starts_with("abc123def456"),
             "Filename should start with first 12 chars of hash"
         );
 
         let filename = downloader.generate_filename_from_hash("xyz789abc123456", None);
-        assert!(
-            filename.ends_with(".bin"),
-            "Expected .bin but got: {}",
-            filename
-        );
+        assert!(filename.ends_with(".bin"), "Expected .bin but got: {}", filename);
     }
 
     #[tokio::test]
