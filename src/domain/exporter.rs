@@ -242,9 +242,15 @@ mod tests {
 
     #[test]
     fn test_exporter_config_output_path() {
-        let config =
-            ExporterConfig::new(PathBuf::from("/tmp/output"), ExportFormat::Jsonl, "test_export");
-        assert_eq!(config.output_path(), PathBuf::from("/tmp/output/test_export.jsonl"));
+        let config = ExporterConfig::new(
+            PathBuf::from("/tmp/output"),
+            ExportFormat::Jsonl,
+            "test_export",
+        );
+        assert_eq!(
+            config.output_path(),
+            PathBuf::from("/tmp/output/test_export.jsonl")
+        );
     }
 
     #[test]

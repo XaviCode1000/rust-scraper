@@ -609,7 +609,10 @@ mod tests {
     fn test_matches_pattern_ssrf_bypass_attempt() {
         // ATAQUE: Evil URL con query params que contienen el dominio
         // Esto NO debe matchear
-        assert!(!matches_pattern("https://evil.com/?q=example.com/path", "*.example.com/*"));
+        assert!(!matches_pattern(
+            "https://evil.com/?q=example.com/path",
+            "*.example.com/*"
+        ));
 
         assert!(!matches_pattern(
             "https://attacker.com/?redirect=example.com/admin",
@@ -626,27 +629,45 @@ mod tests {
     #[test]
     fn test_matches_pattern_real_subdomain() {
         // Subdominio real DEBE matchear
-        assert!(matches_pattern("https://blog.example.com/post", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://blog.example.com/post",
+            "*.example.com/*"
+        ));
 
-        assert!(matches_pattern("https://sub.example.com/page", "*.example.com"));
+        assert!(matches_pattern(
+            "https://sub.example.com/page",
+            "*.example.com"
+        ));
 
         // Multiple subdomain levels
-        assert!(matches_pattern("https://deep.sub.example.com/page", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://deep.sub.example.com/page",
+            "*.example.com/*"
+        ));
     }
 
     #[test]
     fn test_matches_pattern_with_port() {
         // URLs with ports should work
         // Note: example.com:8080 does NOT match *.example.com/* (needs subdomain)
-        assert!(matches_pattern("https://blog.example.com:8080/path", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://blog.example.com:8080/path",
+            "*.example.com/*"
+        ));
 
-        assert!(matches_pattern("https://blog.example.com:443/post", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://blog.example.com:443/post",
+            "*.example.com/*"
+        ));
     }
 
     #[test]
     fn test_matches_pattern_ipv4() {
         // IPv4 debe funcionar
-        assert!(matches_pattern("http://192.168.1.1:8080/path", "192.168.1.1"));
+        assert!(matches_pattern(
+            "http://192.168.1.1:8080/path",
+            "192.168.1.1"
+        ));
     }
 
     #[test]
@@ -683,26 +704,47 @@ mod tests {
     #[test]
     fn test_matches_pattern_exact_host() {
         assert!(matches_pattern("https://example.com/page", "example.com"));
-        assert!(!matches_pattern("https://sub.example.com/page", "example.com"));
+        assert!(!matches_pattern(
+            "https://sub.example.com/page",
+            "example.com"
+        ));
     }
 
     #[test]
     fn test_matches_pattern_prefix_wildcard() {
         // After SSRF fix, *.example.com/* matches SUBDOMAINS only, not root domain
         // Use "example.com/*" pattern to match the root domain itself
-        assert!(matches_pattern("https://blog.example.com/admin/users", "*.example.com/*"));
-        assert!(matches_pattern("https://admin.example.com/users", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://blog.example.com/admin/users",
+            "*.example.com/*"
+        ));
+        assert!(matches_pattern(
+            "https://admin.example.com/users",
+            "*.example.com/*"
+        ));
         // Root domain does NOT match *.example.com/*
-        assert!(!matches_pattern("https://example.com/admin/users", "*.example.com/*"));
+        assert!(!matches_pattern(
+            "https://example.com/admin/users",
+            "*.example.com/*"
+        ));
     }
 
     #[test]
     fn test_matches_pattern_slash_wildcard() {
         // *.example.com/* matches any subdomain of example.com
         // Note: Compares HOSTS only, path is not considered
-        assert!(matches_pattern("https://blog.example.com/admin/users", "*.example.com/*"));
-        assert!(matches_pattern("https://admin.example.com/users", "*.example.com/*"));
+        assert!(matches_pattern(
+            "https://blog.example.com/admin/users",
+            "*.example.com/*"
+        ));
+        assert!(matches_pattern(
+            "https://admin.example.com/users",
+            "*.example.com/*"
+        ));
         // Root domain does NOT match *.example.com/*
-        assert!(!matches_pattern("https://example.com/admin/users", "*.example.com/*"));
+        assert!(!matches_pattern(
+            "https://example.com/admin/users",
+            "*.example.com/*"
+        ));
     }
 }

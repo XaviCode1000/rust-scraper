@@ -301,7 +301,10 @@ mod tests {
     #[test]
     fn test_readability_error() {
         let err = ScraperError::readability("Failed to parse HTML");
-        assert_eq!(err.to_string(), "Error de legibilidad: Failed to parse HTML");
+        assert_eq!(
+            err.to_string(),
+            "Error de legibilidad: Failed to parse HTML"
+        );
     }
 
     #[test]

@@ -2,9 +2,22 @@
 
 ## 🎉 Latest Achievements
 
-**Tests:** **271 passing** (nextest)  
+**Tests:** **361 passing** (nextest)  
 **Status:** ✅ **All tests passing, 0 failing**  
-**Version:** v1.3.0 — SPA Detection Phase 1
+**Version:** v1.6.0 — Vault Auto-Detect & Quick-Save
+
+### v1.6.0 Highlights
+- **Vault auto-detect:** 4-tier resolution (CLI > env > config > auto-scan)
+- **Quick-save mode:** `--obsidian --quick-save` bypasses TUI, saves to vault inbox
+- **Rich metadata:** readingTime, language, wordCount, contentType, status for Dataview
+- **Obsidian URI:** Opens saved notes in Obsidian via `obsidian://open` (Linux)
+- **36 new tests** covering vault detection, metadata generation, and URI building
+
+### v1.5.0 Highlights
+- **Obsidian Markdown export:** Wiki-links, relative asset paths, tags in frontmatter
+- **New module:** `src/infrastructure/converter/obsidian.rs`
+- **New dependency:** `pathdiff = "0.2"` for cross-platform relative paths
+- **Backward compatible:** All flags optional, zero breaking changes
 
 ### v1.3.0 Highlights
 - **SPA Detection:** `detect_spa_content()` heuristic in ScraperService warns when pages return minimal content
@@ -340,7 +353,7 @@ See comments in `Cargo.toml` for details. Do NOT try to unify them.
 
 ---
 
-**Last updated**: 2026-04-01  
+**Last updated**: 2026-04-04  
 **Rust version**: 1.93.0  
 **Stack version**: 2025-26 optimal
-**Tests**: 271 passing (nextest)
+**Tests**: 361 passing (nextest)

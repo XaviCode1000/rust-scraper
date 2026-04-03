@@ -1,8 +1,8 @@
 # CLI Reference — rust-scraper
 
-**Version:** 1.1.0  
+**Version:** 1.6.0  
 **MSRV:** 1.88  
-**Last Updated:** 2026-04-03
+**Last Updated:** 2026-04-04
 
 ---
 
@@ -113,6 +113,62 @@ cargo run -- --url "https://example.com" --export-format auto
 ```bash
 cargo run -- --url "https://example.com" -o ./my-scrapes
 ```
+
+### Obsidian Integration (v1.5.0+)
+
+#### Vault Detection
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--vault <PATH>` | Path | Auto-detect | Explicit Obsidian vault path |
+
+**Detection order:** `--vault` > `$OBSIDIAN_VAULT` env var > config file > auto-scan
+
+#### Obsidian Export Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--obsidian-wiki-links` | Boolean | `false` | Convert same-domain links to `[[wiki-link]]` syntax |
+| `--obsidian-tags <TAGS>` | Comma-separated | None | Tags for YAML frontmatter (e.g., `"rust,web,scraping"`) |
+| `--obsidian-relative-assets` | Boolean | `false` | Rewrite asset paths as relative to `.md` file |
+| `--quick-save` | Boolean | `false` | Bypass TUI, save directly to vault inbox |
+
+**Example:**
+```bash
+# Quick-save to detected vault
+cargo run -- --url "https://example.com" --obsidian --quick-save
+
+# Full Obsidian mode
+cargo run -- --url "https://example.com" \
+  --vault ~/Obsidian/MyVault \
+  --obsidian-wiki-links \
+  --obsidian-tags "rust,web" \
+  --obsidian-relative-assets \
+  --quick-save
+```
+
+**Quick-save behavior:**
+- Saves to `{vault}/_inbox/YYYY-MM-DD-slug.md`
+- Creates `_inbox/` directory if it doesn't exist
+- Opens note in Obsidian if running (Linux)
+- Falls back to `--output` directory if no vault detected
+
+**Environment Variables:**
+| Variable | Description |
+|----------|-------------|
+| `OBSIDIAN_VAULT` | Path to Obsidian vault (used if `--vault` not specified) |
+
+**Config File:**
+```toml
+# ~/.config/rust-scraper/config.toml
+[obsidian]
+vault_path = "~/Obsidian/MyVault"
+wiki_links = true
+relative_assets = true
+tags = ["web-clip", "automation"]
+```
+
+See [`docs/OBSIDIAN.md`](OBSIDIAN.md) for complete Obsidian documentation.
 
 ---
 

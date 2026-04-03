@@ -3,10 +3,10 @@
 **Production-ready web scraper with Clean Architecture, TUI selector, and AI-powered semantic cleaning.**
 
 [![Build Status](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions)
-[![Tests](https://img.shields.io/badge/tests-304%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
+[![Tests](https://img.shields.io/badge/tests-361%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
 
 ---
 
@@ -67,6 +67,15 @@
 - **LazyLock Cache** — Syntax highlighting (2-10ms → ~0.01ms)
 - **Bounded Concurrency** — Configurable parallel downloads (HDD-aware defaults)
 - **Hardware-Aware** — Auto-detects CPU cores, adjusts concurrency accordingly
+
+### 📝 Obsidian Integration (v1.5.0+)
+
+- **Obsidian-compatible Markdown** — Wiki-links, relative asset paths, tags in frontmatter
+- **Vault auto-detect** — Automatic vault discovery via CLI, env var, config, or filesystem scan
+- **Quick-save mode** — `--obsidian --quick-save` for frictionless URL-to-vault workflow
+- **Rich metadata** — `readingTime`, `language`, `wordCount`, `contentType`, `status` for Dataview queries
+- **Obsidian URI** — Open saved notes directly in Obsidian after scraping
+- **See** [`docs/OBSIDIAN.md`](docs/OBSIDIAN.md) for complete documentation
 
 ### 🎨 CLI UX (v1.1.0+)
 
@@ -205,6 +214,30 @@ cargo build --release --features ai
 ```
 
 **Requirements:** Compile with `--features ai`
+
+### Obsidian Integration (v1.5.0+)
+
+```bash
+# Quick-save to detected vault (no TUI, no confirmation)
+./target/release/rust_scraper --url https://example.com/article --obsidian --quick-save
+
+# With explicit vault path
+./target/release/rust_scraper --url https://example.com/article \
+  --vault ~/Obsidian/MyVault \
+  --obsidian-wiki-links \
+  --obsidian-tags "rust,web,scraping" \
+  --obsidian-relative-assets
+
+# Set vault via environment variable (persistent)
+export OBSIDIAN_VAULT=~/Obsidian/MyKnowledge
+./target/release/rust_scraper --url https://example.com/article --obsidian --quick-save
+```
+
+**Quick-save behavior:**
+- Detects vault automatically (CLI > env > config > auto-scan)
+- Saves to `{vault}/_inbox/YYYY-MM-DD-slug.md`
+- Opens note in Obsidian if running (Linux)
+- Falls back to `./output/` if no vault found
 
 ## RAG Export Pipeline (JSONL and Vector Format)
 
@@ -389,6 +422,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for detailed architecture doc
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Clean Architecture design decisions |
 | [`docs/AI-SEMANTIC-CLEANING.md`](docs/AI-SEMANTIC-CLEANING.md) | AI-powered content extraction (v1.0.5+) |
 | [`docs/RAG-EXPORT.md`](docs/RAG-EXPORT.md) | RAG export pipeline and JSONL format |
+| [`docs/OBSIDIAN.md`](docs/OBSIDIAN.md) | Obsidian integration: vault auto-detect, quick-save, rich metadata |
 | [`docs/CLI.md`](docs/CLI.md) | Complete CLI reference |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Contribution guidelines |
 | [`docs/CHANGES.md`](docs/CHANGES.md) | Changelog and version history |
@@ -679,11 +713,11 @@ By contributing to this project, you agree that your contributions will be licen
 | Metric | Value |
 |--------|-------|
 | **Lines of Code** | ~4,500 (src/) |
-| **Total Tests** | 304 passing (nextest) |
+| **Total Tests** | 361 passing (nextest) |
 | **Public Functions** | 70+ |
 | **MSRV** | 1.88.0 |
 | **Dependencies** | 50+ (core), 65+ (with AI) |
-| **Latest Version** | 1.1.0 |
+| **Latest Version** | 1.6.0 |
 | **Test Runner** | cargo-nextest (4x faster) |
 | **Background Checker** | bacon (instant feedback) |
 | **Clippy** | 0 warnings, 0 errors |
@@ -707,6 +741,8 @@ By contributing to this project, you agree that your contributions will be licen
 - [x] **v1.0.7** — Network hardening (`connect_timeout`, `pool_max_idle_per_host`)
 - [x] **v1.1.0** — CLI UX: CliExit, sysexits, progress bars, dry-run, quiet, completions, config file, NO_COLOR
 - [x] **v1.1.0** — Vector Exporter: JSON with embeddings, cosine similarity, dimension validation, append mode fix
+- [x] **v1.5.0** — Obsidian Markdown export (wiki-links, relative assets, tags)
+- [x] **v1.6.0** — Vault auto-detect, quick-save mode, rich metadata, Obsidian URI
 
 ### Planned 🚧
 
@@ -730,4 +766,4 @@ By contributing to this project, you agree that your contributions will be licen
 
 **Made with ❤️ using Rust and Clean Architecture**
 
-**Current Status:** ✅ All tests passing (304/304) | ✅ CI/CD enabled | ✅ Production-ready | ✅ Validated with real sites | ✅ Clippy clean (0 warnings)
+**Current Status:** ✅ All tests passing (361/361) | ✅ CI/CD enabled | ✅ Production-ready | ✅ Validated with real sites | ✅ Clippy clean (0 warnings)

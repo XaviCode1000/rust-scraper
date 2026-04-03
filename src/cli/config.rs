@@ -24,6 +24,14 @@ pub struct ConfigDefaults {
     pub log_level: Option<String>,
     /// Whether to use sitemap by default
     pub use_sitemap: Option<bool>,
+    /// Default Obsidian wiki-links setting
+    pub obsidian_wiki_links: Option<bool>,
+    /// Default Obsidian tags (comma-separated string)
+    pub obsidian_tags: Option<String>,
+    /// Default Obsidian relative assets setting
+    pub obsidian_relative_assets: Option<bool>,
+    /// Default Obsidian vault path
+    pub vault_path: Option<String>,
 }
 
 impl ConfigDefaults {
@@ -35,7 +43,11 @@ impl ConfigDefaults {
             return Self::default();
         };
         toml::from_str(&content).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to parse config {}: {}, using defaults", path.display(), e);
+            eprintln!(
+                "Warning: Failed to parse config {}: {}, using defaults",
+                path.display(),
+                e
+            );
             Self::default()
         })
     }

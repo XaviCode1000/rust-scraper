@@ -1,0 +1,21 @@
+# rustfmt.toml - Project-wide formatting configuration
+# https://rust-lang.github.io/rustfmt/
+#
+# NOTE: Only stable options are used. Nightly-only options are commented out.
+# To use nightly features, run: rustup toolchain install nightly && cargo +nightly fmt
+
+# Line width
+max_width = 100
+
+# Indentation
+tab_spaces = 4
+hard_tabs = false
+
+# Imports
+reorder_imports = true
+
+# Struct fields
+use_field_init_shorthand = true
+
+# Match block braces
+match_block_trailing_comma = true

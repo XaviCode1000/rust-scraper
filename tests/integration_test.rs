@@ -6,10 +6,11 @@
 //! Run with features: cargo test --test integration --features images,documents
 
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_readability, DownloadedAsset, ScrapedContent,
-    ValidUrl,
+    create_http_client, save_results, scrape_with_config, scrape_with_readability, DownloadedAsset,
+    ScrapedContent, ValidUrl,
 };
 use tempfile::TempDir;
+use walkdir::WalkDir;
 
 // ============================================================================
 // Integration Tests: Full scraping pipeline
@@ -85,6 +86,12 @@ fn test_args_has_required_fields() {
         dry_run: false,
         quiet: false,
         subcommand: None,
+        obsidian_wiki_links: false,
+        obsidian_tags: None,
+        obsidian_relative_assets: false,
+        vault: None,
+        quick_save: false,
+        obsidian_rich_metadata: false,
     };
 
     assert_eq!(args.url, "https://example.com");
@@ -160,7 +167,13 @@ fn test_save_results_to_nested_directory() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Text);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(
+        &results,
+        &output_dir,
+        &rust_scraper::OutputFormat::Text,
+        &obsidian,
+    );
 
     // Assert
     assert!(result.is_ok());
@@ -198,7 +211,13 @@ fn test_save_results_json_with_special_characters() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Json);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(
+        &results,
+        &output_dir,
+        &rust_scraper::OutputFormat::Json,
+        &obsidian,
+    );
 
     // Assert - Should handle special chars correctly
     assert!(result.is_ok());
@@ -229,7 +248,13 @@ fn test_save_results_markdown_with_markdown_syntax() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Markdown);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(
+        &results,
+        &output_dir,
+        &rust_scraper::OutputFormat::Markdown,
+        &obsidian,
+    );
 
     // Assert
     assert!(result.is_ok());
@@ -334,7 +359,6 @@ async fn test_download_documents_from_website() {
         download_documents: true,
         output_dir: output_dir.clone(),
         max_file_size: Some(50 * 1024 * 1024), // 50MB max
-        scraper_concurrency: 3,
         scraper_concurrency: 3,
     };
 

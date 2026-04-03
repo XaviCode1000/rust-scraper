@@ -1,6 +1,6 @@
 [package]
 name = "rust_scraper"
-version = "1.0.7"
+version = "1.6.0"
 edition = "2021"
 description = "Production-ready web scraper with Clean Architecture, TUI selector, and sitemap support"
 authors = ["GazaDev"]
@@ -146,14 +146,22 @@ clap_complete = "4"
 # Config file parsing
 toml = "0.8"
 
+# Cross-platform relative path calculation
+pathdiff = "0.2"
+
 # UUID for temp file generation (production-ready streaming)
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
 tokio-util = { version = "0.7.18", features = ["io"] }
 
-# ============================================================================
-# AI/ML Dependencies (feature-gated: --features ai)
-# ============================================================================
+# Language detection for Obsidian rich metadata
+whatlang = "0.18"
+
+# URL encoding for Obsidian URI protocol
+urlencoding = "2.1"
+
+# Slug generation for quick-save filenames
+slug = "0.1"
 # ONNX runtime for model inference (tract-onnx - 100% Rust)
 tract-onnx = { version = "0.21", optional = true }
 # Alternative ONNX runtime (ort)

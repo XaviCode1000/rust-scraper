@@ -248,13 +248,25 @@ mod tests {
 
     #[test]
     fn test_get_extension() {
-        assert_eq!(get_extension("https://example.com/file.png"), Some("png".to_string()));
-        assert_eq!(get_extension("https://example.com/archive.tar.gz"), Some("gz".to_string()));
+        assert_eq!(
+            get_extension("https://example.com/file.png"),
+            Some("png".to_string())
+        );
+        assert_eq!(
+            get_extension("https://example.com/archive.tar.gz"),
+            Some("gz".to_string())
+        );
     }
 
     #[test]
     fn test_get_mime_type() {
-        assert_eq!(get_mime_type("https://example.com/file.png"), Some("image/png"));
-        assert_eq!(get_mime_type("https://example.com/file.pdf"), Some("application/pdf"));
+        assert_eq!(
+            get_mime_type("https://example.com/file.png"),
+            Some("image/png")
+        );
+        assert_eq!(
+            get_mime_type("https://example.com/file.pdf"),
+            Some("application/pdf")
+        );
     }
 }

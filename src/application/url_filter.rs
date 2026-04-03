@@ -211,8 +211,14 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_domain_wildcard() {
-        assert!(matches_pattern("https://blog.example.com/post", "*.example.com/*"));
-        assert!(matches_pattern("https://sub.example.com/page", "*.example.com"));
+        assert!(matches_pattern(
+            "https://blog.example.com/post",
+            "*.example.com/*"
+        ));
+        assert!(matches_pattern(
+            "https://sub.example.com/page",
+            "*.example.com"
+        ));
         assert!(!matches_pattern("https://other.com/page", "*.example.com"));
     }
 
@@ -335,7 +341,10 @@ mod tests {
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(extract_domain("https://example.com/page"), Some("example.com".to_string()));
+        assert_eq!(
+            extract_domain("https://example.com/page"),
+            Some("example.com".to_string())
+        );
         assert_eq!(
             extract_domain("https://blog.example.com/post"),
             Some("blog.example.com".to_string())
@@ -357,19 +366,31 @@ mod tests {
 
     #[test]
     fn test_extract_domain_with_port() {
-        assert_eq!(extract_domain("https://domain.com:8080/path"), Some("domain.com".to_string()));
+        assert_eq!(
+            extract_domain("https://domain.com:8080/path"),
+            Some("domain.com".to_string())
+        );
     }
 
     #[test]
     fn test_extract_domain_ipv6() {
-        assert_eq!(extract_domain("http://[::1]:8080"), Some("[::1]".to_string()));
+        assert_eq!(
+            extract_domain("http://[::1]:8080"),
+            Some("[::1]".to_string())
+        );
     }
 
     #[test]
     fn test_is_internal_link() {
         assert!(is_internal_link("https://example.com/page", "example.com"));
-        assert!(is_internal_link("https://www.example.com/page", "example.com"));
-        assert!(is_internal_link("https://blog.example.com/post", "example.com"));
+        assert!(is_internal_link(
+            "https://www.example.com/page",
+            "example.com"
+        ));
+        assert!(is_internal_link(
+            "https://blog.example.com/post",
+            "example.com"
+        ));
         assert!(!is_internal_link("https://other.com/page", "example.com"));
         assert!(!is_internal_link("invalid-url", "example.com"));
     }
@@ -414,7 +435,10 @@ mod tests {
     #[test]
     fn test_matches_pattern_ssrf_bypass_attempt() {
         // Evil URL with query params containing target domain should NOT match
-        assert!(!matches_pattern("https://evil.com/?q=example.com/path", "*.example.com/*"));
+        assert!(!matches_pattern(
+            "https://evil.com/?q=example.com/path",
+            "*.example.com/*"
+        ));
 
         assert!(!matches_pattern(
             "https://attacker.com/?redirect=example.com/admin",
@@ -433,7 +457,10 @@ mod tests {
         let patterns = vec!["*.example.com".to_string()];
 
         // Evil domain should NOT match example.com pattern
-        assert!(!is_excluded("https://evil.com/?q=example.com/admin", &patterns));
+        assert!(!is_excluded(
+            "https://evil.com/?q=example.com/admin",
+            &patterns
+        ));
 
         // Real example.com subdomain SHOULD match
         assert!(is_excluded("https://admin.example.com/page", &patterns));

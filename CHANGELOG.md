@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Added
 
+#### Obsidian Integration — v1.5.0 + v1.6.0
+- **Obsidian Markdown Export (v1.5.0):** Wiki-links conversion (`[text](url)` → `[[slug|text]]`), relative asset paths, tags in YAML frontmatter
+- **Vault Auto-Detect (v1.6.0):** 4-tier resolution: CLI `--vault` > env `OBSIDIAN_VAULT` > config file > auto-scan upward for `.obsidian/app.json`
+- **Quick-Save Mode (v1.6.0):** `--obsidian --quick-save` bypasses TUI, saves directly to `{vault}/_inbox/YYYY-MM-DD-slug.md`
+- **Rich Metadata (v1.6.0):** Extended frontmatter with `readingTime`, `language`, `wordCount`, `contentType`, `status` for Dataview queries
+- **Obsidian URI (v1.6.0):** Opens saved notes in Obsidian via `obsidian://open?vault=...&file=...` (Linux, fire-and-forget)
+- **New modules:** `src/infrastructure/converter/obsidian.rs`, `src/infrastructure/obsidian/` (vault_detector, metadata, uri)
+- **New dependencies:** `pathdiff 0.2`, `whatlang 0.18`, `urlencoding 2.1`, `slug 0.1`
+- **361 tests passing** (36 new for Obsidian features)
+- **PR:** [#24](https://github.com/XaviCode1000/rust-scraper/pull/24)
+
 #### CLI UX Improvement — v1.1.0
 - **`CliExit` return type** — `main()` now returns `CliExit` with proper `Termination` trait implementation
 - **Sysexits exit codes** — 0 (success), 64 (usage), 69 (network/partial), 74 (IO), 76 (protocol), 78 (config)
@@ -413,7 +424,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Commits | Key Feature |
 |---------|------|---------|-------------|
-| [Unreleased] | - | 15+ | AI Semantic Cleaning + Vector Exporter + Embedding Preservation |
+| [Unreleased] | - | 20+ | Obsidian Markdown Export + Vault Auto-Detect + Quick-Save |
 | [1.0.7] | 2026-03-31 | — | WAF Detection, File Locking, OOM Protection |
 | [1.0.4] | 2026-03-10 | 20 | RAG Export Pipeline + AI Foundation |
 | [1.0.0] | 2026-03-08 | 79 | Production Ready Release |

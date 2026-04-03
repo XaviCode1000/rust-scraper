@@ -44,9 +44,11 @@ use rust_scraper::{
         error::{format_cli_error, CliError, CliExit},
         summary::ScrapeSummary,
     },
-    export_factory, validate_and_parse_url, Args, Commands, CrawlerConfig, ScraperConfig,
-    UserAgentCache,
+    export_factory, save_results, validate_and_parse_url, Args, Commands, CrawlerConfig,
+    ObsidianOptions, ScraperConfig, UserAgentCache,
 };
+use rust_scraper::infrastructure::obsidian::{detect_vault, open_note};
+use slug::slugify;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -61,7 +63,7 @@ async fn main() -> CliExit {
         Err(e) => {
             eprintln!("{}", e);
             return CliExit::UsageError("invalid arguments".into());
-        }
+        },
     };
 
     // =========================================================================
@@ -105,12 +107,30 @@ async fn main() -> CliExit {
     // =========================================================================
     let args = apply_config_defaults(args, &config_defaults);
 
+    // =========================================================================
+    // 5b. Vault detection for Obsidian integration
+    // =========================================================================
+    let vault_path = detect_vault(
+        args.vault.as_deref(),
+        None,
+        config_defaults.vault_path.as_deref(),
+    );
+
+    if let Some(ref vault) = vault_path {
+        info!("Obsidian vault detected: {}", vault.display());
+    } else {
+        info!("No Obsidian vault detected, using output directory");
+    }
+
     // Emoji helpers (resolved once after NO_COLOR check)
     let ok = icon("✅", "OK");
     let warn_icon = icon("⚠️", "WARN");
     let info_icon = icon("📌", "INFO");
 
-    info!("Rust Scraper {} - Clean Architecture", rust_scraper::version_string());
+    info!(
+        "Rust Scraper {} - Clean Architecture",
+        rust_scraper::version_string()
+    );
     info!("{} Target: {}", info_icon, args.url);
     info!("{} Output: {}", info_icon, args.output.display());
 
@@ -119,7 +139,11 @@ async fn main() -> CliExit {
     // =========================================================================
     info!("Loading user agents (cache check)...");
     let user_agents = UserAgentCache::load().await;
-    info!("{} User agent loaded: {} agents available", ok, user_agents.len());
+    info!(
+        "{} User agent loaded: {} agents available",
+        ok,
+        user_agents.len()
+    );
 
     // =========================================================================
     // 7. Validate URL
@@ -134,7 +158,7 @@ async fn main() -> CliExit {
             };
             eprintln!("{}", format_cli_error(&cli_err, no_color));
             return CliExit::UsageError(e.to_string());
-        }
+        },
     };
 
     info!("{} URL validated: {}", ok, parsed_url);
@@ -146,10 +170,13 @@ async fn main() -> CliExit {
     match preflight_check(&parsed_url).await {
         PreflightResult::Ok => {
             info!("{} Connectivity check passed", ok);
-        }
+        },
         PreflightResult::Warning(status) => {
-            warn!("{} Server returned {} but connectivity OK", warn_icon, status);
-        }
+            warn!(
+                "{} Server returned {} but connectivity OK",
+                warn_icon, status
+            );
+        },
         PreflightResult::Failed(msg) => {
             let suggestion = "Check your network connection and URL. Verify the host is reachable";
             let cli_err = CliError::PreflightFailed {
@@ -158,7 +185,7 @@ async fn main() -> CliExit {
             };
             eprintln!("{}", format_cli_error(&cli_err, no_color));
             return CliExit::NetworkError(msg);
-        }
+        },
     }
 
     // =========================================================================
@@ -222,7 +249,7 @@ async fn main() -> CliExit {
             }
             warn!("URL discovery failed: {}", e);
             Vec::new()
-        }
+        },
     };
 
     let discovered_count = discovered_urls.len();
@@ -252,7 +279,11 @@ async fn main() -> CliExit {
     // =========================================================================
     // 13. Interactive selection or headless mode
     // =========================================================================
-    let urls_to_scrape = if args.interactive {
+    let urls_to_scrape = if args.quick_save && vault_path.is_some() {
+        // Quick-save mode: bypass TUI, use all discovered URLs
+        info!("Quick-save mode: bypassing TUI, will save to vault _inbox");
+        discovered_urls
+    } else if args.interactive {
         info!("Starting interactive TUI selector...");
         match tui::run_selector(&discovered_urls).await {
             Ok(selected) => {
@@ -262,18 +293,21 @@ async fn main() -> CliExit {
                     return CliExit::Success;
                 }
                 selected
-            }
+            },
             Err(tui::TuiError::Interrupted) => {
                 info!("User interrupted TUI selector, exiting");
                 return CliExit::Success;
-            }
+            },
             Err(e) => {
                 warn!("TUI error: {}", e);
                 return CliExit::ProtocolError(e.to_string());
-            }
+            },
         }
     } else {
-        info!("Headless mode: will scrape all {} URLs", discovered_urls.len());
+        info!(
+            "Headless mode: will scrape all {} URLs",
+            discovered_urls.len()
+        );
         discovered_urls
     };
 
@@ -300,7 +334,7 @@ async fn main() -> CliExit {
             Err(e) => {
                 warn!("Failed to create state store: {}", e);
                 None
-            }
+            },
         }
     } else {
         None
@@ -330,11 +364,11 @@ async fn main() -> CliExit {
                     );
 
                     filtered
-                }
+                },
                 Err(e) => {
                     warn!("Failed to load state: {}", e);
                     urls_to_scrape
-                }
+                },
             }
         } else {
             urls_to_scrape
@@ -359,7 +393,7 @@ async fn main() -> CliExit {
         Err(e) => {
             warn!("Failed to create HTTP client: {}", e);
             return CliExit::NetworkError(e.to_string());
-        }
+        },
     };
 
     let total_urls = urls_to_scrape.len();
@@ -388,13 +422,13 @@ async fn main() -> CliExit {
         match scrape_single_url_for_tui(http_client.client(), url, &scraper_config).await {
             Ok(content) => {
                 results.push(content);
-            }
+            },
             Err(e) => {
                 let url_str = url.as_str().to_string();
                 let err_msg = e.to_string();
                 warn!("Failed to scrape {}: {}", url_str, err_msg);
                 failures.push((url_str, err_msg));
-            }
+            },
         }
 
         if let Some(pb) = scrape_pb.as_ref() {
@@ -405,10 +439,13 @@ async fn main() -> CliExit {
     if let Some(pb) = scrape_pb {
         let success_count = results.len();
         let fail_count = failures.len();
-        pb.finish_with_message(format!(
-            "Scraping complete: {} succeeded, {} failed",
-            success_count, fail_count
-        ).to_owned());
+        pb.finish_with_message(
+            format!(
+                "Scraping complete: {} succeeded, {} failed",
+                success_count, fail_count
+            )
+            .to_owned(),
+        );
     }
 
     let duration = start_time.elapsed();
@@ -452,13 +489,95 @@ async fn main() -> CliExit {
         Err(e) => {
             warn!("Failed to export results: {}", e);
             return CliExit::IoError(e.to_string());
-        }
+        },
     };
+
+    // =========================================================================
+    // 16b. Save individual files (Markdown/Text/JSON with Obsidian support)
+    // =========================================================================
+    
+    // Determine output directory (vault _inbox for quick-save mode)
+    let output_dir = if args.quick_save {
+        if let Some(ref vault) = vault_path {
+            let inbox_path = vault.join("_inbox");
+            if let Err(e) = std::fs::create_dir_all(&inbox_path) {
+                warn!("Failed to create vault _inbox directory: {}", e);
+                args.output.clone()
+            } else {
+                info!("Quick-save: using vault inbox {}", inbox_path.display());
+                inbox_path
+            }
+        } else {
+            warn!("Quick-save mode but no vault detected, using output directory");
+            args.output.clone()
+        }
+    } else {
+        args.output.clone()
+    };
+
+    let obsidian_options = ObsidianOptions {
+        wiki_links: args.obsidian_wiki_links,
+        tags: args.obsidian_tags.clone().unwrap_or_default(),
+        relative_assets: args.obsidian_relative_assets,
+        rich_metadata: args.obsidian_rich_metadata,
+        quick_save: args.quick_save,
+        vault_path: vault_path.clone(),
+    };
+
+    if let Err(e) = save_results(&results, &output_dir, &args.format, &obsidian_options) {
+        warn!("Failed to save individual files: {}", e);
+        // Continue - file save is non-fatal, RAG export succeeded
+    }
+
+    // =========================================================================
+    // 16c. Open in Obsidian (if vault detected and requested)
+    // =========================================================================
+    if vault_path.is_some() && args.obsidian_rich_metadata {
+        // Try to open the saved notes in Obsidian
+        for item in &results {
+            let file_path = if args.quick_save {
+                // Calculate the filename from the URL
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let url_str = item.url.as_str();
+                // Use url.path() which returns a PathBuf (owned)
+                let url = url::Url::parse(url_str).ok();
+                let path_segment = url
+                    .as_ref()
+                    .and_then(|u| u.path_segments())
+                    .and_then(|mut p| p.next_back())
+                    .unwrap_or("untitled");
+                let slug = slugify(path_segment);
+                format!("_inbox/{}-{}.md", today, slug)
+            } else {
+                // Use domain-based folder structure
+                let url_str = item.url.as_str();
+                let domain = export_factory::domain_from_url(url_str);
+                let url = url::Url::parse(url_str).ok();
+                let path_segment = url
+                    .as_ref()
+                    .and_then(|u| u.path_segments())
+                    .and_then(|mut p| p.next_back())
+                    .unwrap_or("index");
+                let slug = slugify(path_segment);
+                format!("{}/{}.md", domain, slug)
+            };
+
+            if let Some(ref vault) = vault_path {
+                match open_note(vault, std::path::Path::new(&file_path)) {
+                    Ok(()) => info!("Opened in Obsidian: {}", item.title),
+                    Err(e) => warn!("Failed to open in Obsidian: {}", e),
+                }
+            }
+        }
+    }
 
     // Summary of downloaded assets
     let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
     if total_assets > 0 {
-        info!("Total assets downloaded: {} (images and documents)", total_assets);
+        info!(
+            "Total assets downloaded: {} (images and documents)",
+            total_assets
+        );
     }
 
     // =========================================================================
@@ -529,7 +648,7 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
             } else {
                 PreflightResult::Warning(status)
             }
-        }
+        },
         Err(e) => {
             if e.is_timeout() {
                 PreflightResult::Failed("connection timed out".into())
@@ -538,7 +657,7 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
             } else {
                 PreflightResult::Failed(format!("network error: {}", e))
             }
-        }
+        },
     }
 }
 
@@ -604,6 +723,34 @@ fn apply_config_defaults(mut args: Args, config: &ConfigDefaults) -> Args {
     if let Some(v) = config.use_sitemap {
         if !args.use_sitemap && v {
             args.use_sitemap = v;
+        }
+    }
+
+    // Obsidian config
+    if let Some(ref tags_str) = config.obsidian_tags {
+        if args.obsidian_tags.is_none() {
+            args.obsidian_tags = Some(
+                tags_str
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+            );
+        }
+    }
+    if let Some(v) = config.obsidian_wiki_links {
+        if !args.obsidian_wiki_links && v {
+            args.obsidian_wiki_links = v;
+        }
+    }
+    if let Some(v) = config.obsidian_relative_assets {
+        if !args.obsidian_relative_assets && v {
+            args.obsidian_relative_assets = v;
+        }
+    }
+    if let Some(ref vault) = config.vault_path {
+        if args.vault.is_none() {
+            args.vault = Some(PathBuf::from(vault));
         }
     }
 

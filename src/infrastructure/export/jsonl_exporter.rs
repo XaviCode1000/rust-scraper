@@ -159,9 +159,12 @@ mod tests {
     #[test]
     fn test_jsonl_exporter_batch() {
         let temp_dir = TempDir::new().unwrap();
-        let config =
-            ExporterConfig::new(PathBuf::from(temp_dir.path()), ExportFormat::Jsonl, "batch_test")
-                .with_append(false);
+        let config = ExporterConfig::new(
+            PathBuf::from(temp_dir.path()),
+            ExportFormat::Jsonl,
+            "batch_test",
+        )
+        .with_append(false);
 
         let exporter = JsonlExporter::new(config);
         let chunks = vec![
@@ -186,17 +189,23 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // First write
-        let config1 =
-            ExporterConfig::new(PathBuf::from(temp_dir.path()), ExportFormat::Jsonl, "append_test")
-                .with_append(false);
+        let config1 = ExporterConfig::new(
+            PathBuf::from(temp_dir.path()),
+            ExportFormat::Jsonl,
+            "append_test",
+        )
+        .with_append(false);
 
         let exporter1 = JsonlExporter::new(config1);
         exporter1.export(create_test_chunk("First")).unwrap();
 
         // Second write with append
-        let config2 =
-            ExporterConfig::new(PathBuf::from(temp_dir.path()), ExportFormat::Jsonl, "append_test")
-                .with_append(true);
+        let config2 = ExporterConfig::new(
+            PathBuf::from(temp_dir.path()),
+            ExportFormat::Jsonl,
+            "append_test",
+        )
+        .with_append(true);
 
         let exporter2 = JsonlExporter::new(config2);
         exporter2.export(create_test_chunk("Second")).unwrap();

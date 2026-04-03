@@ -2,7 +2,7 @@
 
 **Project**: rust-scraper  
 **Repository**: https://github.com/XaviCode1000/rust_scraper  
-**Last Updated**: 2026-04-01  
+**Last Updated**: 2026-04-04  
 **Status**: Production Ready ✅
 
 ---
@@ -11,14 +11,14 @@
 
 | Metric | Value |
 |--------|-------|
-| **Current Version** | v1.3.0 (tagged) |
-| **Total Commits** | 90+ |
-| **Commits Since v1.0.0** | 45+ |
+| **Current Version** | v1.6.0 (unreleased) |
+| **Total Commits** | 110+ |
+| **Commits Since v1.0.0** | 65+ |
 | **Total Contributors** | 2 (XaviCode1000: 76, Xavi: 3) |
-| **Issues Closed** | 11+ |
-| **PRs Merged** | 6+ |
+| **Issues Closed** | 13+ |
+| **PRs Merged** | 7+ |
 | **First Commit** | a70b17c - chore: initialize rust_scraper project structure |
-| **Latest Commit** | 44b286d - fix(spa-detection): search markers in raw HTML, remove dead has_empty_title |
+| **Latest Commit** | eb1c45b - chore: archive openspec changes and add exploration report |
 
 ---
 
@@ -39,11 +39,48 @@
 | 2026-03-10 | AI Semantic Cleaning (Issue #9) | 17cc20c |
 | 2026-03-11 | Embeddings Bug Fix | 528657b |
 | 2026-04-01 | **v1.3.0 Release** - SPA Detection Phase 1 | ef70671 |
-| 2026-04-01 | **v1.3.0 Release** - SPA Detection Phase 1 | ef70671 |
+| 2026-04-04 | **v1.5.0 Release** — Obsidian Markdown Export | PR #24 |
+| 2026-04-04 | **v1.6.0 Release** — Vault Auto-Detect & Quick-Save | PR #24 |
 
 ---
 
 ## 📦 Release History
+
+### [v1.6.0] - 2026-04-04 — Vault Auto-Detect & Quick-Save
+
+**PR**: [#24](https://github.com/XaviCode1000/rust-scraper/pull/24)
+
+#### Added
+- **Vault auto-detect** — 4-tier resolution: CLI `--vault` > env `OBSIDIAN_VAULT` > config file > auto-scan upward for `.obsidian/app.json`
+- **Quick-save mode** — `--obsidian --quick-save` bypasses TUI, saves directly to `{vault}/_inbox/YYYY-MM-DD-slug.md`
+- **Rich metadata** — Extended YAML frontmatter with `readingTime`, `language`, `wordCount`, `contentType`, `status` for Dataview
+- **Obsidian URI** — Opens saved notes in Obsidian via `obsidian://open?vault=...&file=...` (Linux, fire-and-forget)
+- **New module** — `src/infrastructure/obsidian/` with `vault_detector.rs`, `metadata.rs`, `uri.rs`
+
+#### Dependencies
+- **Added:** `whatlang = "0.18"` (language detection), `urlencoding = "2.1"` (URI encoding), `slug = "0.1"` (filename generation)
+
+#### Testing
+- 361 tests passing (36 new)
+- 0 clippy warnings
+
+### [v1.5.0] - 2026-04-04 — Obsidian Markdown Export
+
+**PR**: [#24](https://github.com/XaviCode1000/rust-scraper/pull/24)
+
+#### Added
+- **Wiki-links conversion** — Same-domain `[text](url)` → `[[slug|text]]` for Obsidian compatibility
+- **Relative asset paths** — Absolute paths rewritten as relative to `.md` file location
+- **Tags in frontmatter** — `--obsidian-tags "tag1,tag2"` adds YAML frontmatter tags
+- **CLI flags** — `--obsidian-wiki-links`, `--obsidian-tags`, `--obsidian-relative-assets`
+- **New module** — `src/infrastructure/converter/obsidian.rs` with regex alternation to skip code blocks
+
+#### Dependencies
+- **Added:** `pathdiff = "0.2"` for cross-platform relative paths
+
+#### Testing
+- 330 tests passing (11 new)
+- 0 clippy warnings
 
 ### [v1.3.0] - 2026-04-01 - SPA Detection Warning + JsRenderer Trait (Phase 1)
 

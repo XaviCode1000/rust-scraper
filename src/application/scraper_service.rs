@@ -286,7 +286,11 @@ pub async fn scrape_multiple_with_limit(
         }
     }
 
-    info!("✅ Scraped {} pages from {} URLs", all_content.len(), urls.len());
+    info!(
+        "✅ Scraped {} pages from {} URLs",
+        all_content.len(),
+        urls.len()
+    );
     Ok(all_content)
 }
 
@@ -373,8 +377,11 @@ mod tests {
     #[test]
     fn test_detect_spa_content_spa_markers_app() {
         // Test the "app" marker as well
-        let result =
-            detect_spa_content("https://spa.example.com", "minimal text", "<div id=\"app\"></div>");
+        let result = detect_spa_content(
+            "https://spa.example.com",
+            "minimal text",
+            "<div id=\"app\"></div>",
+        );
         assert!(result.is_some());
         let result = result.unwrap();
         assert!(result.has_spa_markers);

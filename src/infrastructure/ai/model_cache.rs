@@ -346,8 +346,10 @@ impl ModelCache {
 
         // Compute actual hash
         let file = File::open(&model_path).await.map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to open model file: {}", e),
-            ))
+            SemanticError::ModelLoad(std::io::Error::other(format!(
+                "Failed to open model file: {}",
+                e
+            )))
         })?;
 
         let mut reader = BufReader::new(file);
@@ -356,8 +358,10 @@ impl ModelCache {
 
         loop {
             let bytes_read = reader.read(&mut buffer).await.map_err(|e| {
-                SemanticError::ModelLoad(std::io::Error::other(format!("Failed to read model file: {}", e),
-                ))
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to read model file: {}",
+                    e
+                )))
             })?;
 
             if bytes_read == 0 {
@@ -426,8 +430,10 @@ impl ModelCache {
 
         // Get file modification time
         let metadata = fs::metadata(&model_path).await.map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to read model metadata: {}", e),
-            ))
+            SemanticError::ModelLoad(std::io::Error::other(format!(
+                "Failed to read model metadata: {}",
+                e
+            )))
         })?;
 
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -490,8 +496,10 @@ impl ModelCache {
         fs::remove_dir_all(&self.config.cache_dir)
             .await
             .map_err(|e| {
-                SemanticError::ModelLoad(std::io::Error::other(format!("Failed to clear cache: {}", e),
-                ))
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to clear cache: {}",
+                    e
+                )))
             })?;
 
         info!(
@@ -530,19 +538,23 @@ impl ModelCache {
 
         let mut total_size = 0u64;
         let mut entries = fs::read_dir(&self.config.cache_dir).await.map_err(|e| {
-                SemanticError::ModelLoad(std::io::Error::other(format!(
-                    "Failed to create cache directory: {}",
-                    e,
-                )))
+            SemanticError::ModelLoad(std::io::Error::other(format!(
+                "Failed to create cache directory: {}",
+                e,
+            )))
         })?;
 
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            SemanticError::ModelLoad(std::io::Error::other(format!("Failed to read directory entry: {}", e),
-            ))
+            SemanticError::ModelLoad(std::io::Error::other(format!(
+                "Failed to read directory entry: {}",
+                e
+            )))
         })? {
             let metadata = entry.metadata().await.map_err(|e| {
-                SemanticError::ModelLoad(std::io::Error::other(format!("Failed to read entry metadata: {}", e),
-                ))
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to read entry metadata: {}",
+                    e
+                )))
             })?;
 
             if metadata.is_file() {

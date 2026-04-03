@@ -192,7 +192,9 @@ impl VectorExporter {
 
             // Reject NaN/Infinity — serde_json serialises them as `null` silently
             if embeddings.iter().any(|v| !v.is_finite()) {
-                return Err(ExporterError::WriteError("embeddings contain NaN or Infinity".into()));
+                return Err(ExporterError::WriteError(
+                    "embeddings contain NaN or Infinity".into(),
+                ));
             }
         }
 
@@ -385,7 +387,10 @@ mod tests {
         doc2.embeddings = Some(vec![0.1, 0.2]); // Only 2 dimensions
 
         let result = exporter.serialize_document(&doc2);
-        assert!(matches!(result, Err(ExporterError::DimensionMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(ExporterError::DimensionMismatch { .. })
+        ));
     }
 
     #[test]
@@ -428,10 +433,17 @@ mod tests {
 
         let docs1 = vec![create_test_chunk(), create_test_chunk()];
         let result = exporter1.export_batch(&docs1);
-        assert!(result.is_ok(), "first batch should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "first batch should succeed: {:?}",
+            result.err()
+        );
 
         let file1_path = temp_dir.join("test_export.json");
-        assert!(file1_path.exists(), "output file should exist after first batch");
+        assert!(
+            file1_path.exists(),
+            "output file should exist after first batch"
+        );
 
         // Read file content after first write
         let content1 = std::fs::read_to_string(&file1_path).expect("should read file");
@@ -454,7 +466,10 @@ mod tests {
         let json2: serde_json::Value =
             serde_json::from_str(&content2).expect("after append should be valid JSON");
         let final_doc_count = json2["documents"].as_array().map_or(0, |a| a.len());
-        assert_eq!(final_doc_count, 3, "should have 3 documents after append (2 + 1)");
+        assert_eq!(
+            final_doc_count, 3,
+            "should have 3 documents after append (2 + 1)"
+        );
 
         // Verify metadata header still exists
         assert!(
@@ -479,7 +494,10 @@ mod tests {
         let doc = create_test_chunk();
 
         let result = exporter.export(doc);
-        assert!(result.is_err(), "export to /root should fail with directory creation error");
+        assert!(
+            result.is_err(),
+            "export to /root should fail with directory creation error"
+        );
     }
 
     // --- Task 4.10: Serialization failure with NaN in embeddings ---
