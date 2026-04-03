@@ -30,6 +30,8 @@ pub struct ConfigDefaults {
     pub obsidian_tags: Option<String>,
     /// Default Obsidian relative assets setting
     pub obsidian_relative_assets: Option<bool>,
+    /// Default Obsidian vault path
+    pub vault_path: Option<String>,
 }
 
 impl ConfigDefaults {

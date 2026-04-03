@@ -47,6 +47,8 @@ use rust_scraper::{
     export_factory, save_results, validate_and_parse_url, Args, Commands, CrawlerConfig,
     ObsidianOptions, ScraperConfig, UserAgentCache,
 };
+use rust_scraper::infrastructure::obsidian::{detect_vault, open_note};
+use slug::slugify;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -104,6 +106,21 @@ async fn main() -> CliExit {
     // 5. Apply config file defaults where CLI args are at default values
     // =========================================================================
     let args = apply_config_defaults(args, &config_defaults);
+
+    // =========================================================================
+    // 5b. Vault detection for Obsidian integration
+    // =========================================================================
+    let vault_path = detect_vault(
+        args.vault.as_deref(),
+        None,
+        config_defaults.vault_path.as_deref(),
+    );
+
+    if let Some(ref vault) = vault_path {
+        info!("Obsidian vault detected: {}", vault.display());
+    } else {
+        info!("No Obsidian vault detected, using output directory");
+    }
 
     // Emoji helpers (resolved once after NO_COLOR check)
     let ok = icon("✅", "OK");
@@ -262,7 +279,11 @@ async fn main() -> CliExit {
     // =========================================================================
     // 13. Interactive selection or headless mode
     // =========================================================================
-    let urls_to_scrape = if args.interactive {
+    let urls_to_scrape = if args.quick_save && vault_path.is_some() {
+        // Quick-save mode: bypass TUI, use all discovered URLs
+        info!("Quick-save mode: bypassing TUI, will save to vault _inbox");
+        discovered_urls
+    } else if args.interactive {
         info!("Starting interactive TUI selector...");
         match tui::run_selector(&discovered_urls).await {
             Ok(selected) => {
@@ -474,15 +495,80 @@ async fn main() -> CliExit {
     // =========================================================================
     // 16b. Save individual files (Markdown/Text/JSON with Obsidian support)
     // =========================================================================
+    
+    // Determine output directory (vault _inbox for quick-save mode)
+    let output_dir = if args.quick_save {
+        if let Some(ref vault) = vault_path {
+            let inbox_path = vault.join("_inbox");
+            if let Err(e) = std::fs::create_dir_all(&inbox_path) {
+                warn!("Failed to create vault _inbox directory: {}", e);
+                args.output.clone()
+            } else {
+                info!("Quick-save: using vault inbox {}", inbox_path.display());
+                inbox_path
+            }
+        } else {
+            warn!("Quick-save mode but no vault detected, using output directory");
+            args.output.clone()
+        }
+    } else {
+        args.output.clone()
+    };
+
     let obsidian_options = ObsidianOptions {
         wiki_links: args.obsidian_wiki_links,
         tags: args.obsidian_tags.clone().unwrap_or_default(),
         relative_assets: args.obsidian_relative_assets,
+        rich_metadata: args.obsidian_rich_metadata,
+        quick_save: args.quick_save,
+        vault_path: vault_path.clone(),
     };
 
-    if let Err(e) = save_results(&results, &args.output, &args.format, &obsidian_options) {
+    if let Err(e) = save_results(&results, &output_dir, &args.format, &obsidian_options) {
         warn!("Failed to save individual files: {}", e);
         // Continue - file save is non-fatal, RAG export succeeded
+    }
+
+    // =========================================================================
+    // 16c. Open in Obsidian (if vault detected and requested)
+    // =========================================================================
+    if vault_path.is_some() && args.obsidian_rich_metadata {
+        // Try to open the saved notes in Obsidian
+        for item in &results {
+            let file_path = if args.quick_save {
+                // Calculate the filename from the URL
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let url_str = item.url.as_str();
+                // Use url.path() which returns a PathBuf (owned)
+                let url = url::Url::parse(url_str).ok();
+                let path_segment = url
+                    .as_ref()
+                    .and_then(|u| u.path_segments())
+                    .and_then(|mut p| p.next_back())
+                    .unwrap_or("untitled");
+                let slug = slugify(path_segment);
+                format!("_inbox/{}-{}.md", today, slug)
+            } else {
+                // Use domain-based folder structure
+                let url_str = item.url.as_str();
+                let domain = export_factory::domain_from_url(url_str);
+                let url = url::Url::parse(url_str).ok();
+                let path_segment = url
+                    .as_ref()
+                    .and_then(|u| u.path_segments())
+                    .and_then(|mut p| p.next_back())
+                    .unwrap_or("index");
+                let slug = slugify(path_segment);
+                format!("{}/{}.md", domain, slug)
+            };
+
+            if let Some(ref vault) = vault_path {
+                match open_note(vault, std::path::Path::new(&file_path)) {
+                    Ok(()) => info!("Opened in Obsidian: {}", item.title),
+                    Err(e) => warn!("Failed to open in Obsidian: {}", e),
+                }
+            }
+        }
     }
 
     // Summary of downloaded assets
@@ -660,6 +746,11 @@ fn apply_config_defaults(mut args: Args, config: &ConfigDefaults) -> Args {
     if let Some(v) = config.obsidian_relative_assets {
         if !args.obsidian_relative_assets && v {
             args.obsidian_relative_assets = v;
+        }
+    }
+    if let Some(ref vault) = config.vault_path {
+        if args.vault.is_none() {
+            args.vault = Some(PathBuf::from(vault));
         }
     }
 

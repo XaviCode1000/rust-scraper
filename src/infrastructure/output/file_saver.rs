@@ -5,10 +5,12 @@
 //! - URL-based file naming
 //! - YAML frontmatter with metadata
 //! - Obsidian-compatible output (wiki-links, relative assets, tags)
+//! - Rich metadata (word count, reading time, language)
 
 use crate::domain::ScrapedContent;
 use crate::error::Result;
 use crate::infrastructure::converter::{html_to_markdown, obsidian, syntax_highlight};
+use crate::infrastructure::obsidian::ObsidianRichMetadata;
 use crate::infrastructure::output::frontmatter;
 use crate::url_path::OutputPath;
 use crate::OutputFormat;
@@ -24,6 +26,12 @@ pub struct ObsidianOptions {
     pub relative_assets: bool,
     /// Tags to include in YAML frontmatter
     pub tags: Vec<String>,
+    /// Enable rich metadata (word count, reading time, language)
+    pub rich_metadata: bool,
+    /// Quick-save mode: save to vault _inbox folder
+    pub quick_save: bool,
+    /// Vault path for Obsidian integration
+    pub vault_path: Option<std::path::PathBuf>,
 }
 
 /// Save scraped results to output directory
@@ -102,13 +110,21 @@ fn save_as_markdown(
             processed = obsidian::resolve_asset_paths(&processed, md_file_dir, &item.assets);
         }
 
-        let fm = frontmatter::generate(
+        // Generate rich metadata if enabled
+        let rich_meta = if obsidian.rich_metadata {
+            Some(ObsidianRichMetadata::from_content(item))
+        } else {
+            None
+        };
+
+        let fm = frontmatter::generate_with_metadata(
             &item.title,
             item.url.as_str(),
             item.date.as_deref(),
             item.author.as_deref(),
             item.excerpt.as_deref(),
             &obsidian.tags,
+            rich_meta.as_ref(),
         );
 
         let final_content = format!("---\n{}---\n\n{}", fm.trim(), processed);

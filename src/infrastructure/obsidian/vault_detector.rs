@@ -1,0 +1,193 @@
+//! Obsidian vault auto-detection.
+//!
+//! Searches for Obsidian vaults using a priority-ordered strategy:
+//! 1. Explicit CLI `--vault` flag
+//! 2. `OBSIDIAN_VAULT` environment variable
+//! 3. TOML config file `vault_path`
+//! 4. Auto-scan common locations for `.obsidian/` marker
+
+use std::path::{Path, PathBuf};
+
+/// Detect an Obsidian vault using priority-ordered search.
+///
+/// # Search Order
+/// 1. `cli_path` — from CLI `--vault` flag
+/// 2. `OBSIDIAN_VAULT` environment variable
+/// 3. `config_path` — from TOML config `vault_path` field
+/// 4. Auto-scan common locations (see `scan_common_locations()`)
+///
+/// # Arguments
+/// - `cli_path` — Optional explicit vault path from CLI
+/// - `env_var` — Optional environment variable name to check (default: "OBSIDIAN_VAULT")
+/// - `config_path` — Optional vault path from config file
+///
+/// # Returns
+/// `Option<PathBuf>` — The detected vault path, or None if not found
+pub fn detect_vault(
+    cli_path: Option<&Path>,
+    env_var: Option<&str>,
+    config_path: Option<&str>,
+) -> Option<PathBuf> {
+    // Priority 1: CLI flag
+    if let Some(path) = cli_path {
+        if is_valid_vault(path) {
+            tracing::debug!("Vault detected via CLI path: {}", path.display());
+            return Some(path.to_path_buf());
+        }
+        tracing::warn!("Explicit vault path not valid: {}", path.display());
+    }
+
+    // Priority 2: Environment variable
+    let env_var_name = env_var.unwrap_or("OBSIDIAN_VAULT");
+    if let Ok(env_path) = std::env::var(env_var_name) {
+        let path = PathBuf::from(&env_path);
+        if is_valid_vault(&path) {
+            tracing::debug!("Vault detected via env var {}: {}", env_var_name, env_path);
+            return Some(path);
+        }
+        tracing::warn!("OBSIDIAN_VAULT env var not valid: {}", env_path);
+    }
+
+    // Priority 3: Config file
+    if let Some(config_str) = config_path {
+        let path = PathBuf::from(config_str);
+        if is_valid_vault(&path) {
+            tracing::debug!("Vault detected via config path: {}", config_str);
+            return Some(path);
+        }
+        tracing::warn!("Config vault_path not valid: {}", config_str);
+    }
+
+    // Priority 4: Auto-scan
+    if let Some(path) = scan_for_vault() {
+        tracing::debug!("Vault auto-detected: {}", path.display());
+        return Some(path);
+    }
+
+    None
+}
+
+/// Check if a path is a valid Obsidian vault (contains `.obsidian/app.json`).
+fn is_valid_vault(path: &Path) -> bool {
+    path.is_dir() && path.join(".obsidian").join("app.json").is_file()
+}
+
+/// Scan for Obsidian vault in common locations.
+///
+/// Search order:
+/// 1. Current working directory (and parents up to 3 levels)
+/// 2. ~/Obsidian/
+/// 3. ~/Documents/Obsidian/
+///
+/// Returns the first valid vault found, or None.
+fn scan_for_vault() -> Option<PathBuf> {
+    // Scan upward from current working directory (max 3 levels)
+    let cwd = std::env::current_dir().ok()?;
+    let mut current = cwd.as_path();
+
+    for _ in 0..3 {
+        if is_valid_vault(current) {
+            return Some(current.to_path_buf());
+        }
+        // Go up one level
+        current = current.parent()?;
+    }
+
+    // Scan common Obsidian locations
+    let home = dirs::home_dir()?;
+
+    let candidates = [
+        home.join("Obsidian"),
+        home.join("Documents").join("Obsidian"),
+    ];
+
+    candidates
+        .into_iter()
+        .find(|candidate| is_valid_vault(candidate))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_is_valid_vault_true() {
+        let tmp = std::env::temp_dir().join("test_vault_valid_ obsidian");
+        fs::create_dir_all(tmp.join(".obsidian")).unwrap();
+        // Create app.json to make it valid
+        fs::write(tmp.join(".obsidian").join("app.json"), "{}").unwrap();
+        assert!(is_valid_vault(&tmp));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_is_valid_vault_false_no_obsidian() {
+        let tmp = std::env::temp_dir().join("test_vault_no_obsidian");
+        fs::create_dir_all(&tmp).unwrap();
+        assert!(!is_valid_vault(&tmp));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_is_valid_vault_false_no_app_json() {
+        let tmp = std::env::temp_dir().join("test_vault_no_app_json");
+        fs::create_dir_all(tmp.join(".obsidian")).unwrap();
+        // No app.json - not a valid vault
+        assert!(!is_valid_vault(&tmp));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_detect_vault_explicit_path() {
+        let tmp = std::env::temp_dir().join("test_vault_explicit");
+        fs::create_dir_all(tmp.join(".obsidian")).unwrap();
+        fs::write(tmp.join(".obsidian").join("app.json"), "{}").unwrap();
+        let result = detect_vault(Some(&tmp), None, None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), tmp);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_detect_vault_env_var() {
+        // Set env var for test
+        let tmp = std::env::temp_dir().join("test_vault_env");
+        fs::create_dir_all(tmp.join(".obsidian")).unwrap();
+        fs::write(tmp.join(".obsidian").join("app.json"), "{}").unwrap();
+
+        // Test with env var
+        std::env::set_var("RUST_SCRAPER_TEST_VAULT", tmp.to_str().unwrap());
+        let result = detect_vault(None, Some("RUST_SCRAPER_TEST_VAULT"), None);
+        assert!(result.is_some());
+        std::env::remove_var("RUST_SCRAPER_TEST_VAULT");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_detect_vault_not_found() {
+        // In a clean environment, no vault should be found
+        // This test verifies the function doesn't panic
+        let result = detect_vault(None, None, None);
+        // Result depends on environment - may be Some or None
+        let _ = result;
+    }
+
+    #[test]
+    fn test_detect_vault_invalid_path() {
+        let non_existent = std::path::PathBuf::from("/nonexistent/path/to/vault");
+        let result = detect_vault(Some(&non_existent), None, None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_vault_config_path() {
+        let tmp = std::env::temp_dir().join("test_vault_config");
+        fs::create_dir_all(tmp.join(".obsidian")).unwrap();
+        fs::write(tmp.join(".obsidian").join("app.json"), "{}").unwrap();
+
+        let result = detect_vault(None, None, Some(tmp.to_str().unwrap()));
+        assert!(result.is_some());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}
