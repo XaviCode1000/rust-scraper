@@ -146,6 +146,9 @@ clap_complete = "4"
 # Config file parsing
 toml = "0.8"
 
+# Cross-platform relative path calculation
+pathdiff = "0.2"
+
 # UUID for temp file generation (production-ready streaming)
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }

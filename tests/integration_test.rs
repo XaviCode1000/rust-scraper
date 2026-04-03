@@ -85,6 +85,9 @@ fn test_args_has_required_fields() {
         dry_run: false,
         quiet: false,
         subcommand: None,
+        obsidian_wiki_links: false,
+        obsidian_tags: None,
+        obsidian_relative_assets: false,
     };
 
     assert_eq!(args.url, "https://example.com");
@@ -160,7 +163,8 @@ fn test_save_results_to_nested_directory() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Text);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Text, &obsidian);
 
     // Assert
     assert!(result.is_ok());
@@ -198,7 +202,8 @@ fn test_save_results_json_with_special_characters() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Json);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Json, &obsidian);
 
     // Assert - Should handle special chars correctly
     assert!(result.is_ok());
@@ -229,7 +234,8 @@ fn test_save_results_markdown_with_markdown_syntax() {
     }];
 
     // Act
-    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Markdown);
+    let obsidian = rust_scraper::ObsidianOptions::default();
+    let result = save_results(&results, &output_dir, &rust_scraper::OutputFormat::Markdown, &obsidian);
 
     // Assert
     assert!(result.is_ok());
@@ -280,10 +286,7 @@ async fn test_download_images_from_website() {
             let content = &contents[0];
 
             // Verify we got some assets
-            assert!(
-                !content.assets.is_empty(),
-                "Should have downloaded some images"
-            );
+            assert!(!content.assets.is_empty(), "Should have downloaded some images");
 
             // Verify images directory was created
             let images_dir = output_dir.join("images");
@@ -296,10 +299,7 @@ async fn test_download_images_from_website() {
                 .filter(|e| e.file_type().is_file())
                 .collect();
 
-            assert!(
-                !image_files.is_empty(),
-                "Should have downloaded image files"
-            );
+            assert!(!image_files.is_empty(), "Should have downloaded image files");
 
             // Log for debugging
             eprintln!(
@@ -344,10 +344,7 @@ async fn test_download_documents_from_website() {
     // Assert - Just verify it doesn't crash
     // Document extraction depends on specific site content
     if let Ok(contents) = result {
-        eprintln!(
-            "✅ Document extraction completed, found {} items",
-            contents.len()
-        );
+        eprintln!("✅ Document extraction completed, found {} items", contents.len());
     }
 }
 
@@ -433,33 +430,20 @@ async fn test_ai_embedding_preservation() {
     let chunks = chunks_result.unwrap();
 
     // Verify we got chunks
-    assert!(
-        !chunks.is_empty(),
-        "Should have generated at least one chunk"
-    );
+    assert!(!chunks.is_empty(), "Should have generated at least one chunk");
 
     // Verify each chunk has embeddings (THE BUG FIX!)
     for (idx, chunk) in chunks.iter().enumerate() {
         let has_embeddings = chunk.embeddings.is_some();
         if !has_embeddings {
             eprintln!("❌ ERROR: Chunk {} has no embeddings!", idx);
-            eprintln!(
-                "   Content preview: {}",
-                &chunk.content[..chunk.content.len().min(100)]
-            );
+            eprintln!("   Content preview: {}", &chunk.content[..chunk.content.len().min(100)]);
         }
-        assert!(
-            has_embeddings,
-            "Chunk {} should have embeddings, but embeddings is None",
-            idx
-        );
+        assert!(has_embeddings, "Chunk {} should have embeddings, but embeddings is None", idx);
     }
 
     // Log results for debugging
-    eprintln!(
-        "✅ AI clean successful, generated {} chunks with embeddings",
-        chunks.len()
-    );
+    eprintln!("✅ AI clean successful, generated {} chunks with embeddings", chunks.len());
     eprintln!(
         "   First chunk embedding dimension: {}",
         chunks[0]
@@ -468,8 +452,5 @@ async fn test_ai_embedding_preservation() {
             .map(|e: &Vec<f32>| e.len())
             .unwrap_or(0)
     );
-    eprintln!(
-        "   Sample content: {}",
-        &chunks[0].content[..chunks[0].content.len().min(150)]
-    );
+    eprintln!("   Sample content: {}", &chunks[0].content[..chunks[0].content.len().min(150)]);
 }

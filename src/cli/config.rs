@@ -24,6 +24,12 @@ pub struct ConfigDefaults {
     pub log_level: Option<String>,
     /// Whether to use sitemap by default
     pub use_sitemap: Option<bool>,
+    /// Default Obsidian wiki-links setting
+    pub obsidian_wiki_links: Option<bool>,
+    /// Default Obsidian tags (comma-separated string)
+    pub obsidian_tags: Option<String>,
+    /// Default Obsidian relative assets setting
+    pub obsidian_relative_assets: Option<bool>,
 }
 
 impl ConfigDefaults {

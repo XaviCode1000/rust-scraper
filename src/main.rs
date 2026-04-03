@@ -44,8 +44,8 @@ use rust_scraper::{
         error::{format_cli_error, CliError, CliExit},
         summary::ScrapeSummary,
     },
-    export_factory, validate_and_parse_url, Args, Commands, CrawlerConfig, ScraperConfig,
-    UserAgentCache,
+    export_factory, validate_and_parse_url, Args, Commands, CrawlerConfig, ObsidianOptions,
+    ScraperConfig, UserAgentCache, save_results,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -61,7 +61,7 @@ async fn main() -> CliExit {
         Err(e) => {
             eprintln!("{}", e);
             return CliExit::UsageError("invalid arguments".into());
-        }
+        },
     };
 
     // =========================================================================
@@ -134,7 +134,7 @@ async fn main() -> CliExit {
             };
             eprintln!("{}", format_cli_error(&cli_err, no_color));
             return CliExit::UsageError(e.to_string());
-        }
+        },
     };
 
     info!("{} URL validated: {}", ok, parsed_url);
@@ -146,10 +146,10 @@ async fn main() -> CliExit {
     match preflight_check(&parsed_url).await {
         PreflightResult::Ok => {
             info!("{} Connectivity check passed", ok);
-        }
+        },
         PreflightResult::Warning(status) => {
             warn!("{} Server returned {} but connectivity OK", warn_icon, status);
-        }
+        },
         PreflightResult::Failed(msg) => {
             let suggestion = "Check your network connection and URL. Verify the host is reachable";
             let cli_err = CliError::PreflightFailed {
@@ -158,7 +158,7 @@ async fn main() -> CliExit {
             };
             eprintln!("{}", format_cli_error(&cli_err, no_color));
             return CliExit::NetworkError(msg);
-        }
+        },
     }
 
     // =========================================================================
@@ -222,7 +222,7 @@ async fn main() -> CliExit {
             }
             warn!("URL discovery failed: {}", e);
             Vec::new()
-        }
+        },
     };
 
     let discovered_count = discovered_urls.len();
@@ -262,15 +262,15 @@ async fn main() -> CliExit {
                     return CliExit::Success;
                 }
                 selected
-            }
+            },
             Err(tui::TuiError::Interrupted) => {
                 info!("User interrupted TUI selector, exiting");
                 return CliExit::Success;
-            }
+            },
             Err(e) => {
                 warn!("TUI error: {}", e);
                 return CliExit::ProtocolError(e.to_string());
-            }
+            },
         }
     } else {
         info!("Headless mode: will scrape all {} URLs", discovered_urls.len());
@@ -300,7 +300,7 @@ async fn main() -> CliExit {
             Err(e) => {
                 warn!("Failed to create state store: {}", e);
                 None
-            }
+            },
         }
     } else {
         None
@@ -330,11 +330,11 @@ async fn main() -> CliExit {
                     );
 
                     filtered
-                }
+                },
                 Err(e) => {
                     warn!("Failed to load state: {}", e);
                     urls_to_scrape
-                }
+                },
             }
         } else {
             urls_to_scrape
@@ -359,7 +359,7 @@ async fn main() -> CliExit {
         Err(e) => {
             warn!("Failed to create HTTP client: {}", e);
             return CliExit::NetworkError(e.to_string());
-        }
+        },
     };
 
     let total_urls = urls_to_scrape.len();
@@ -388,13 +388,13 @@ async fn main() -> CliExit {
         match scrape_single_url_for_tui(http_client.client(), url, &scraper_config).await {
             Ok(content) => {
                 results.push(content);
-            }
+            },
             Err(e) => {
                 let url_str = url.as_str().to_string();
                 let err_msg = e.to_string();
                 warn!("Failed to scrape {}: {}", url_str, err_msg);
                 failures.push((url_str, err_msg));
-            }
+            },
         }
 
         if let Some(pb) = scrape_pb.as_ref() {
@@ -405,10 +405,10 @@ async fn main() -> CliExit {
     if let Some(pb) = scrape_pb {
         let success_count = results.len();
         let fail_count = failures.len();
-        pb.finish_with_message(format!(
-            "Scraping complete: {} succeeded, {} failed",
-            success_count, fail_count
-        ).to_owned());
+        pb.finish_with_message(
+            format!("Scraping complete: {} succeeded, {} failed", success_count, fail_count)
+                .to_owned(),
+        );
     }
 
     let duration = start_time.elapsed();
@@ -429,11 +429,7 @@ async fn main() -> CliExit {
         return CliExit::Success;
     }
 
-    info!(
-        "{} Scraping completed: {} elements extracted",
-        ok,
-        results.len()
-    );
+    info!("{} Scraping completed: {} elements extracted", ok, results.len());
 
     // =========================================================================
     // 16. Export results
@@ -452,8 +448,22 @@ async fn main() -> CliExit {
         Err(e) => {
             warn!("Failed to export results: {}", e);
             return CliExit::IoError(e.to_string());
-        }
+        },
     };
+
+    // =========================================================================
+    // 16b. Save individual files (Markdown/Text/JSON with Obsidian support)
+    // =========================================================================
+    let obsidian_options = ObsidianOptions {
+        wiki_links: args.obsidian_wiki_links,
+        tags: args.obsidian_tags.clone().unwrap_or_default(),
+        relative_assets: args.obsidian_relative_assets,
+    };
+
+    if let Err(e) = save_results(&results, &args.output, &args.format, &obsidian_options) {
+        warn!("Failed to save individual files: {}", e);
+        // Continue - file save is non-fatal, RAG export succeeded
+    }
 
     // Summary of downloaded assets
     let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
@@ -529,7 +539,7 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
             } else {
                 PreflightResult::Warning(status)
             }
-        }
+        },
         Err(e) => {
             if e.is_timeout() {
                 PreflightResult::Failed("connection timed out".into())
@@ -538,7 +548,7 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
             } else {
                 PreflightResult::Failed(format!("network error: {}", e))
             }
-        }
+        },
     }
 }
 
@@ -604,6 +614,29 @@ fn apply_config_defaults(mut args: Args, config: &ConfigDefaults) -> Args {
     if let Some(v) = config.use_sitemap {
         if !args.use_sitemap && v {
             args.use_sitemap = v;
+        }
+    }
+
+    // Obsidian config
+    if let Some(ref tags_str) = config.obsidian_tags {
+        if args.obsidian_tags.is_none() {
+            args.obsidian_tags = Some(
+                tags_str
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+            );
+        }
+    }
+    if let Some(v) = config.obsidian_wiki_links {
+        if !args.obsidian_wiki_links && v {
+            args.obsidian_wiki_links = v;
+        }
+    }
+    if let Some(v) = config.obsidian_relative_assets {
+        if !args.obsidian_relative_assets && v {
+            args.obsidian_relative_assets = v;
         }
     }
 

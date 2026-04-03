@@ -6,6 +6,7 @@
 //! - Date (publication or scrape date)
 //! - Author (if available)
 //! - Excerpt (if available)
+//! - Tags (if available, for Obsidian compatibility)
 
 use chrono::Utc;
 use serde::Serialize;
@@ -25,6 +26,9 @@ struct Frontmatter {
     /// Excerpt/summary (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     excerpt: Option<String>,
+    /// Tags for Obsidian (if available)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
 }
 
 /// Generate YAML frontmatter for a markdown file
@@ -35,6 +39,7 @@ struct Frontmatter {
 /// * `date` - Publication date (optional, uses current date if None)
 /// * `author` - Author name (optional)
 /// * `excerpt` - Excerpt/summary (optional)
+/// * `tags` - Tags for Obsidian (optional, empty slice for no tags)
 ///
 /// # Returns
 /// YAML string without the surrounding `---` delimiters
@@ -50,6 +55,7 @@ struct Frontmatter {
 ///     Some("2024-01-15"),
 ///     Some("John Doe"),
 ///     Some("A short excerpt"),
+///     &[],
 /// );
 /// assert!(fm.contains("title: My Article"));
 /// assert!(fm.contains("url: https://example.com/article"));
@@ -60,6 +66,7 @@ pub fn generate(
     date: Option<&str>,
     author: Option<&str>,
     excerpt: Option<&str>,
+    tags: &[String],
 ) -> String {
     let fm = Frontmatter {
         title: title.to_string(),
@@ -69,6 +76,7 @@ pub fn generate(
             .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
         author: author.map(|s| s.to_string()),
         excerpt: excerpt.map(|s| s.to_string()),
+        tags: tags.to_vec(),
     };
 
     serde_yaml::to_string(&fm).unwrap_or_else(|_| String::new())
@@ -86,6 +94,7 @@ mod tests {
             Some("2024-01-15"),
             Some("John Doe"),
             Some("Test excerpt"),
+            &["tag1".to_string(), "tag2".to_string()],
         );
 
         assert!(fm.contains("title: Test Title"));
@@ -93,11 +102,14 @@ mod tests {
         assert!(fm.contains("date:")); // Date format may vary
         assert!(fm.contains("author: John Doe"));
         assert!(fm.contains("excerpt: Test excerpt"));
+        assert!(fm.contains("tags:"));
+        assert!(fm.contains("tag1"));
+        assert!(fm.contains("tag2"));
     }
 
     #[test]
     fn test_generate_with_auto_date() {
-        let fm = generate("Test", "https://example.com", None, None, None);
+        let fm = generate("Test", "https://example.com", None, None, None, &[]);
 
         assert!(fm.contains("title: Test"));
         assert!(fm.contains("url: https://example.com"));
@@ -105,13 +117,38 @@ mod tests {
         assert!(fm.contains("date:"));
         assert!(!fm.contains("author"));
         assert!(!fm.contains("excerpt"));
+        assert!(!fm.contains("tags:"));
     }
 
     #[test]
     fn test_generate_minimal() {
-        let fm = generate("Minimal", "https://minimal.com", None, None, None);
+        let fm = generate("Minimal", "https://minimal.com", None, None, None, &[]);
 
         assert!(fm.contains("title: Minimal"));
         assert!(fm.contains("url: https://minimal.com"));
+    }
+
+    #[test]
+    fn test_generate_with_tags() {
+        let fm = generate(
+            "Tagged",
+            "https://example.com",
+            None,
+            None,
+            None,
+            &["scraped".to_string(), "web-dev".to_string()],
+        );
+
+        assert!(fm.contains("tags:"));
+        assert!(fm.contains("scraped"));
+        assert!(fm.contains("web-dev"));
+    }
+
+    #[test]
+    fn test_generate_empty_tags_not_serialized() {
+        let fm = generate("No Tags", "https://example.com", None, None, None, &[]);
+
+        // Empty tags should not appear in output
+        assert!(!fm.contains("tags:"));
     }
 }
