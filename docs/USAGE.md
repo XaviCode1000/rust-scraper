@@ -21,19 +21,53 @@ cargo run -- --help
 
 **Expected Output:**
 ```
-🚀 Rust Scraper v0.4.0 - Clean Architecture + TUI
-📌 Target: https://example.com
-📁 Output: output
-✅ URL validated: https://example.com/
-🔍 Discovering URLs...
-✅ Found 5 URLs
-📡 Headless mode: will scrape all 5 URLs
-🕷️  Scraping 5 URLs...
-✅ Scraping completed: 5 elements extracted
-💾 Exporting results (format: Jsonl)...
-🎉 Pipeline completed successfully!
-📊 Files generated: output
-📈 Total URLs processed: 5
+>> Rust Scraper v1.1.0 - Clean Architecture
+INFO Target: https://example.com
+INFO Output: output
+INFO Config loaded: /home/user/.config/rust-scraper/config.toml
+INFO User agent loaded: 5 agents available
+INFO URL validated: https://example.com/
+INFO Checking connectivity...
+INFO Connectivity check passed
+INFO Discovering URLs...
+[========================================] 5/5 | Found 5 URLs
+INFO Headless mode: will scrape all 5 URLs
+[========================================] 5/5 | Scraping: example.com
+INFO Scraping completed: 5 elements extracted
+INFO Exporting results (format: Jsonl)...
+INFO Pipeline completed successfully!
+```
+
+**With `--quiet`:**
+```
+(No progress bars, no emojis — only tracing to stderr)
+```
+
+**With `NO_COLOR=1`:**
+```
+OK Rust Scraper v1.1.0 - Clean Architecture
+OK User agent loaded: 5 agents available
+OK URL validated: https://example.com/
+OK Connectivity check passed
+OK Found 5 URLs
+OK Scraping completed: 5 elements extracted
+OK Pipeline completed successfully!
+```
+
+**With `--quiet`:**
+```
+(No progress bars, no emojis — only tracing to stderr)
+```
+
+**With `NO_COLOR=1`:**
+```
+OK Rust Scraper v1.1.0 - Clean Architecture
+OK User agent loaded: 5 agents available
+OK URL validated: https://example.com/
+OK Connectivity check passed
+OK Found 5 URLs
+OK Scraping completed: 5 elements extracted
+OK Pipeline completed successfully!
 ```
 
 ---
@@ -52,14 +86,15 @@ cargo run -- --help
 |------|---------|-------------|
 | `-o, --output <DIR>` | `output` | Output directory for scraped content |
 | `-f, --format <FORMAT>` | `markdown` | Output format: `markdown`, `json`, `text` |
-| `--export-format <FORMAT>` | `jsonl` | RAG export: `jsonl`, `auto` |
+| `--export-format <FORMAT>` | `jsonl` | RAG export: `jsonl`, `vector`, `auto` |
 | `--max-pages <N>` | `10` | Maximum pages to scrape |
 | `--delay-ms <MS>` | `1000` | Delay between requests in milliseconds |
 | `--concurrency <N>` | `auto` | Parallel requests (auto-detects CPU) |
 | `-v, --verbose` | - | Verbosity level (`-v`, `-vv`, `-vvv`) |
 | `--resume` | - | Skip already processed URLs |
 | `--interactive` | - | TUI mode for URL selection |
-| `--force-js-render` | - | Force JS rendering for SPA sites (reserved, no-op) |
+| `--dry-run` | - | Print discovered URLs and exit (no scraping) |
+| `--quiet` | - | Suppress progress bars, emojis, and summary |
 | `--force-js-render` | - | Force JS rendering for SPA sites (reserved, no-op) |
 
 ### Output Formats
@@ -73,6 +108,7 @@ cargo run -- --help
 **RAG export formats (`--export-format`):**
 
 - `jsonl` — JSON Lines (one JSON per line), optimal for RAG pipelines
+- `vector` — JSON with metadata header, embeddings support, cosine similarity
 - `auto` — Auto-detect from existing export files
 
 ---
@@ -515,6 +551,72 @@ cargo run -- --url https://example.com \
   --resume \
   -vv
 ```
+
+---
+
+## Configuration File
+
+The scraper loads defaults from `~/.config/rust-scraper/config.toml` if it exists.
+CLI arguments always take precedence over config file values.
+
+```toml
+# ~/.config/rust-scraper/config.toml
+format = "markdown"
+export_format = "jsonl"
+concurrency = "auto"
+selector = "body"
+max_pages = 50
+delay_ms = 500
+use_sitemap = true
+```
+
+**Precedence:** CLI arguments > environment variables > config file > struct defaults
+
+---
+
+## Exit Codes
+
+| Code | Description |
+|------|-------------|
+| `0` | Success — all URLs scraped without errors |
+| `64` | Invalid arguments or URL parsing error |
+| `69` | Network error or partial success (some URLs failed) |
+| `74` | I/O error — failed to write output files |
+| `76` | Protocol error — TUI failure, WAF blocked |
+| `78` | Configuration error — config file parsing failed |
+
+---
+
+## Configuration File
+
+The scraper loads defaults from `~/.config/rust-scraper/config.toml` if it exists.
+CLI arguments always take precedence over config file values.
+
+```toml
+# ~/.config/rust-scraper/config.toml
+format = "markdown"
+export_format = "jsonl"
+concurrency = "auto"
+selector = "body"
+max_pages = 50
+delay_ms = 500
+use_sitemap = true
+```
+
+**Precedence:** CLI arguments > environment variables > config file > struct defaults
+
+---
+
+## Exit Codes
+
+| Code | Description |
+|------|-------------|
+| `0` | Success — all URLs scraped without errors |
+| `64` | Invalid arguments or URL parsing error |
+| `69` | Network error or partial success (some URLs failed) |
+| `74` | I/O error — failed to write output files |
+| `76` | Protocol error — TUI failure, WAF blocked |
+| `78` | Configuration error — config file parsing failed |
 
 ---
 

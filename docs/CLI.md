@@ -1,8 +1,8 @@
 # CLI Reference — rust-scraper
 
-**Version:** 1.3.0  
+**Version:** 1.1.0  
 **MSRV:** 1.88  
-**Last Updated:** 2026-04-01
+**Last Updated:** 2026-04-03
 
 ---
 
@@ -316,6 +316,182 @@ cargo run -- --url "https://example.com" --interactive
 - Confirmation mode before download
 - Terminal restore on panic/exit
 - Ratatui + crossterm backend
+
+---
+
+## CLI UX Options (v1.1.0+)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dry-run` | `false` | Print discovered URLs to stdout and exit without scraping |
+| `--quiet` | `false` | Suppress progress bars, emojis, and summary output |
+| `completions <SHELL>` | — | Generate shell completion scripts |
+
+### Dry-Run Mode (`--dry-run`)
+
+Preview which URLs would be scraped without actually scraping them:
+
+```bash
+# Discover URLs only, no scraping
+cargo run -- --url "https://example.com" --dry-run
+
+# With sitemap discovery
+cargo run -- --url "https://example.com" --use-sitemap --dry-run
+```
+
+**Output:** Discovered URLs are printed to stdout, one per line. Exit code 0.
+
+### Quiet Mode (`--quiet`)
+
+Suppress all non-essential output for clean scripting/pipe usage:
+
+```bash
+# No progress bars, no emojis, no summary
+cargo run -- --url "https://example.com" --quiet
+
+# Combine with NO_COLOR for fully ASCII output
+NO_COLOR=1 cargo run -- --url "https://example.com" --quiet
+```
+
+**What `--quiet` suppresses:**
+- Progress bar spinners and bars (indicatif)
+- Emoji icons in log messages
+- `ScrapeSummary` output at end
+
+**What still appears:**
+- `tracing` log messages (stderr)
+- Error messages (stderr)
+- Scraped content (stdout, if piped)
+
+### Shell Completions (`completions`)
+
+Generate completion scripts for your shell:
+
+```bash
+# Bash
+cargo run -- completions bash > ~/.local/share/bash-completion/completions/rust-scraper
+
+# Fish
+cargo run -- completions fish > ~/.config/fish/completions/rust-scraper.fish
+
+# Zsh
+cargo run -- completions zsh > ~/.zsh/completions/_rust-scraper
+
+# Elvish
+cargo run -- completions elvish > ~/.elvish/lib/rust-scraper.elv
+
+# PowerShell
+cargo run -- completions powershell > rust-scraper.ps1
+```
+
+### NO_COLOR Support
+
+The scraper respects the `NO_COLOR` environment variable:
+
+```bash
+# Disable emojis (ASCII fallback)
+NO_COLOR=1 cargo run -- --url "https://example.com"
+
+# Disable colors in log output
+NO_COLOR=1 cargo run -- --url "https://example.com" -vv
+```
+
+**Emoji → ASCII mapping:**
+| Emoji | ASCII |
+|-------|-------|
+| ✅ | OK |
+| ⚠️ | WARN |
+| 📌 | INFO |
+| 🚀 | >> |
+| 📁 | DIR |
+
+---
+
+## CLI UX Options (v1.1.0+)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dry-run` | `false` | Print discovered URLs to stdout and exit without scraping |
+| `--quiet` | `false` | Suppress progress bars, emojis, and summary output |
+| `completions <SHELL>` | — | Generate shell completion scripts |
+
+### Dry-Run Mode (`--dry-run`)
+
+Preview which URLs would be scraped without actually scraping them:
+
+```bash
+# Discover URLs only, no scraping
+cargo run -- --url "https://example.com" --dry-run
+
+# With sitemap discovery
+cargo run -- --url "https://example.com" --use-sitemap --dry-run
+```
+
+**Output:** Discovered URLs are printed to stdout, one per line. Exit code 0.
+
+### Quiet Mode (`--quiet`)
+
+Suppress all non-essential output for clean scripting/pipe usage:
+
+```bash
+# No progress bars, no emojis, no summary
+cargo run -- --url "https://example.com" --quiet
+
+# Combine with NO_COLOR for fully ASCII output
+NO_COLOR=1 cargo run -- --url "https://example.com" --quiet
+```
+
+**What `--quiet` suppresses:**
+- Progress bar spinners and bars (indicatif)
+- Emoji icons in log messages
+- `ScrapeSummary` output at end
+
+**What still appears:**
+- `tracing` log messages (stderr)
+- Error messages (stderr)
+- Scraped content (stdout, if piped)
+
+### Shell Completions (`completions`)
+
+Generate completion scripts for your shell:
+
+```bash
+# Bash
+cargo run -- completions bash > ~/.local/share/bash-completion/completions/rust-scraper
+
+# Fish
+cargo run -- completions fish > ~/.config/fish/completions/rust-scraper.fish
+
+# Zsh
+cargo run -- completions zsh > ~/.zsh/completions/_rust-scraper
+
+# Elvish
+cargo run -- completions elvish > ~/.elvish/lib/rust-scraper.elv
+
+# PowerShell
+cargo run -- completions powershell > rust-scraper.ps1
+```
+
+### NO_COLOR Support
+
+The scraper respects the `NO_COLOR` environment variable:
+
+```bash
+# Disable emojis (ASCII fallback)
+NO_COLOR=1 cargo run -- --url "https://example.com"
+
+# Disable colors in log output
+NO_COLOR=1 cargo run -- --url "https://example.com" -vv
+```
+
+**Emoji → ASCII mapping:**
+| Emoji | ASCII |
+|-------|-------|
+| ✅ | OK |
+| ⚠️ | WARN |
+| 📌 | INFO |
+| 🚀 | >> |
+| 📁 | DIR |
 
 ---
 
@@ -709,11 +885,33 @@ cargo run -- --url "https://example.com" --max-pages 10 --resume
 
 ## Exit Codes
 
-| Code | Description |
-|------|-------------|
-| `0` | Success |
-| `1` | General error (invalid URL, network error, etc.) |
-| `2` | CLI argument parsing error |
+| Code | Constant | Description |
+|------|----------|-------------|
+| `0` | `EX_OK` | Success — all URLs scraped without errors |
+| `64` | `EX_USAGE` | Invalid arguments or URL parsing error |
+| `69` | `EX_UNAVAILABLE` | Network error or partial success (some URLs failed) |
+| `74` | `EX_IOERR` | I/O error — failed to write output files |
+| `76` | `EX_PROTOCOL` | Protocol error — TUI failure, WAF blocked |
+| `78` | `EX_CONFIG` | Configuration error — config file parsing failed |
+
+**Partial Success (exit 69):** When some URLs scrape successfully but others fail. The `ScrapeSummary` shows the breakdown.
+
+### Example Exit Code Usage
+
+```bash
+# Check exit code
+cargo run -- --url "https://example.com"
+echo $?  # 0 = success, 69 = partial, etc.
+
+# Script with error handling
+cargo run -- --url "https://example.com" --quiet
+case $? in
+    0) echo "All URLs scraped successfully" ;;
+    69) echo "Some URLs failed, check logs" ;;
+    64) echo "Invalid URL or arguments" ;;
+    *) echo "Unexpected error" ;;
+esac
+```
 
 ---
 
@@ -835,6 +1033,20 @@ Options:
 ---
 
 ## Version History
+
+### v1.1.0 (2026-04-03)
+
+- ✅ `CliExit` return type with sysexits codes (0, 64, 69, 74, 76, 78)
+- ✅ `--dry-run` mode — print discovered URLs, exit without scraping
+- ✅ `--quiet` mode — suppress progress bars, emojis, and summary
+- ✅ `completions` subcommand — bash, fish, zsh, elvish, powershell
+- ✅ `NO_COLOR` support — emoji → ASCII fallback
+- ✅ Pre-flight HEAD check — fail fast on DNS errors
+- ✅ Progress bars — spinner for discovery, bounded bar for scraping
+- ✅ Config file loading — `~/.config/rust-scraper/config.toml`
+- ✅ `ScrapeSummary` — structured summary with emoji/ASCII display
+- ✅ `built` integration — build-time metadata in binary
+- ✅ 304 tests passing, clippy clean
 
 ### v1.3.0 (2026-04-01)
 

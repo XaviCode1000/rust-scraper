@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Added
 
+#### CLI UX Improvement — v1.1.0
+- **`CliExit` return type** — `main()` now returns `CliExit` with proper `Termination` trait implementation
+- **Sysexits exit codes** — 0 (success), 64 (usage), 69 (network/partial), 74 (IO), 76 (protocol), 78 (config)
+- **Shell completions** — `completions` subcommand for bash, fish, zsh, elvish, powershell
+- **Config file loading** — `~/.config/rust-scraper/config.toml` with TOML defaults and CLI merge
+- **Pre-flight HEAD check** — Fail fast on DNS/connection errors before starting discovery
+- **Progress bars** — `indicatif` spinner for URL discovery, bounded bar for per-URL scraping
+- **Dry-run mode** — `--dry-run` prints discovered URLs to stdout and exits without scraping
+- **Quiet mode** — `--quiet` suppresses progress bars, emojis, and summary output
+- **ScrapeSummary** — Structured summary with emoji/ASCII display based on `NO_COLOR`
+- **Conditional emojis** — All log messages respect `NO_COLOR` env var (emoji → ASCII fallback)
+- **stderr-only tracing** — All `tracing` output goes to stderr, clean stdout for piping
+- **NO_COLOR support** — `NO_COLOR=1` disables emojis and color output automatically
+- **`built` integration** — Build-time metadata (version, profile, target) embedded in binary
+- **`dirs` integration** — XDG-compliant config and cache directory resolution
+
 #### Vector Exporter — v1.4.0
 - **`ExportFormat::Vector`** variant — JSON format with metadata header and embeddings
 - **`VectorExporter`** implementation — full `Exporter` trait impl with streaming writes
@@ -41,9 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🔧 Fixed
 
+- **Vector Exporter Append Mode**: Fixed JSON corruption — truncation now happens before BufWriter creation
+- **NaN Validation**: Embeddings with NaN/Infinity now rejected before serialization (was silently producing `null`)
+- **Clippy 1.93/1.94**: Resolved all 28 warnings across 13 files
+  - `io::Error::new(Other, ...)` → `io::Error::other(...)` in AI modules
+  - `map_or(false, ...)` → `is_some_and(...)`
+  - `or_else(\|\| ...)` → `or(...)` for Option
+  - `vec!` → array literal in tests
+  - Derivable `Default` impl for `ConfigDefaults`
+  - `from_str` → `parse_str` to avoid `FromStr` conflict
+  - `tracing_subscriber::init()` → `try_init()` for test compatibility
 - **Embedding Preservation**: Fixed bug losing 49,536 embedding dimensions during semantic filtering
 - **Test Isolation**: Fixed AI test isolation issues
-- **Clippy 1.93/1.94**: Resolved all 29 warnings
 - **Wildcard Pattern Matching**: Subdomains only (not root domain)
 - **Doctests**: Added async main wrapper and proper return types
 - **Crawler Integration Tests**: Updated patterns to match HOSTS not paths
@@ -59,10 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🧪 Testing
 
+- **304 tests passing** (up from 217)
+- **0 failures** — all vector_exporter tests fixed
 - 64 AI integration tests
-- 217 total tests passing (217 passed; 0 failed; 1 ignored)
 - Test isolation for AI modules
 - Embedding preservation tests
+- Vector exporter append mode + NaN validation tests
+- Vector exporter append mode + NaN validation tests
 
 ### 🚧 CI/CD
 

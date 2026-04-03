@@ -3,10 +3,10 @@
 **Production-ready web scraper with Clean Architecture, TUI selector, and AI-powered semantic cleaning.**
 
 [![Build Status](https://github.com/XaviCode1000/rust-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCode1000/rust-scraper/actions)
-[![Tests](https://img.shields.io/badge/tests-252%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
+[![Tests](https://img.shields.io/badge/tests-304%20passing-brightgreen)](https://github.com/XaviCode1000/rust-scraper)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.80%2B-orange)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.7-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/XaviCode1000/rust-scraper/releases)
 
 ---
 
@@ -67,6 +67,18 @@
 - **LazyLock Cache** — Syntax highlighting (2-10ms → ~0.01ms)
 - **Bounded Concurrency** — Configurable parallel downloads (HDD-aware defaults)
 - **Hardware-Aware** — Auto-detects CPU cores, adjusts concurrency accordingly
+
+### 🎨 CLI UX (v1.1.0+)
+
+- **Sysexits Exit Codes** — Proper exit codes (0, 64, 69, 74, 76, 78) for scripting
+- **Shell Completions** — Auto-generated for bash, fish, zsh, elvish, powershell
+- **Config File** — `~/.config/rust-scraper/config.toml` with TOML defaults
+- **Dry-Run Mode** — `--dry-run` to preview URLs without scraping
+- **Quiet Mode** — `--quiet` for clean scripting/pipe usage
+- **NO_COLOR Support** — Respects `NO_COLOR` env var (emoji → ASCII)
+- **Progress Bars** — `indicatif` spinner for discovery, bar for scraping
+- **Pre-flight Check** — HEAD request to fail fast on DNS errors
+- **Build Metadata** — `built` crate embeds version, profile, target info
 
 ### 🔒 Security
 
@@ -666,14 +678,15 @@ By contributing to this project, you agree that your contributions will be licen
 
 | Metric | Value |
 |--------|-------|
-| **Lines of Code** | 3,754 (src/) |
-| **Total Tests** | 252 passing (nextest) |
-| **Public Functions** | 64 |
-| **MSRV** | 1.80.0 |
-| **Dependencies** | 45+ (core), 60+ (with AI) |
-| **Latest Version** | 1.0.7 |
+| **Lines of Code** | ~4,500 (src/) |
+| **Total Tests** | 304 passing (nextest) |
+| **Public Functions** | 70+ |
+| **MSRV** | 1.88.0 |
+| **Dependencies** | 50+ (core), 65+ (with AI) |
+| **Latest Version** | 1.1.0 |
 | **Test Runner** | cargo-nextest (4x faster) |
 | **Background Checker** | bacon (instant feedback) |
+| **Clippy** | 0 warnings, 0 errors |
 
 ---
 
@@ -692,7 +705,8 @@ By contributing to this project, you agree that your contributions will be licen
 - [x] **v1.0.7** — Production assertion fix (`debug_assert_eq!` → `assert_eq!` in inference)
 - [x] **v1.0.7** — Robust URL resolution (`resolve_url()` with RFC 3986, Content-Type validation)
 - [x] **v1.0.7** — Network hardening (`connect_timeout`, `pool_max_idle_per_host`)
-- [x] **v1.1** — Vector Exporter: JSON with embeddings, cosine similarity, dimension validation, `--export-format vector`
+- [x] **v1.1.0** — CLI UX: CliExit, sysexits, progress bars, dry-run, quiet, completions, config file, NO_COLOR
+- [x] **v1.1.0** — Vector Exporter: JSON with embeddings, cosine similarity, dimension validation, append mode fix
 
 ### Planned 🚧
 
@@ -716,4 +730,4 @@ By contributing to this project, you agree that your contributions will be licen
 
 **Made with ❤️ using Rust and Clean Architecture**
 
-**Current Status:** ✅ All tests passing (252/252) | ✅ CI/CD enabled | ✅ Production-ready | ✅ Validated with real sites
+**Current Status:** ✅ All tests passing (304/304) | ✅ CI/CD enabled | ✅ Production-ready | ✅ Validated with real sites | ✅ Clippy clean (0 warnings)
