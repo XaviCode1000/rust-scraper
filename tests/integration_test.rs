@@ -6,10 +6,11 @@
 //! Run with features: cargo test --test integration --features images,documents
 
 use rust_scraper::{
-    create_http_client, save_results, scrape_with_readability, DownloadedAsset, ScrapedContent,
-    ValidUrl,
+    create_http_client, save_results, scrape_with_config, scrape_with_readability, DownloadedAsset,
+    ScrapedContent, ValidUrl,
 };
 use tempfile::TempDir;
+use walkdir::WalkDir;
 
 // ============================================================================
 // Integration Tests: Full scraping pipeline
@@ -355,7 +356,6 @@ async fn test_download_documents_from_website() {
         download_documents: true,
         output_dir: output_dir.clone(),
         max_file_size: Some(50 * 1024 * 1024), // 50MB max
-        scraper_concurrency: 3,
         scraper_concurrency: 3,
     };
 
