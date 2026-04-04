@@ -125,17 +125,9 @@ pub fn convert_wiki_links(content: &str, base_domain: &str) -> String {
             let parsed = match url::Url::parse(url_str) {
                 Ok(p) => p,
                 Err(_) => {
-                    // Handle relative paths (root-relative: /path/to/page)
-                    // These are always same-site since they start with /
-                    if url_str.starts_with('/') && !url_str.starts_with("//") {
-                        let slug = slug_from_url(url_str);
-                        if slug == link_text.to_lowercase().trim().replace(' ', "-") {
-                            return format!("[[{}]]", slug);
-                        } else {
-                            return format!("[[{}|{}]]", slug, link_text);
-                        }
-                    }
-                    return caps[0].to_string(); // Not a valid URL or not root-relative
+                    // Relative paths (root-relative: /path/to/page) should be left unchanged
+                    // Only convert absolute URLs or same-domain links
+                    return caps[0].to_string();
                 },
             };
 
