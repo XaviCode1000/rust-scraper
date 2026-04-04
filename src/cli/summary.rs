@@ -67,12 +67,12 @@ impl ScrapeSummary {
         };
 
         format!(
-            "\nScrape Complete! ✅\n\
-             ✅ scrapados: {scraped}\n\
-             ❌ falhos: {failed}\n\
-             ⏭️  pulados: {skipped}\n\
-             📊 resumo: {discovered} descobertos, {elements} elementos extraídos, \
-             {assets} assets baixados, {dur} de duração",
+            "\n¡Scrapeo completado! ✅\n\
+             ✅ scrapeados: {scraped}\n\
+             ❌ fallidos: {failed}\n\
+             ⏭️  omitidos: {skipped}\n\
+             📊 resumen: {discovered} descubiertos, {elements} elementos extraídos, \
+             {assets} assets descargados, {dur} de duración",
             scraped = self.urls_scraped,
             failed = self.urls_failed,
             skipped = self.urls_skipped,
@@ -93,11 +93,11 @@ impl ScrapeSummary {
         };
 
         format!(
-            "\n[OK] scraped: {scraped}\n\
-             [FAIL] failed: {failed}\n\
-             [SKIP] skipped: {skipped}\n\
-             [SUMMARY] {discovered} discovered, {elements} elements extracted, \
-             {assets} assets downloaded, {dur} duration",
+            "\n[OK] scrapeados: {scraped}\n\
+             [FALLIDO] fallidos: {failed}\n\
+             [OMITIDO] omitidos: {skipped}\n\
+             [RESUMEN] {discovered} descubiertos, {elements} elementos extraídos, \
+             {assets} assets descargados, {dur} de duración",
             scraped = self.urls_scraped,
             failed = self.urls_failed,
             skipped = self.urls_skipped,
@@ -128,11 +128,11 @@ mod tests {
     fn test_summary_display_emoji() {
         let s = make_summary();
         let out = s.display(false);
-        assert!(out.contains("Scrape Complete!"));
+        assert!(out.contains("¡Scrapeo completado!"));
         assert!(out.contains("✅"));
-        assert!(out.contains("❌ falhos: 2"));
-        assert!(out.contains("⏭️  pulados: 1"));
-        assert!(out.contains("📊 resumo"));
+        assert!(out.contains("❌ fallidos: 2"));
+        assert!(out.contains("⏭️  omitidos: 1"));
+        assert!(out.contains("📊 resumen"));
         assert!(out.contains("45s"));
     }
 
@@ -144,10 +144,10 @@ mod tests {
         assert!(!out.contains("❌"));
         assert!(!out.contains("⏭️"));
         assert!(!out.contains("📊"));
-        assert!(out.contains("[OK] scraped: 7"));
-        assert!(out.contains("[FAIL] failed: 2"));
-        assert!(out.contains("[SKIP] skipped: 1"));
-        assert!(out.contains("[SUMMARY]"));
+        assert!(out.contains("[OK] scrapeados: 7"));
+        assert!(out.contains("[FALLIDO] fallidos: 2"));
+        assert!(out.contains("[OMITIDO] omitidos: 1"));
+        assert!(out.contains("[RESUMEN]"));
         assert!(out.contains("45s"));
     }
 
