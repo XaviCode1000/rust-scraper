@@ -116,6 +116,11 @@ pub fn convert_wiki_links(content: &str, base_domain: &str) -> String {
             let link_text = &caps[4];
             let url_str = &caps[5];
 
+            // Skip links that contain embedded images (e.g., [![alt](img.png)Text](url))
+            if link_text.contains("![") {
+                return caps[0].to_string();
+            }
+
             // Try to parse the URL
             let parsed = match url::Url::parse(url_str) {
                 Ok(p) => p,
