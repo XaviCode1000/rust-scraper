@@ -79,6 +79,17 @@ async fn main() -> CliExit {
     }
 
     // =========================================================================
+    // 2b. URL is required for scraping (subcommands already handled above)
+    // =========================================================================
+    let target_url = match args.url {
+        Some(ref u) => u.clone(),
+        None => {
+            eprintln!("Error: --url is required for scraping");
+            return CliExit::UsageError("--url is required".into());
+        },
+    };
+
+    // =========================================================================
     // 3. Initialize logging (stderr-only, respects quiet + NO_COLOR)
     // =========================================================================
     let no_color = rust_scraper::is_no_color();
@@ -131,7 +142,7 @@ async fn main() -> CliExit {
         "Rust Scraper {} - Clean Architecture",
         rust_scraper::version_string()
     );
-    info!("{} Target: {}", info_icon, args.url);
+    info!("{} Target: {}", info_icon, target_url);
     info!("{} Output: {}", info_icon, args.output.display());
 
     // =========================================================================
@@ -148,7 +159,7 @@ async fn main() -> CliExit {
     // =========================================================================
     // 7. Validate URL
     // =========================================================================
-    let parsed_url = match validate_and_parse_url(&args.url) {
+    let parsed_url = match validate_and_parse_url(&target_url) {
         Ok(url) => url,
         Err(e) => {
             let suggestion = "Use http:// or https:// scheme with a valid host";
@@ -241,7 +252,7 @@ async fn main() -> CliExit {
         None
     };
 
-    let discovered_urls = match discover_urls_for_tui(&args.url, &crawler_config).await {
+    let discovered_urls = match discover_urls_for_tui(&target_url, &crawler_config).await {
         Ok(urls) => urls,
         Err(e) => {
             if let Some(pb) = discovery_pb.as_ref() {
@@ -327,7 +338,7 @@ async fn main() -> CliExit {
             cache_base.join("rust-scraper").join("state")
         });
 
-        let domain = export_factory::domain_from_url(&args.url);
+        let domain = export_factory::domain_from_url(&target_url);
         info!("State store domain: {}", domain);
         match export_factory::create_state_store(state_dir, &domain) {
             Ok(store) => Some(store),

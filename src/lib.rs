@@ -684,10 +684,10 @@ pub struct Args {
     pub subcommand: Option<Commands>,
 
     // ========== Target ==========
-    /// URL to scrape (required)
-    #[arg(short, long, required = true, env = "RUST_SCRAPER_URL")]
+    /// URL to scrape (required unless using a subcommand)
+    #[arg(short, long, required_unless_present = "subcommand", env = "RUST_SCRAPER_URL")]
     #[clap(next_help_heading = "Target")]
-    pub url: String,
+    pub url: Option<String>,
 
     /// CSS selector for content extraction
     #[arg(short, long, default_value = "body", env = "RUST_SCRAPER_SELECTOR")]
