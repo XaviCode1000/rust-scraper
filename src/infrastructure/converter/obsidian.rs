@@ -11,11 +11,12 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 /// Matches Markdown links: [text](url)
-/// Uses alternation to skip code blocks and inline code:
+/// Uses alternation to skip code blocks, inline code, AND images:
 ///   (```[\s\S]*?```|`[^`]+`) — skip fenced/inline code
-///   | \[([^\]]+)\]\(([^)]+)\) — capture link text and URL
+///   | !\[([^\]]*)\]\(([^)]+)\) — skip images (capture to ignore)
+///   | \[([^\]]+)\]\(([^)]+)\) — capture link text (group 3) and URL (group 4)
 static MARKDOWN_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)(```[\s\S]*?```|`[^`]+`)|\[([^\]]+)\]\(([^)]+)\)")
+    Regex::new(r"(?s)(```[\s\S]*?```|`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)")
         .expect("BUG: invalid regex for markdown links")
 });
 
@@ -107,13 +108,13 @@ pub fn slug_from_url(url_path: &str) -> String {
 pub fn convert_wiki_links(content: &str, base_domain: &str) -> String {
     MARKDOWN_LINK_RE
         .replace_all(content, |caps: &regex::Captures| {
-            // If code block matched, return unchanged
-            if caps.get(1).is_some() {
+            // If code block or image matched, return unchanged
+            if caps.get(1).is_some() || caps.get(2).is_some() {
                 return caps[0].to_string();
             }
 
-            let link_text = &caps[2];
-            let url_str = &caps[3];
+            let link_text = &caps[4];
+            let url_str = &caps[5];
 
             // Try to parse the URL
             let parsed = match url::Url::parse(url_str) {
