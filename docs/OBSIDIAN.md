@@ -27,7 +27,7 @@ Automatically finds your Obsidian vault using 4-tier resolution:
 The fastest way to clip a URL to your vault:
 
 ```bash
-cargo run --release -- --url https://example.com/article --obsidian --quick-save
+cargo run --release -- --url https://example.com/article --obsidian-wiki-links --quick-save
 ```
 
 **Behavior:**
@@ -65,7 +65,7 @@ Uses `pathdiff` crate for cross-platform compatibility. Always outputs `/` separ
 
 ### 5. Rich Metadata for Dataview
 
-Extended YAML frontmatter with fields optimized for Dataview queries:
+Enable with `--obsidian-rich-metadata`. Extended YAML frontmatter with fields optimized for Dataview queries:
 
 ```yaml
 ---
@@ -113,17 +113,18 @@ WHERE language = "en" AND readingTime < 10
 
 ```bash
 # Simplest: quick-save to auto-detected vault
-cargo run --release -- --url https://example.com --obsidian --quick-save
+cargo run --release -- --url https://example.com --obsidian-wiki-links --quick-save
 
 # With explicit vault
 cargo run --release -- --url https://example.com --vault ~/Obsidian/Brain --quick-save
 
-# Full control
+# Full control with rich metadata
 cargo run --release -- --url https://example.com \
   --vault ~/Obsidian/Brain \
   --obsidian-wiki-links \
   --obsidian-tags "rust,web,scraping" \
   --obsidian-relative-assets \
+  --obsidian-rich-metadata \
   --quick-save
 ```
 
@@ -134,7 +135,7 @@ cargo run --release -- --url https://example.com \
 export OBSIDIAN_VAULT=~/Obsidian/MyKnowledge
 
 # Then just quick-save
-cargo run --release -- --url https://example.com --obsidian --quick-save
+cargo run --release -- --url https://example.com --obsidian-wiki-links --quick-save
 ```
 
 ### Config File
@@ -145,6 +146,7 @@ cargo run --release -- --url https://example.com --obsidian --quick-save
 vault_path = "~/Obsidian/MyVault"
 wiki_links = true
 relative_assets = true
+rich_metadata = true
 tags = ["web-clip"]
 ```
 

@@ -219,18 +219,19 @@ cargo build --release --features ai
 
 ```bash
 # Quick-save to detected vault (no TUI, no confirmation)
-./target/release/rust_scraper --url https://example.com/article --obsidian --quick-save
+./target/release/rust_scraper --url https://example.com/article --obsidian-wiki-links --obsidian-rich-metadata --quick-save
 
 # With explicit vault path
 ./target/release/rust_scraper --url https://example.com/article \
   --vault ~/Obsidian/MyVault \
   --obsidian-wiki-links \
   --obsidian-tags "rust,web,scraping" \
-  --obsidian-relative-assets
+  --obsidian-relative-assets \
+  --obsidian-rich-metadata
 
 # Set vault via environment variable (persistent)
 export OBSIDIAN_VAULT=~/Obsidian/MyKnowledge
-./target/release/rust_scraper --url https://example.com/article --obsidian --quick-save
+./target/release/rust_scraper --url https://example.com/article --obsidian-wiki-links --quick-save
 ```
 
 **Quick-save behavior:**
