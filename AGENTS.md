@@ -25,6 +25,33 @@ bacon                                                # Background checker (auto-
 
 ---
 
+## Code Style
+
+Error messages are in **Spanish**. HTTP client is **`wreq`**, not `reqwest`.
+
+```rust
+// src/error.rs — Error messages in Spanish (not English)
+#[derive(Error, Debug)]
+pub enum ScraperError {
+    #[error("URL inválida: {0}")]
+    InvalidUrl(String),
+    #[error("error de red: {0}")]
+    Network(String),
+    #[error("WAF/CAPTCHA detectado en {url}: {provider}")]
+    WafBlocked { url: String, provider: String },
+}
+
+// src/application/http_client.rs — wreq, not reqwest
+use wreq::Client;  // NOT reqwest
+use wreq_util::emulation::ClientBuilderExt;
+
+let client = Client::builder()
+    .emulate(wreq_util::emulation::KnownVersion::Chrome131)
+    .build()?;
+```
+
+---
+
 ## Non-Obvious Patterns
 
 ### Crate version conflicts (DO NOT try to unify)
