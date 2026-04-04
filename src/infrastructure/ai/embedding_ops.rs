@@ -224,6 +224,110 @@ pub fn find_most_similar(query: &[f32], candidates: &[Vec<f32>]) -> Option<usize
     Some(best_idx)
 }
 
+/// Attention-mask weighted Mean Pooling
+///
+/// Computes the mean of token embeddings weighted by the attention mask.
+/// This is the standard pooling strategy for sentence-transformers models.
+///
+/// # Arguments
+///
+/// * `token_embeddings` - Flat slice of token embeddings [seq_len * embedding_dim]
+/// * `seq_len` - Number of tokens in sequence
+/// * `embedding_dim` - Dimension of each embedding (typically 384 for all-MiniLM-L6-v2)
+/// * `attention_mask` - slice of 0/1 values, length must equal seq_len
+///
+/// # Returns
+///
+/// Pooled embedding vector of length `embedding_dim`
+///
+/// # Examples
+///
+/// ```
+/// # use rust_scraper::infrastructure::ai::embedding_ops::mean_pool;
+/// let data: Vec<f32> = (0..4 * 384).map(|i| i as f32).collect();
+/// let pooled = mean_pool(&data, 4, 384, &[1i64; 4]);
+/// assert_eq!(pooled.len(), 384);
+/// ```
+#[must_use]
+pub fn mean_pool(
+    token_embeddings: &[f32],
+    seq_len: usize,
+    embedding_dim: usize,
+    attention_mask: &[i64],
+) -> Vec<f32> {
+    debug_assert_eq!(
+        attention_mask.len(),
+        seq_len,
+        "attention_mask length must match seq_len"
+    );
+    debug_assert_eq!(
+        token_embeddings.len(),
+        seq_len * embedding_dim,
+        "token_embeddings length must match seq_len * embedding_dim"
+    );
+
+    let mut pooled = vec![0.0f32; embedding_dim];
+    let mut mask_sum = 0.0f32;
+
+    for (i, &weight) in attention_mask.iter().take(seq_len).enumerate() {
+        let weight_f = weight as f32;
+        if weight_f > 0.0 {
+            mask_sum += weight_f;
+            let offset = i * embedding_dim;
+            for j in 0..embedding_dim {
+                pooled[j] += token_embeddings[offset + j] * weight_f;
+            }
+        }
+    }
+
+    if mask_sum > f32::EPSILON {
+        let inv_mask_sum = 1.0 / mask_sum;
+        for v in &mut pooled {
+            *v *= inv_mask_sum;
+        }
+    }
+    // If mask_sum == 0, pooled stays as zero vector (defensive)
+
+    pooled
+}
+
+/// L2 normalize a vector, returning zero vector if magnitude is too small
+///
+/// Unlike `normalize()`, this function never panics. If the input vector
+/// has near-zero magnitude, it returns the input unchanged.
+///
+/// # Arguments
+///
+/// * `vector` - Input vector to normalize
+///
+/// # Returns
+///
+/// Normalized vector (unit length) or original if magnitude < epsilon
+///
+/// # Examples
+///
+/// ```
+/// # use rust_scraper::infrastructure::ai::embedding_ops::l2_normalize_safe;
+/// let v = vec![3.0f32, 4.0];
+/// let normalized = l2_normalize_safe(&v);
+/// let mag: f32 = normalized.iter().map(|&x| x * x).sum::<f32>().sqrt();
+/// assert!((mag - 1.0).abs() < 0.001);
+///
+/// let zero = vec![0.0f32, 0.0, 0.0];
+/// let result = l2_normalize_safe(&zero);
+/// assert_eq!(result, vec![0.0, 0.0, 0.0]); // No panic, returns zero
+/// ```
+#[must_use]
+pub fn l2_normalize_safe(vector: &[f32]) -> Vec<f32> {
+    let magnitude = vector.iter().map(|&x| x * x).sum::<f32>().sqrt();
+
+    if magnitude < f32::EPSILON {
+        return vector.to_vec();
+    }
+
+    vector.iter().map(|&x| x / magnitude).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +454,74 @@ mod tests {
         let b: Vec<f32> = (0..20).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect();
         let sim = cosine_similarity(&a, &b);
         assert!((sim - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_mean_pool_produces_correct_dimension() {
+        // Simulate [4, 384] output with all mask=1
+        let data: Vec<f32> = (0..4 * 384).map(|i| i as f32).collect();
+        let mask = vec![1i64; 4];
+        let pooled = mean_pool(&data, 4, 384, &mask);
+        assert_eq!(pooled.len(), 384);
+    }
+
+    #[test]
+    fn test_mean_pool_excludes_padding() {
+        // 2 real tokens + 2 padding (seq_len=4, embedding_dim=2)
+        let data = vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0];
+        let mask = vec![1i64, 1, 0, 0];
+        let pooled = mean_pool(&data, 4, 2, &mask);
+        // Mean of first 2 rows: [(1+10)/2, (2+20)/2] = [5.5, 11.0]
+        assert!((pooled[0] - 5.5).abs() < 0.001);
+        assert!((pooled[1] - 11.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_mean_pool_empty_mask() {
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let mask = vec![0i64, 0];
+        let pooled = mean_pool(&data, 2, 2, &mask);
+        assert_eq!(pooled, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_l2_normalize_safe_unit_magnitude() {
+        let v = vec![3.0f32, 4.0];
+        let normalized = l2_normalize_safe(&v);
+        let mag: f32 = normalized.iter().map(|&x| x * x).sum::<f32>().sqrt();
+        assert!((mag - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_l2_normalize_safe_zero_vector() {
+        let v = vec![0.0f32, 0.0, 0.0];
+        let result = l2_normalize_safe(&v);
+        assert_eq!(result, vec![0.0, 0.0, 0.0]); // No panic, returns zero
+    }
+
+    #[test]
+    fn test_mean_pool_single_token() {
+        // Single token with mask=1
+        let data = vec![1.0f32, 2.0, 3.0, 4.0];
+        let mask = vec![1i64];
+        let pooled = mean_pool(&data, 1, 4, &mask);
+        assert_eq!(pooled.len(), 4);
+        assert_eq!(pooled, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_mean_pool_with_l2_normalize_pipeline() {
+        // Test the full pipeline: mean_pool + l2_normalize_safe
+        let data: Vec<f32> = (0..4 * 384).map(|i| (i % 384) as f32).collect();
+        let mask = vec![1i64; 4];
+
+        let pooled = mean_pool(&data, 4, 384, &mask);
+        let normalized = l2_normalize_safe(&pooled);
+
+        assert_eq!(normalized.len(), 384);
+
+        // Check L2 norm is ~1.0
+        let mag: f32 = normalized.iter().map(|&x| x * x).sum::<f32>().sqrt();
+        assert!((mag - 1.0).abs() < 0.001);
     }
 }

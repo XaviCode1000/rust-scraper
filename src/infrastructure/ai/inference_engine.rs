@@ -348,14 +348,18 @@ impl InferenceEngine {
                 .first()
                 .ok_or_else(|| SemanticError::Inference("No output from model".to_string()))?;
 
-            // Convert to Vec<f32> by iterating over the tensor
-            // Using to_array_view for zero-copy access to tensor data
-            let embedding: Vec<f32> = output
+            // Convert to flat Vec<f32> and apply Mean Pooling + L2 Normalization
+            let embedding_flat: Vec<f32> = output
                 .to_array_view::<f32>()
                 .map_err(|e| SemanticError::Inference(format!("Failed to extract output: {}", e)))?
                 .iter()
                 .copied()
                 .collect();
+
+            // Apply Mean Pooling + L2 Normalization (sentence-transformers standard)
+            use crate::infrastructure::ai::embedding_ops::{l2_normalize_safe, mean_pool};
+            let pooled = mean_pool(&embedding_flat, seq_len, 384, &input.attention_mask);
+            let embedding = l2_normalize_safe(&pooled);
 
             Ok(embedding)
         })
