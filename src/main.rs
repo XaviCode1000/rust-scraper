@@ -488,19 +488,90 @@ async fn main() -> CliExit {
     // =========================================================================
     info!("Exporting results (format: {:?})...", args.export_format);
 
-    let processed_urls = match export_factory::process_results(
-        &results,
-        args.output.clone(),
-        args.export_format,
-        "export",
-        state_store.as_ref(),
-        args.resume,
-    ) {
-        Ok(urls) => urls,
-        Err(e) => {
-            warn!("Failed to export results: {}", e);
-            return CliExit::IoError(e.to_string());
-        },
+    let processed_urls = if args.clean_ai {
+        // AI semantic cleaning path
+        #[cfg(feature = "ai")]
+        {
+            use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{ModelConfig, SemanticCleanerImpl};
+            use rust_scraper::domain::DocumentChunk;
+            use rust_scraper::SemanticCleaner;
+            
+            info!("Initializing AI semantic cleaner...");
+            let config = ModelConfig::default();
+            let cleaner = match SemanticCleanerImpl::new(config).await {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("Failed to initialize semantic cleaner: {}", e);
+                    return CliExit::IoError(format!(
+                        "Failed to initialize AI semantic cleaner: {}. Ensure ONNX model is available.",
+                        e
+                    ));
+                }
+            };
+
+            // Pre-clean all content
+            let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> = Vec::with_capacity(results.len() * 2);
+            for result in &results {
+                // Use the `html` field from ScrapedContent - it's Option<String>
+                let html_content = result.html.as_deref().unwrap_or(&result.content);
+                let chunks_result: Result<Vec<rust_scraper::domain::DocumentChunk>, _> = cleaner.clean(html_content).await;
+                match chunks_result {
+                    Ok(chunks) => {
+                        if chunks.is_empty() {
+                            warn!("AI cleaner produced 0 chunks for: {}", result.url);
+                            // Fallback: use non-AI conversion for this page
+                            cleaned_chunks.push(DocumentChunk::from_scraped_content(result));
+                        } else {
+                            cleaned_chunks.extend(chunks);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to clean content for {}: {}. Using fallback.", result.url, e);
+                        cleaned_chunks.push(DocumentChunk::from_scraped_content(result));
+                    }
+                }
+            }
+
+            info!("AI cleaning complete: {} chunks from {} pages", cleaned_chunks.len(), results.len());
+
+            // Export cleaned chunks
+            match export_factory::process_results_with_chunks(
+                &cleaned_chunks,
+                args.output.clone(),
+                args.export_format,
+                "export",
+                state_store.as_ref(),
+                args.resume,
+            ) {
+                Ok(urls) => urls,
+                Err(e) => {
+                    warn!("Failed to export cleaned results: {}", e);
+                    return CliExit::IoError(e.to_string());
+                },
+            }
+        }
+
+        #[cfg(not(feature = "ai"))]
+        {
+            warn!("--clean-ai requires the 'ai' feature. Recompile with --features ai");
+            return CliExit::UsageError("AI semantic cleaning requires --features ai. Recompile with: cargo run --features ai".into());
+        }
+    } else {
+        // Standard export path (backward compatible)
+        match export_factory::process_results(
+            &results,
+            args.output.clone(),
+            args.export_format,
+            "export",
+            state_store.as_ref(),
+            args.resume,
+        ) {
+            Ok(urls) => urls,
+            Err(e) => {
+                warn!("Failed to export results: {}", e);
+                return CliExit::IoError(e.to_string());
+            },
+        }
     };
 
     // =========================================================================

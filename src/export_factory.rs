@@ -203,6 +203,66 @@ pub fn domain_from_url(url: &str) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Process pre-cleaned document chunks and export them.
+///
+/// This function is used when `--clean-ai` is enabled. It accepts
+/// `DocumentChunk` instances that already have embeddings populated
+/// by the `SemanticCleaner`, bypassing the simple field-mapping conversion.
+#[cfg(feature = "ai")]
+pub fn process_results_with_chunks(
+    chunks: &[crate::domain::DocumentChunk],
+    output_dir: PathBuf,
+    format: ExportFormat,
+    filename: &str,
+    state_store: Option<&crate::infrastructure::export::state_store::StateStore>,
+    resume_mode: bool,
+) -> Result<Vec<String>, ExporterError> {
+    info!("Processing {} cleaned chunks for export", chunks.len());
+
+    let exporter = create_exporter(output_dir, filename, format)?;
+
+    let mut processed_urls = Vec::new();
+    let mut export_state = if resume_mode {
+        if let Some(store) = state_store {
+            Some(store.load_or_default()?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    for chunk in chunks {
+        exporter.export(chunk.clone())?;
+
+        // Track URL — use chunk metadata if available
+        let url_str = chunk.url.clone();
+        processed_urls.push(url_str.clone());
+
+        if resume_mode {
+            if let Some(store) = state_store {
+                if let Some(ref mut state) = export_state {
+                    store.mark_processed(state, &url_str);
+                }
+            }
+        }
+    }
+
+    if resume_mode {
+        if let Some(store) = state_store {
+            if let Some(state) = export_state {
+                store.save(&state)?;
+            }
+        }
+    }
+
+    info!(
+        "✅ AI-cleaned export completed: {} chunks processed",
+        processed_urls.len()
+    );
+    Ok(processed_urls)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
