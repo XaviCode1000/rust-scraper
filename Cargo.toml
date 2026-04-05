@@ -149,6 +149,12 @@ toml = "0.8"
 # Cross-platform relative path calculation
 pathdiff = "0.2"
 
+# Markdown parsing for wiki-link conversion (event-based)
+# Replaces regex-based approach that couldn't handle GFM tables, footnotes, etc.
+pulldown-cmark = "0.13"
+# Markdown serialization for round-trip conversion
+pulldown-cmark-to-cmark = "22"
+
 # UUID for temp file generation (production-ready streaming)
 uuid = { version = "1", features = ["v4", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip"] }
