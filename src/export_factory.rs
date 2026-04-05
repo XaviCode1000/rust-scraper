@@ -221,7 +221,14 @@ pub fn process_results_with_chunks(
 
     let exporter = create_exporter(output_dir, filename, format)?;
 
-    let mut processed_urls = Vec::new();
+    // Track URLs before batch export
+    let processed_urls: Vec<String> = chunks.iter().map(|c| c.url.clone()).collect();
+
+    // Use export_batch to avoid per-chunk file open/close (which overwrites in VectorExporter)
+    if !chunks.is_empty() {
+        exporter.export_batch(chunks)?;
+    }
+
     let mut export_state = if resume_mode {
         if let Some(store) = state_store {
             Some(store.load_or_default()?)
@@ -232,26 +239,13 @@ pub fn process_results_with_chunks(
         None
     };
 
-    for chunk in chunks {
-        exporter.export(chunk.clone())?;
-
-        // Track URL — use chunk metadata if available
-        let url_str = chunk.url.clone();
-        processed_urls.push(url_str.clone());
-
-        if resume_mode {
-            if let Some(store) = state_store {
-                if let Some(ref mut state) = export_state {
-                    store.mark_processed(state, &url_str);
-                }
-            }
-        }
-    }
-
     if resume_mode {
         if let Some(store) = state_store {
-            if let Some(state) = export_state {
-                store.save(&state)?;
+            if let Some(ref mut state) = export_state {
+                for url_str in &processed_urls {
+                    store.mark_processed(state, url_str);
+                }
+                store.save(state)?;
             }
         }
     }
