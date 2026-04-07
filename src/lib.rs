@@ -688,7 +688,7 @@ pub struct Args {
 
     // ========== Target ==========
     /// URL to scrape (required unless using a subcommand)
-    #[arg(short, long, required_unless_present = "subcommand", env = "RUST_SCRAPER_URL")]
+    #[arg(short, long, env = "RUST_SCRAPER_URL")]
     #[clap(next_help_heading = "Target")]
     pub url: Option<String>,
 
