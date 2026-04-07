@@ -91,11 +91,16 @@ fn save_as_markdown(
             fs::create_dir_all(parent)?;
         }
 
-        let markdown_content = item
-            .html
-            .as_ref()
-            .map(|html| html_to_markdown::convert_to_markdown(html))
-            .unwrap_or_else(|| item.content.clone());
+        // Use clean content (readability) if available, fallback to HTML conversion (Bug #29 fix)
+        // Priority: content (clean) > html (raw with nav/footer/SVG noise)
+        let markdown_content = if !item.content.is_empty() {
+            item.content.clone()
+        } else {
+            item.html
+                .as_ref()
+                .map(|html| html_to_markdown::convert_to_markdown(html))
+                .unwrap_or_default()
+        };
 
         let mut processed = syntax_highlight::highlight_code_blocks(&markdown_content);
 

@@ -522,25 +522,45 @@ async fn main() -> CliExit {
                 }
             };
 
-            // Pre-clean all content
+            // Pre-clean all content CONCURRENTLY (Bug #29 fix)
+            info!("Starting AI cleaning for {} pages concurrently...", results.len());
+            
+            // Share cleaner via Arc for concurrent access
+            use std::sync::Arc;
+            let cleaner = Arc::new(cleaner);
+            
+            // Create concurrent cleaning tasks using tokio::join_all
+            let cleaning_tasks: Vec<_> = results
+                .iter()
+                .map(|result| {
+                    let html_content = result.html.clone().unwrap_or_else(|| result.content.clone());
+                    let url = result.url.clone();
+                    let cleaner = Arc::clone(&cleaner);
+                    async move {
+                        let chunks_result = cleaner.clean(&html_content).await;
+                        (url, chunks_result, result.clone())
+                    }
+                })
+                .collect();
+
+            // Execute all cleaning tasks concurrently
+            let cleaning_results = futures::future::join_all(cleaning_tasks).await;
+            
+            // Process results
             let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> = Vec::with_capacity(results.len() * 2);
-            for result in &results {
-                // Use the `html` field from ScrapedContent - it's Option<String>
-                let html_content = result.html.as_deref().unwrap_or(&result.content);
-                let chunks_result: Result<Vec<rust_scraper::domain::DocumentChunk>, _> = cleaner.clean(html_content).await;
+            for (url, chunks_result, result) in cleaning_results {
                 match chunks_result {
                     Ok(chunks) => {
                         if chunks.is_empty() {
-                            warn!("AI cleaner produced 0 chunks for: {}", result.url);
-                            // Fallback: use non-AI conversion for this page
-                            cleaned_chunks.push(DocumentChunk::from_scraped_content(result));
+                            warn!("AI cleaner produced 0 chunks for: {}", url);
+                            cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
                         } else {
                             cleaned_chunks.extend(chunks);
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to clean content for {}: {}. Using fallback.", result.url, e);
-                        cleaned_chunks.push(DocumentChunk::from_scraped_content(result));
+                        warn!("Failed to clean content for {}: {}. Using fallback.", url, e);
+                        cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
                     }
                 }
             }
