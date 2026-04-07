@@ -109,7 +109,7 @@ impl UserAgentCache {
     /// Fetch user agents from API and save to cache
     async fn fetch_and_cache() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let client = Client::builder()
-            .emulation(Emulation::Chrome131)
+            .emulation(Emulation::Chrome145)
             .timeout(Duration::from_secs(5))
             .build()?;
 

@@ -21,7 +21,14 @@ use crate::user_agent::UserAgentCache;
 use std::time::Duration;
 use tracing::{debug, warn};
 use wreq::Client;
+use wreq::header::{HeaderMap, HeaderValue, HeaderName};
 use wreq_util::Emulation;
+
+/// Client Hints headers for Chrome 145 (2026 Standard)
+/// These headers must match the TLS fingerprint to avoid "Headless Spoofing" detection
+const CLIENT_HINTS_SEC_CH_UA: &str = "\"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\", \"Not=A?Brand\";v=\"99\"";
+const CLIENT_HINTS_SEC_CH_UA_MOBILE: &str = "?0";
+const CLIENT_HINTS_SEC_CH_UA_PLATFORM: &str = "\"Linux\"";
 
 /// Result type for HttpClient operations
 pub type HttpResult<T> = Result<T, HttpError>;
@@ -198,8 +205,32 @@ impl HttpClient {
     /// Returns `ScraperError::Config` if client creation fails
     pub fn new(config: HttpClientConfig) -> Result<Self, ScraperError> {
         let pool_size = std::cmp::max(3, num_cpus::get() - 1);
+        
+        // Build Client Hints headers for Chrome 145 (2026 Standard)
+        // These MUST match the TLS fingerprint to avoid "Headless Spoofing" detection
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("sec-ch-ua"),
+            HeaderValue::from_static(CLIENT_HINTS_SEC_CH_UA),
+        );
+        headers.insert(
+            HeaderName::from_static("sec-ch-ua-mobile"),
+            HeaderValue::from_static(CLIENT_HINTS_SEC_CH_UA_MOBILE),
+        );
+        headers.insert(
+            HeaderName::from_static("sec-ch-ua-platform"),
+            HeaderValue::from_static(CLIENT_HINTS_SEC_CH_UA_PLATFORM),
+        );
+        // Additional security headers (Sec-Fetch)
+        headers.insert(HeaderName::from_static("sec-fetch-dest"), HeaderValue::from_static("document"));
+        headers.insert(HeaderName::from_static("sec-fetch-mode"), HeaderValue::from_static("navigate"));
+        headers.insert(HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static("none"));
+        headers.insert(HeaderName::from_static("sec-fetch-user"), HeaderValue::from_static("?1"));
+        headers.insert(HeaderName::from_static("upgrade-insecure-requests"), HeaderValue::from_static("1"));
+        
         let builder = Client::builder()
-            .emulation(Emulation::Chrome131) // TLS fingerprint impersonation (Layer 2 WAF Evasion)
+            .emulation(Emulation::Chrome145) // TLS fingerprint impersonation (Layer 2 WAF Evasion) - Updated to Chrome 145 for 2026
+            .default_headers(headers)
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(pool_size)
@@ -464,7 +495,7 @@ pub fn create_http_client() -> Result<Client, ScraperError> {
     tracing::debug!("Using user agent: {}", user_agent);
 
     let client = Client::builder()
-        .emulation(Emulation::Chrome131) // TLS fingerprint impersonation
+        .emulation(Emulation::Chrome145) // TLS fingerprint impersonation (Updated to Chrome 145 for 2026)
         .user_agent(user_agent)
         .timeout(Duration::from_secs(30))
         .gzip(true)

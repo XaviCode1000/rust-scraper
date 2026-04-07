@@ -120,7 +120,7 @@ async fn download_single_asset(
     use wreq_util::Emulation;
 
     let client = Client::builder()
-        .emulation(Emulation::Chrome131)
+        .emulation(Emulation::Chrome145)
         .timeout(std::time::Duration::from_secs(30))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .build()

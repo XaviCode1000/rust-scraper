@@ -239,7 +239,7 @@ impl SitemapParser {
         Self {
             config: SitemapConfig::default(),
             client: wreq::Client::builder()
-                .emulation(wreq_util::Emulation::Chrome131)
+                .emulation(wreq_util::Emulation::Chrome145)
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("BUG: failed to build HTTP client"),
@@ -252,7 +252,7 @@ impl SitemapParser {
         Self {
             config,
             client: wreq::Client::builder()
-                .emulation(wreq_util::Emulation::Chrome131)
+                .emulation(wreq_util::Emulation::Chrome145)
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("BUG: failed to build HTTP client"),

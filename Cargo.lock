@@ -3443,6 +3443,7 @@ dependencies = [
 name = "rust_scraper"
 version = "1.1.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "async-compression",
  "async-trait",
@@ -3469,6 +3470,7 @@ dependencies = [
  "mockall",
  "ndarray 0.17.2",
  "num_cpus",
+ "once_cell",
  "ort",
  "pathdiff",
  "pulldown-cmark",

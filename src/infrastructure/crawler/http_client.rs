@@ -41,7 +41,7 @@ pub fn create_rate_limited_client(delay_ms: u64) -> Result<Client> {
     let pool_size = std::cmp::max(3, num_cpus::get() - 1);
 
     let client = Client::builder()
-        .emulation(Emulation::Chrome131)
+        .emulation(Emulation::Chrome145)
         .pool_max_idle_per_host(pool_size)
         .pool_idle_timeout(Duration::from_secs(60))
         .timeout(Duration::from_secs(30))

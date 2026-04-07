@@ -106,7 +106,7 @@ impl Downloader {
         })?;
 
         let client = Client::builder()
-            .emulation(Emulation::Chrome131)
+            .emulation(Emulation::Chrome145)
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .user_agent(&config.user_agent)
             .build()
