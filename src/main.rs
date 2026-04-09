@@ -31,7 +31,7 @@
 
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use rust_scraper::infrastructure::obsidian::{detect_vault, open_note};
+use rust_scraper::infrastructure::obsidian::detect_vault;
 use rust_scraper::{
     adapters::tui,
     application::{
@@ -48,7 +48,6 @@ use rust_scraper::{
     export_factory, save_results, validate_and_parse_url, Args, Commands, CrawlerConfig,
     ObsidianOptions, ScraperConfig, UserAgentCache,
 };
-use slug::slugify;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -645,46 +644,10 @@ async fn main() -> CliExit {
     }
 
     // =========================================================================
-    // 16c. Open in Obsidian (if vault detected and requested)
+    // 16c. Open in Obsidian — REMOVED
+    // Users open notes manually. Auto-opening N notes saturates X11/Wayland
+    // clients and causes "Maximum number of clients reached" errors.
     // =========================================================================
-    if vault_path.is_some() && args.obsidian_rich_metadata {
-        // Try to open the saved notes in Obsidian
-        for item in &results {
-            let file_path = if args.quick_save {
-                // Calculate the filename from the URL
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let url_str = item.url.as_str();
-                // Use url.path() which returns a PathBuf (owned)
-                let url = url::Url::parse(url_str).ok();
-                let path_segment = url
-                    .as_ref()
-                    .and_then(|u| u.path_segments())
-                    .and_then(|mut p| p.next_back())
-                    .unwrap_or("untitled");
-                let slug = slugify(path_segment);
-                format!("_inbox/{}-{}.md", today, slug)
-            } else {
-                // Use domain-based folder structure
-                let url_str = item.url.as_str();
-                let domain = export_factory::domain_from_url(url_str);
-                let url = url::Url::parse(url_str).ok();
-                let path_segment = url
-                    .as_ref()
-                    .and_then(|u| u.path_segments())
-                    .and_then(|mut p| p.next_back())
-                    .unwrap_or("index");
-                let slug = slugify(path_segment);
-                format!("{}/{}.md", domain, slug)
-            };
-
-            if let Some(ref vault) = vault_path {
-                match open_note(vault, std::path::Path::new(&file_path)) {
-                    Ok(()) => info!("Opened in Obsidian: {}", item.title),
-                    Err(e) => warn!("Failed to open in Obsidian: {}", e),
-                }
-            }
-        }
-    }
 
     // Summary of downloaded assets
     let total_assets: usize = results.iter().map(|r| r.assets.len()).sum();
