@@ -19,7 +19,27 @@ Rust Scraper es una herramienta de línea de comandos que te permite descargar p
 
 ## 📦 Instalación
 
-### Compilar desde código fuente
+### Opción 1: Instalar con Cargo (Recomendado)
+
+```bash
+cd rust-scraper
+cargo install --path . --features "ai,full"
+```
+
+Esto compila en modo release e instala el binario automáticamente en `~/.cargo/bin/`, listo para usar desde cualquier directorio:
+
+```bash
+rust_scraper --help
+```
+
+**Features incluidas con `ai,full`:**
+- ✅ Limpieza semántica con IA (modelo ONNX local)
+- ✅ Detección y descarga de imágenes
+- ✅ Detección y descarga de documentos (PDF, DOCX, XLSX)
+
+> **Nota:** La primera compilación tarda ~4 minutos. El modelo de IA (~90MB) se descarga y cachea automáticamente en `~/.cache/rust-scraper/models/` al primer uso.
+
+### Opción 2: Compilar manualmente
 
 ```bash
 git clone https://github.com/XaviCode1000/rust-scraper.git
@@ -30,9 +50,9 @@ cargo build --release
 Luego copia el binario a tu PATH:
 
 ```bash
-cp target/release/rust_scraper ~/.local/bin/rust-scraper
+cp target/release/rust_scraper ~/.local/bin/rust_scraper
 # o en tu sistema:
-sudo cp target/release/rust_scraper /usr/local/bin/rust-scraper
+sudo cp target/release/rust_scraper /usr/local/bin/rust_scraper
 ```
 
 ### Requisitos del sistema
@@ -40,26 +60,16 @@ sudo cp target/release/rust_scraper /usr/local/bin/rust-scraper
 - **Rust:** 1.88 o superior
 - **Sistema operativo:** Linux, macOS o Windows
 
-### Características opcionales
-
-| Característica | Descripción |
-|---------------|-------------|
-| Limpieza con IA | Extrae solo el contenido relevante usando modelos locales |
-| Descarga de imágenes | Detecta y descarga imágenes automáticamente |
-| Descarga de documentos | Detecta y descarga PDFs, DOCX, XLSX, etc. |
-
-Para compilar con características opcionales, consulta la [guía de desarrollo](DEVELOPMENT.md).
-
 ---
 
 ## 🎯 Uso rápido
 
-Una vez instalado, ejecuta `rust-scraper` desde tu terminal:
+Una vez instalado, ejecuta `rust_scraper` desde tu terminal:
 
 ### Tu primer raspado
 
 ```bash
-rust-scraper --url https://example.com
+rust_scraper --url https://example.com
 ```
 
 Esto descarga la página principal y guarda el contenido en Markdown en la carpeta `output/`.
@@ -67,7 +77,7 @@ Esto descarga la página principal y guarda el contenido en Markdown en la carpe
 ### Descubrir páginas automáticamente
 
 ```bash
-rust-scraper --url https://example.com --use-sitemap
+rust_scraper --url https://example.com --use-sitemap
 ```
 
 Encuentra todas las páginas del sitio usando su sitemap.
@@ -75,7 +85,7 @@ Encuentra todas las páginas del sitio usando su sitemap.
 ### Modo interactivo (recomendado)
 
 ```bash
-rust-scraper --url https://example.com --interactive
+rust_scraper --url https://example.com --interactive
 ```
 
 Se abre una interfaz en la terminal donde puedes:
@@ -98,7 +108,7 @@ Se abre una interfaz en la terminal donde puedes:
 
 ```bash
 # Guardar directamente en tu vault
-rust-scraper --url https://example.com/articulo --obsidian-wiki-links --quick-save
+rust_scraper --url https://example.com/articulo --obsidian-wiki-links --quick-save
 ```
 
 Detecta tu vault automáticamente y guarda la nota en `_inbox/`.
@@ -106,7 +116,7 @@ Detecta tu vault automáticamente y guarda la nota en `_inbox/`.
 ### Con limpieza de IA
 
 ```bash
-rust-scraper --url https://example.com --clean-ai --export-format jsonl
+rust_scraper --url https://example.com --clean-ai --export-format jsonl
 ```
 
 La IA filtra menús, publicidad y contenido irrelevante, quedándose solo con el texto importante.
@@ -128,25 +138,25 @@ La IA filtra menús, publicidad y contenido irrelevante, quedándose solo con el
 
 ```bash
 # Guardar en una carpeta específica
-rust-scraper --url https://example.com --output ./mi-carpeta
+rust_scraper --url https://example.com --output ./mi-carpeta
 
 # Descargar imágenes y documentos
-rust-scraper --url https://example.com --download-images --download-documents
+rust_scraper --url https://example.com --download-images --download-documents
 
 # Limitar a 50 páginas con 2 segundos entre peticiones
-rust-scraper --url https://example.com --max-pages 50 --delay-ms 2000
+rust_scraper --url https://example.com --max-pages 50 --delay-ms 2000
 
 # Previsualizar URLs sin descargar nada
-rust-scraper --url https://example.com --dry-run
+rust_scraper --url https://example.com --dry-run
 
 # Modo silencioso (sin barras de progreso)
-rust-scraper --url https://example.com --quiet
+rust_scraper --url https://example.com --quiet
 ```
 
 ### Reanudar un raspado interrumpido
 
 ```bash
-rust-scraper --url https://example.com --use-sitemap --max-pages 100 --resume
+rust_scraper --url https://example.com --use-sitemap --max-pages 100 --resume
 ```
 
 Si se interrumpe, vuelve a ejecutar el mismo comando y continúa donde lo dejó.
@@ -156,7 +166,7 @@ Si se interrumpe, vuelve a ejecutar el mismo comando y continúa donde lo dejó.
 Para ver todas las opciones disponibles, ejecuta:
 
 ```bash
-rust-scraper --help
+rust_scraper --help
 ```
 
 O consulta la [referencia completa del CLI](docs/CLI.md) con todas las opciones, variables de entorno y ejemplos avanzados.
