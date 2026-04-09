@@ -91,15 +91,17 @@ fn save_as_markdown(
             fs::create_dir_all(parent)?;
         }
 
-        // Use clean content (readability) if available, fallback to HTML conversion (Bug #29 fix)
-        // Priority: content (clean) > html (raw with nav/footer/SVG noise)
-        let markdown_content = if !item.content.is_empty() {
+        // Convert raw HTML to Markdown to preserve headings, code blocks, links,
+        // tables, and lists. The readability-extracted text (item.content) loses
+        // all HTML structure, so we prefer the raw HTML for Markdown output.
+        // For Text format, item.content (readability text) is still used.
+        let markdown_content = if let Some(html) = &item.html {
+            html_to_markdown::convert_to_markdown(html)
+        } else if !item.content.is_empty() {
+            // Fallback: use readability text directly (no structure)
             item.content.clone()
         } else {
-            item.html
-                .as_ref()
-                .map(|html| html_to_markdown::convert_to_markdown(html))
-                .unwrap_or_default()
+            String::new()
         };
 
         let mut processed = syntax_highlight::highlight_code_blocks(&markdown_content);
