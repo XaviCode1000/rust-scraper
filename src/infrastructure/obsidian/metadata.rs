@@ -99,11 +99,17 @@ pub fn compute_reading_time(word_count: usize) -> usize {
 /// Detect the language of text using whatlang.
 ///
 /// Only returns a language if detection is reliable.
-/// Caps input at 1024 bytes for performance.
+/// Caps input at ~1024 bytes for performance (always on char boundary).
 pub fn detect_language(content: &str) -> Option<String> {
-    // Limit to first 1024 bytes for performance
+    // Limit to first ~1024 bytes for performance, always on char boundary
     let sample = if content.len() > 1024 {
-        &content[..1024]
+        let end = content
+            .char_indices()
+            .take_while(|(idx, _)| *idx <= 1024)
+            .last()
+            .map(|(idx, c)| idx + c.len_utf8())
+            .unwrap_or(0);
+        &content[..end]
     } else {
         content
     };
