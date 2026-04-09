@@ -1,14 +1,18 @@
 //! HTML to Markdown conversion
 //!
 //! Uses html-to-markdown-rs crate for structure-preserving conversion.
+//! HTML boilerplate (nav, sidebar, SVG, scripts) is stripped before
+//! conversion for Obsidian-quality output.
 
-use html_to_markdown_rs::{convert, ConversionOptions, HeadingStyle};
+use html_to_markdown_rs::{convert, CodeBlockStyle, ConversionOptions, HeadingStyle};
 use tracing::warn;
 
-/// Convert HTML to well-structured Markdown
+/// Convert HTML to well-structured Markdown.
 ///
-/// Uses ATX-style headings (# ## ###) for better readability.
-/// Falls back to plain text if conversion fails.
+/// Pipeline:
+/// 1. Remove boilerplate (scripts, nav, sidebar, SVG, page chrome)
+/// 2. Convert clean HTML → Markdown with ATX headings and fenced code blocks
+/// 3. Fall back to plain text if conversion fails
 ///
 /// # Examples
 ///
@@ -20,12 +24,17 @@ use tracing::warn;
 /// assert!(md.contains("# Title"));
 /// ```
 pub fn convert_to_markdown(html: &str) -> String {
+    // Step 1: Remove boilerplate (nav, sidebar, scripts, SVG, etc.)
+    let cleaned = crate::infrastructure::converter::html_cleaner::clean_html(html);
+
+    // Step 2: Convert clean HTML → Markdown
     let options = ConversionOptions {
         heading_style: HeadingStyle::Atx,
+        code_block_style: CodeBlockStyle::Backticks,
         ..Default::default()
     };
 
-    convert(html, Some(options)).unwrap_or_else(|e| {
+    convert(&cleaned, Some(options)).unwrap_or_else(|e| {
         warn!("HTML to Markdown conversion failed: {}, falling back", e);
         crate::infrastructure::scraper::fallback::extract_text(html)
     })
@@ -64,5 +73,22 @@ mod tests {
         let html = "";
         let md = convert_to_markdown(html);
         assert_eq!(md, "");
+    }
+
+    #[test]
+    fn test_code_block_uses_backticks() {
+        let html = "<pre><code>fn main() {}</code></pre>";
+        let md = convert_to_markdown(html);
+        assert!(md.contains("```"), "Expected fenced code blocks, got: {}", md);
+    }
+
+    #[test]
+    fn test_boilerplate_removed() {
+        let html = "<html><body><nav>Menu</nav><main><h1>Title</h1><p>Content</p></main><footer>Copyright</footer></body></html>";
+        let md = convert_to_markdown(html);
+        assert!(!md.contains("Menu"));
+        assert!(!md.contains("Copyright"));
+        assert!(md.contains("Title"));
+        assert!(md.contains("Content"));
     }
 }

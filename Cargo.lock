@@ -1042,6 +1042,21 @@ dependencies = [
 
 [[package]]
 name = "dom_query"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4af481d52c89bfe91ca11be1e5be9d6106f53ba5960cc28cddd3ac424fbd13f2"
+dependencies = [
+ "bit-set 0.8.0",
+ "cssparser 0.36.0",
+ "foldhash 0.2.0",
+ "html5ever 0.36.1",
+ "precomputed-hash",
+ "selectors 0.33.0",
+ "tendril",
+]
+
+[[package]]
+name = "dom_query"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d9c2e7f1d22d0f2ce07626d259b8a55f4a47cb0938d4006dd8ae037f17d585e"
@@ -1602,6 +1617,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "html-cleaning"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7cfa21711b17b9dc0d4e3e094bdc5883a47a5ea552b4d808d879f9343786f75"
+dependencies = [
+ "dom_query 0.24.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "html-escape"
 version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2108,7 +2133,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63a92189b284405721b29a7a50f5024a8f04dc6eebba7ff92c2e79fbe91226b"
 dependencies = [
- "dom_query",
+ "dom_query 0.25.1",
  "hashbrown 0.16.1",
  "once_cell",
  "regex",
@@ -3455,12 +3480,14 @@ dependencies = [
  "crossterm",
  "dashmap 6.1.0",
  "dirs 5.0.1",
+ "dom_query 0.24.0",
  "flate2",
  "fs2",
  "futures",
  "governor",
  "hf-hub",
  "htmd",
+ "html-cleaning",
  "html-to-markdown-rs",
  "indicatif 0.17.11",
  "legible",
@@ -3718,6 +3745,25 @@ dependencies = [
  "phf 0.11.3",
  "phf_codegen 0.11.3",
  "precomputed-hash",
+ "servo_arc",
+ "smallvec 1.15.1",
+]
+
+[[package]]
+name = "selectors"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "feef350c36147532e1b79ea5c1f3791373e61cbd9a6a2615413b3807bb164fb7"
+dependencies = [
+ "bitflags",
+ "cssparser 0.36.0",
+ "derive_more 2.1.1",
+ "log",
+ "new_debug_unreachable",
+ "phf 0.13.1",
+ "phf_codegen 0.13.1",
+ "precomputed-hash",
+ "rustc-hash",
  "servo_arc",
  "smallvec 1.15.1",
 ]

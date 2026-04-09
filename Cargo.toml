@@ -78,6 +78,14 @@ futures = "0.3"
 # Pinned to <2.21 to avoid edition2024 requirement (needs Rust 1.85+)
 html-to-markdown-rs = ">=2.3, <2.21"
 
+# HTML cleaning / boilerplate removal (nav, sidebar, SVG, scripts)
+# Used before Markdown conversion for Obsidian-quality output
+html-cleaning = "0.3"
+
+# DOM manipulation for HTML cleaning pipeline
+# Pinned to 0.24 to match html-cleaning's dependency
+dom_query = "0.24"
+
 # Syntax highlighting for code blocks
 syntect = "5"
 
