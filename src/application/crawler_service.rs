@@ -717,19 +717,85 @@ pub async fn crawl_with_sitemap(
         CrawlError::Sitemap(e.to_string())
     })?;
 
-    // Convert to DiscoveredUrl
-    // Following own-borrow-over-clone: use Url directly, not String
-    // Following err-no-unwrap-prod: propagate parse errors instead of silent fallback
-    let base_url = Url::parse(&sitemap_url).map_err(|e| {
-        tracing::error!("Invalid sitemap URL '{}': {}", sitemap_url, e);
-        CrawlError::InvalidUrl(e.to_string())
-    })?;
-    let discovered = urls
+    // Validate sitemap relevance: check if any URLs share a path prefix
+    // with the target URL. This handles cases where robots.txt points to
+    // an unrelated sitemap (e.g. blog sitemap for a docs site).
+    let base = Url::parse(base_url).map_err(|e| CrawlError::InvalidUrl(e.to_string()))?;
+    let target_path = base.path().to_string();
+    let relevant_urls: Vec<_> = urls
         .into_iter()
-        .map(|url| DiscoveredUrl::html(url, 0, base_url.clone()))
+        .filter(|url| url.path().starts_with(&target_path))
+        .collect();
+
+    // If no relevant URLs found, try sub-path sitemaps as fallback
+    if relevant_urls.is_empty() {
+        tracing::warn!(
+            "sitemap {} no tiene URLs que coincidan con la ruta objetivo {}, intentando sitemaps de subruta",
+            sitemap_url,
+            target_path
+        );
+        return crawl_with_subpath_sitemaps(base_url, &base, &parser).await;
+    }
+
+    // Following own-borrow-over-clone: use Url directly, not String
+    let discovered = relevant_urls
+        .into_iter()
+        .map(|url| DiscoveredUrl::html(url, 0, base.clone()))
         .collect();
 
     Ok(discovered)
+}
+
+/// Try sub-path sitemaps when the discovered sitemap has no relevant URLs
+///
+/// For nested sites like `https://example.com/docs/en/`, this tries
+/// `/docs/sitemap.xml`, `/docs/en/sitemap.xml`, etc.
+///
+/// Following **own-borrow-over-clone**: Accepts `&Url` not `&String`.
+/// Following **err-no-unwrap-prod**: Proper error handling throughout.
+async fn crawl_with_subpath_sitemaps(
+    base_url: &str,
+    base: &Url,
+    parser: &SitemapParser,
+) -> Result<Vec<DiscoveredUrl>, CrawlError> {
+    let path = base.path();
+    let segments: Vec<_> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let mut all_urls = Vec::new();
+
+    // Try up to 3 path levels: /docs, /docs/en, /docs/en/quickstart
+    for i in 1..=segments.len().min(3) {
+        let sub_path = segments[..i].join("/");
+        for sitemap_name in &["sitemap.xml", "sitemap_index.xml"] {
+            let candidate = format!("/{}/{}", sub_path, sitemap_name);
+            if let Ok(sitemap_url) = base.join(&candidate) {
+                let sitemap_str = sitemap_url.as_str();
+                tracing::debug!("Trying sub-path sitemap: {}", sitemap_str);
+                if let Ok(response) = wreq::Client::new().head(sitemap_str).send().await {
+                    if response.status().is_success() {
+                        tracing::info!("Found sub-path sitemap: {}", sitemap_str);
+                        if let Ok(urls) = parser.parse_from_url(sitemap_str).await {
+                            tracing::info!(
+                                "Parsed {} URLs from sub-path sitemap {}",
+                                urls.len(),
+                                sitemap_str
+                            );
+                            all_urls.extend(urls);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if all_urls.is_empty() {
+        tracing::warn!("no se encontraron sitemaps de subruta para {}", base_url);
+        Ok(Vec::new())
+    } else {
+        Ok(all_urls
+            .into_iter()
+            .map(|url| DiscoveredUrl::html(url, 0, base.clone()))
+            .collect())
+    }
 }
 
 /// Auto-discover sitemap URL from robots.txt or fallback
