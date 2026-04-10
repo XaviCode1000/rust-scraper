@@ -103,7 +103,8 @@ mod tests {
 
     #[test]
     fn test_clean_removes_svg() {
-        let html = "<html><body><nav><svg>icon</svg></nav><article><h1>Title</h1></article></body></html>";
+        let html =
+            "<html><body><nav><svg>icon</svg></nav><article><h1>Title</h1></article></body></html>";
         let cleaned = clean_html(html);
         assert!(!cleaned.contains("<svg>"));
         assert!(!cleaned.contains("<nav>"));

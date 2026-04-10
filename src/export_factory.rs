@@ -19,7 +19,7 @@ pub fn create_exporter(
     filename: &str,
     format: ExportFormat,
 ) -> Result<Box<dyn Exporter>, ExporterError> {
-    let config = ExporterConfig::new(output_dir.clone(), format, filename);
+    let config = ExporterConfig::new(output_dir.clone(), format, filename).with_append(true);
 
     match format {
         ExportFormat::Jsonl => {
@@ -41,18 +41,21 @@ pub fn create_exporter(
 
             if vector_path.exists() {
                 info!("Detected Vector format - {:?} exists", vector_path);
-                let config = ExporterConfig::new(output_dir, ExportFormat::Vector, filename);
+                let config = ExporterConfig::new(output_dir, ExportFormat::Vector, filename)
+                    .with_append(true);
                 let exporter = VectorExporter::new(config);
                 Ok(Box::new(exporter))
             } else if jsonl_path.exists() {
                 info!("Detected JSONL format - {:?} exists", jsonl_path);
-                let config = ExporterConfig::new(output_dir, ExportFormat::Jsonl, filename);
+                let config = ExporterConfig::new(output_dir, ExportFormat::Jsonl, filename)
+                    .with_append(true);
                 let exporter = jsonl_exporter::JsonlExporter::new(config);
                 Ok(Box::new(exporter))
             } else {
                 // Fallback to default Jsonl
                 info!("No existing export, using default Jsonl format");
-                let config = ExporterConfig::new(output_dir, ExportFormat::Jsonl, filename);
+                let config = ExporterConfig::new(output_dir, ExportFormat::Jsonl, filename)
+                    .with_append(true);
                 let exporter = jsonl_exporter::JsonlExporter::new(config);
                 Ok(Box::new(exporter))
             }
@@ -170,7 +173,7 @@ pub fn process_results(
     }
 
     info!(
-        "✅ Export completed: {} documents processed",
+        "✅ Export completado: {} documentos procesados",
         processed_urls.len()
     );
     Ok(processed_urls)

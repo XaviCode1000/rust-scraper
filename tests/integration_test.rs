@@ -19,6 +19,7 @@ use walkdir::WalkDir;
 // ============================================================================
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_scraper_can_fetch_simple_page() {
     // This test fetches a real page - skip in CI without network
     // Arrange
@@ -91,6 +92,7 @@ fn test_args_has_required_fields() {
         obsidian_relative_assets: false,
         vault: None,
         quick_save: false,
+        one_file_per_url: false,
         obsidian_rich_metadata: false,
         // New crawler settings
         max_depth: 2,
@@ -130,6 +132,7 @@ fn test_args_has_required_fields() {
 // ============================================================================
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_scrape_handles_404_gracefully() {
     // Arrange
     let url =

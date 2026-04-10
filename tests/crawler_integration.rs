@@ -98,7 +98,7 @@ fn test_is_internal_link() {
 /// This test is ignored by default to avoid network calls.
 /// Run with: `cargo test --test crawler_integration -- --ignored`
 #[tokio::test]
-#[ignore]
+#[ignore = "requires network - url_queue uses blocking_lock() which panics inside tokio runtime"]
 async fn test_crawl_site_small() {
     let seed = Url::parse("https://example.com").unwrap();
     let config = CrawlerConfig::builder(seed)
@@ -118,7 +118,7 @@ async fn test_crawl_site_small() {
 ///
 /// This test is ignored by default to avoid network calls.
 #[tokio::test]
-#[ignore]
+#[ignore = "requires network - url_queue uses blocking_lock() which panics inside tokio runtime"]
 async fn test_discover_urls() {
     let seed = Url::parse("https://example.com").unwrap();
     let config = CrawlerConfig::new(seed);
@@ -138,7 +138,7 @@ async fn test_discover_urls() {
 ///
 /// This test is ignored by default to avoid network calls.
 #[tokio::test]
-#[ignore]
+#[ignore = "requires network - url_queue uses blocking_lock() which panics inside tokio runtime"]
 async fn test_crawl_with_sitemap() {
     use rust_scraper::crawl_with_sitemap;
 

@@ -57,13 +57,23 @@ impl JsonlExporter {
             ExporterError::WriteError(format!("failed to acquire file lock: {}", e))
         })?;
 
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(self.config.append)
-            .truncate(!self.config.append)
-            .open(&path)
-            .map_err(|e| ExporterError::WriteError(format!("{}: {}", path.display(), e)))?;
+        // Fix: Only truncate if file doesn't exist yet.
+        // Prevents data loss when writer() is called multiple times
+        // (once per document in export(), once per batch in export_batch())
+        let file_exists = path.exists();
+        // When file exists: open in append mode (preserve content).
+        // When file does not exist: create + write + truncate (fresh start).
+        // Split into two branches to avoid clippy warning on .write + .append.
+        let file = if file_exists {
+            OpenOptions::new().create(true).append(true).open(&path)
+        } else {
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+        }
+        .map_err(|e| ExporterError::WriteError(format!("{}: {}", path.display(), e)))?;
 
         // Lock released automatically on drop (RAII)
         Ok(BufWriter::new(file))

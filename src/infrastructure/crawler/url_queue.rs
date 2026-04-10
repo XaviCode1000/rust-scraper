@@ -52,13 +52,15 @@ impl UrlQueue {
     pub fn push(&self, url: DiscoveredUrl) -> bool {
         let url_str = url.url.as_str().to_string();
 
-        // Check and insert into seen set (atomic operation)
-        if self.seen.contains(&url_str) {
-            debug!("Duplicate URL in queue: {}", url_str);
+        // Fix Bug 2: Use atomic insert() instead of separate contains() + insert()
+        // DashSet::insert() returns false if the value already exists,
+        // making this a single atomic check-and-insert operation.
+        // Prevents race condition where two threads both see contains()=false
+        // then both insert().
+        if !self.seen.insert(url_str) {
+            debug!("Duplicate URL in queue: {}", url.url);
             return false;
         }
-
-        self.seen.insert(url_str);
 
         // Add to queue
         let mut queue = self.queue.blocking_lock();
@@ -75,6 +77,19 @@ impl UrlQueue {
     pub fn pop(&self) -> Option<DiscoveredUrl> {
         let mut queue = self.queue.blocking_lock();
         queue.pop()
+    }
+
+    /// Drain all pending URLs from the internal queue into a VecDeque.
+    ///
+    /// Used to transfer discovered links from the deduplicated UrlQueue
+    /// to the main crawl loop's VecDeque work queue.
+    ///
+    /// # Returns
+    ///
+    /// VecDeque of all pending URLs (queue is emptied)
+    pub fn drain_all(&self) -> std::collections::VecDeque<DiscoveredUrl> {
+        let mut queue = self.queue.blocking_lock();
+        std::collections::VecDeque::from(std::mem::take(&mut *queue))
     }
 
     /// Get the current queue length
@@ -219,5 +234,26 @@ mod tests {
         }
 
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_url_queue_drain_all() {
+        let queue = UrlQueue::new();
+
+        queue.push(create_test_url("/page1"));
+        queue.push(create_test_url("/page2"));
+        queue.push(create_test_url("/page3"));
+
+        assert_eq!(queue.len(), 3);
+
+        let drained = queue.drain_all();
+
+        assert_eq!(drained.len(), 3);
+        assert!(queue.is_empty());
+
+        // Re-pushing same URLs should fail (dedup via seen set)
+        assert!(!queue.push(create_test_url("/page1")));
+        assert!(!queue.push(create_test_url("/page2")));
+        assert!(!queue.push(create_test_url("/page3")));
     }
 }

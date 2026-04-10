@@ -20,13 +20,14 @@ use crate::error::ScraperError;
 use crate::user_agent::UserAgentCache;
 use std::time::Duration;
 use tracing::{debug, warn};
+use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::Client;
-use wreq::header::{HeaderMap, HeaderValue, HeaderName};
 use wreq_util::Emulation;
 
 /// Client Hints headers for Chrome 145 (2026 Standard)
 /// These headers must match the TLS fingerprint to avoid "Headless Spoofing" detection
-const CLIENT_HINTS_SEC_CH_UA: &str = "\"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\", \"Not=A?Brand\";v=\"99\"";
+const CLIENT_HINTS_SEC_CH_UA: &str =
+    "\"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\", \"Not=A?Brand\";v=\"99\"";
 const CLIENT_HINTS_SEC_CH_UA_MOBILE: &str = "?0";
 const CLIENT_HINTS_SEC_CH_UA_PLATFORM: &str = "\"Linux\"";
 
@@ -205,7 +206,7 @@ impl HttpClient {
     /// Returns `ScraperError::Config` if client creation fails
     pub fn new(config: HttpClientConfig) -> Result<Self, ScraperError> {
         let pool_size = std::cmp::max(3, num_cpus::get() - 1);
-        
+
         // Build Client Hints headers for Chrome 145 (2026 Standard)
         // These MUST match the TLS fingerprint to avoid "Headless Spoofing" detection
         let mut headers = HeaderMap::new();
@@ -222,12 +223,27 @@ impl HttpClient {
             HeaderValue::from_static(CLIENT_HINTS_SEC_CH_UA_PLATFORM),
         );
         // Additional security headers (Sec-Fetch)
-        headers.insert(HeaderName::from_static("sec-fetch-dest"), HeaderValue::from_static("document"));
-        headers.insert(HeaderName::from_static("sec-fetch-mode"), HeaderValue::from_static("navigate"));
-        headers.insert(HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static("none"));
-        headers.insert(HeaderName::from_static("sec-fetch-user"), HeaderValue::from_static("?1"));
-        headers.insert(HeaderName::from_static("upgrade-insecure-requests"), HeaderValue::from_static("1"));
-        
+        headers.insert(
+            HeaderName::from_static("sec-fetch-dest"),
+            HeaderValue::from_static("document"),
+        );
+        headers.insert(
+            HeaderName::from_static("sec-fetch-mode"),
+            HeaderValue::from_static("navigate"),
+        );
+        headers.insert(
+            HeaderName::from_static("sec-fetch-site"),
+            HeaderValue::from_static("none"),
+        );
+        headers.insert(
+            HeaderName::from_static("sec-fetch-user"),
+            HeaderValue::from_static("?1"),
+        );
+        headers.insert(
+            HeaderName::from_static("upgrade-insecure-requests"),
+            HeaderValue::from_static("1"),
+        );
+
         let builder = Client::builder()
             .emulation(Emulation::Chrome145) // TLS fingerprint impersonation (Layer 2 WAF Evasion) - Updated to Chrome 145 for 2026
             .default_headers(headers)
@@ -652,10 +668,19 @@ mod tests {
     #[test]
     fn test_http_client_has_user_agents() {
         let config = HttpClientConfig::default();
-        let client = HttpClient::new(config).unwrap();
 
-        // Client was created successfully — user agents are loaded from fallback
-        drop(client);
+        // Verify defaults are sane before creating the client
+        assert!(
+            config.max_retries > 0,
+            "HttpClientConfig should have positive max_retries default"
+        );
+        assert!(
+            config.backoff_base_ms > 0,
+            "HttpClientConfig should have positive backoff_base_ms default"
+        );
+
+        // Verify the client can be created — it loads fallback user agents internally
+        let _client = HttpClient::new(config).unwrap();
     }
 
     #[tokio::test]

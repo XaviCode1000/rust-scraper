@@ -210,11 +210,14 @@ smallvec = { version = "1.13", optional = true }
 wide = { version = "0.7", optional = true }
 
 [dev-dependencies]
-mockall = "0.12"
-tokio-test = "0.4"
+assert_cmd = "2"
+predicates = "3"
+
+
 tempfile = "3"
 walkdir = "2"
 wiremock = "0.6"
+proptest = "1.6"
 
 [build-dependencies]
 built = { version = "0.7", features = ["git2", "chrono"] }

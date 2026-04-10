@@ -132,6 +132,15 @@ async fn main() -> CliExit {
         info!("No Obsidian vault detected, using output directory");
     }
 
+    // GAP 3 (Bug #30): Warn when vault is provided but headless mode (no --quick-save)
+    if let Some(ref _vault) = vault_path {
+        if !args.quick_save {
+            warn!("Vault path provided but --quick-save not enabled.");
+            warn!("   Files will be saved to ./output/, not to the vault.");
+            warn!("   Use --quick-save to save directly to vault _inbox.");
+        }
+    }
+
     // Emoji helpers (resolved once after NO_COLOR check)
     let ok = icon("✅", "OK");
     let warn_icon = icon("⚠️", "WARN");
@@ -501,10 +510,12 @@ async fn main() -> CliExit {
         // AI semantic cleaning path
         #[cfg(feature = "ai")]
         {
-            use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{ModelConfig, SemanticCleanerImpl};
             use rust_scraper::domain::DocumentChunk;
+            use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{
+                ModelConfig, SemanticCleanerImpl,
+            };
             use rust_scraper::SemanticCleaner;
-            
+
             info!("Initializing AI semantic cleaner...");
             let config = ModelConfig::default()
                 .with_relevance_threshold(args.threshold)
@@ -518,21 +529,27 @@ async fn main() -> CliExit {
                         "Failed to initialize AI semantic cleaner: {}. Ensure ONNX model is available.",
                         e
                     ));
-                }
+                },
             };
 
             // Pre-clean all content CONCURRENTLY (Bug #29 fix)
-            info!("Starting AI cleaning for {} pages concurrently...", results.len());
-            
+            info!(
+                "Starting AI cleaning for {} pages concurrently...",
+                results.len()
+            );
+
             // Share cleaner via Arc for concurrent access
             use std::sync::Arc;
             let cleaner = Arc::new(cleaner);
-            
+
             // Create concurrent cleaning tasks using tokio::join_all
             let cleaning_tasks: Vec<_> = results
                 .iter()
                 .map(|result| {
-                    let html_content = result.html.clone().unwrap_or_else(|| result.content.clone());
+                    let html_content = result
+                        .html
+                        .clone()
+                        .unwrap_or_else(|| result.content.clone());
                     let url = result.url.clone();
                     let cleaner = Arc::clone(&cleaner);
                     async move {
@@ -544,9 +561,10 @@ async fn main() -> CliExit {
 
             // Execute all cleaning tasks concurrently
             let cleaning_results = futures::future::join_all(cleaning_tasks).await;
-            
+
             // Process results
-            let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> = Vec::with_capacity(results.len() * 2);
+            let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> =
+                Vec::with_capacity(results.len() * 2);
             for (url, chunks_result, result) in cleaning_results {
                 match chunks_result {
                     Ok(chunks) => {
@@ -556,15 +574,22 @@ async fn main() -> CliExit {
                         } else {
                             cleaned_chunks.extend(chunks);
                         }
-                    }
+                    },
                     Err(e) => {
-                        warn!("Failed to clean content for {}: {}. Using fallback.", url, e);
+                        warn!(
+                            "Failed to clean content for {}: {}. Using fallback.",
+                            url, e
+                        );
                         cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
-                    }
+                    },
                 }
             }
 
-            info!("AI cleaning complete: {} chunks from {} pages", cleaned_chunks.len(), results.len());
+            info!(
+                "AI cleaning complete: {} chunks from {} pages",
+                cleaned_chunks.len(),
+                results.len()
+            );
 
             // Export cleaned chunks
             match export_factory::process_results_with_chunks(
@@ -636,6 +661,7 @@ async fn main() -> CliExit {
         rich_metadata: args.obsidian_rich_metadata,
         quick_save: args.quick_save,
         vault_path: vault_path.clone(),
+        one_file_per_url: args.one_file_per_url,
     };
 
     if let Err(e) = save_results(&results, &output_dir, &args.format, &obsidian_options) {
@@ -696,6 +722,7 @@ async fn main() -> CliExit {
 }
 
 // ============================================================================
+// ============================================================================
 // Pre-flight Check (T-070)
 // ============================================================================
 
@@ -709,6 +736,7 @@ enum PreflightResult {
 }
 
 /// Send a HEAD request to verify connectivity before starting discovery.
+/// Falls back to GET with Range: bytes=0-0 if HEAD is blocked (405) or times out.
 ///
 /// Returns `PreflightResult::Ok` for 2xx/3xx, `Warning` for 4xx/5xx,
 /// and `Failed` for DNS/connection errors.
@@ -718,20 +746,29 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
         Err(e) => return PreflightResult::Failed(format!("failed to create HTTP client: {}", e)),
     };
 
-    match client.head(url.as_str()).send().await {
+    match client
+        .head(url.as_str())
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
         Ok(response) => {
             let status = response.status().as_u16();
             if status < 400 {
                 PreflightResult::Ok
+            } else if status == 405 {
+                // HEAD not allowed — try GET fallback
+                warn!("HEAD request blocked (405), trying GET fallback...");
+                preflight_get_fallback(&client, url).await
             } else {
                 PreflightResult::Warning(status)
             }
         },
         Err(e) => {
-            if e.is_timeout() {
-                PreflightResult::Failed("connection timed out".into())
-            } else if e.is_connect() {
-                PreflightResult::Failed(format!("connection refused: {}", e))
+            if e.is_timeout() || e.is_connect() {
+                // Network error — try GET fallback before giving up
+                warn!("HEAD request failed ({}), trying GET fallback...", e);
+                preflight_get_fallback(&client, url).await
             } else {
                 PreflightResult::Failed(format!("network error: {}", e))
             }
@@ -739,7 +776,20 @@ async fn preflight_check(url: &url::Url) -> PreflightResult {
     }
 }
 
-// ============================================================================
+/// Fallback to GET with Range: bytes=0-0 when HEAD is blocked.
+async fn preflight_get_fallback(client: &wreq::Client, url: &url::Url) -> PreflightResult {
+    match client
+        .get(url.as_str())
+        .header("Range", "bytes=0-0")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => PreflightResult::Ok,
+        Ok(resp) => PreflightResult::Warning(resp.status().as_u16()),
+        Err(e) => PreflightResult::Failed(format!("HEAD y GET fallaron: {}", e)),
+    }
+}
 // Config Merge Helper
 // ============================================================================
 

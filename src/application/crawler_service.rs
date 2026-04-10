@@ -424,6 +424,13 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
             handle_crawl_result(result, &error_count);
         }
 
+        // Drain discovered links from the deduplicated UrlQueue
+        // into the main crawl loop's VecDeque work queue.
+        // Fix Bug 5: discovered links were pushed to queue (Arc<UrlQueue>)
+        // but never transferred to url_queue (VecDeque), so sub-paths
+        // were never crawled.
+        url_queue.append(&mut queue.drain_all());
+
         // Spawn new tasks up to concurrency limit
         while let Some(discovered_url) = url_queue.pop_front() {
             // Check concurrency limit
@@ -811,6 +818,26 @@ async fn discover_sitemap_url(base_url: &str) -> Result<String, CrawlError> {
         }
     }
 
+    // GAP 5 (Bug #30): Try sub-path sitemaps for nested sites
+    // e.g. https://example.com/docs/en/ → /docs/sitemap.xml, /docs/en/sitemap.xml
+    let path = base.path();
+    let segments: Vec<_> = path.split('/').filter(|s| !s.is_empty()).collect();
+    for i in 1..=segments.len().min(3) {
+        let sub_path = segments[..i].join("/");
+        for sitemap_name in &["sitemap.xml", "sitemap_index.xml"] {
+            let candidate = format!("/{}/{}", sub_path, sitemap_name);
+            if let Ok(sitemap_url) = base.join(&candidate) {
+                let sitemap_str = sitemap_url.as_str();
+                tracing::debug!("Trying sub-path sitemap: {}", sitemap_str);
+                if let Ok(response) = wreq::Client::new().head(sitemap_str).send().await {
+                    if response.status().is_success() {
+                        tracing::info!("Found sitemap at sub-path: {}", sitemap_str);
+                        return Ok(sitemap_str.to_string());
+                    }
+                }
+            }
+        }
+    }
     // No sitemap found - return error instead of guessing
     tracing::warn!("no sitemap found for {}", base_url);
     Err(CrawlError::SitemapNotFound(base_url.to_string()))

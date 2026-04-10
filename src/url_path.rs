@@ -136,6 +136,37 @@ impl UrlPath {
         format!("{}.md", final_name)
     }
 
+    /// Generate a unique filename from the full URL path, avoiding collisions.
+    ///
+    /// Unlike `to_safe_filename()` which maps all trailing-slash URLs to `index.md`,
+    /// this converts the full path into a unique filename:
+    /// `/blog/post1/` → `blog-post1.md`
+    /// `/blog/post2/` → `blog-post2.md`
+    /// `/` → `index.md` (root is still index.md)
+    pub fn to_unique_filename(&self) -> String {
+        if self.is_root {
+            return "index.md".to_string();
+        }
+        let path_trimmed = self.raw.trim_start_matches('/');
+        // Convert /docs/api/v2/users/ → docs-api-v2-users
+        let slug = path_trimmed
+            .trim_end_matches('/')
+            .replace('/', "-")
+            .replace(' ', "_");
+        let sanitized = Self::sanitize_path_segment(&slug);
+
+        // Check Windows reserved names
+        let upper = sanitized.to_uppercase();
+        let is_reserved = WINDOWS_RESERVED.iter().any(|&r| r == upper);
+        let final_name = if is_reserved {
+            format!("{}_safe", sanitized)
+        } else {
+            sanitized
+        };
+
+        format!("{}.md", final_name)
+    }
+
     /// Get directory part (everything except last component)
     pub fn to_directory(&self) -> String {
         if self.is_root {
@@ -218,6 +249,18 @@ impl OutputPath {
     pub fn to_full_path(&self) -> String {
         let folder = self.to_folder_path();
         let filename = self.path.to_safe_filename();
+        format!("{}{}", folder, filename)
+    }
+
+    /// Full path with optional unique filename mode.
+    /// When `unique` is true, uses `to_unique_filename()` to avoid collisions.
+    pub fn to_full_path_with(&self, unique: bool) -> String {
+        let folder = self.to_folder_path();
+        let filename = if unique {
+            self.path.to_unique_filename()
+        } else {
+            self.path.to_safe_filename()
+        };
         format!("{}{}", folder, filename)
     }
 

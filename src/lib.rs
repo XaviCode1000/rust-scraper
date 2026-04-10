@@ -304,7 +304,7 @@ impl Default for ScraperConfig {
             output_dir: std::path::PathBuf::from("output"),
             max_file_size: Some(50 * 1024 * 1024), // 50MB default
             download_timeout_secs: 30,
-            scraper_concurrency: 3,                // HDD-aware: nproc - 1 for 4C CPU
+            scraper_concurrency: 3, // HDD-aware: nproc - 1 for 4C CPU
         }
     }
 }
@@ -678,7 +678,7 @@ mod concurrency_parser {
 /// assert_eq!(args.url, "https://example.com");
 /// ```
 #[derive(Parser, Debug)]
-#[command(name = "rust-scraper")]
+#[command(name = "rust-scraper", version)]
 #[command(about = "Production-ready web scraper with Clean Architecture", long_about = None)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
@@ -801,6 +801,18 @@ pub struct Args {
     )]
     #[clap(next_help_heading = "Obsidian")]
     pub quick_save: bool,
+
+    /// Use unique filenames for each URL path instead of collapsing
+    /// trailing-slash URLs to `index.md`.
+    ///
+    /// When disabled (default): `/blog/post1/` and `/blog/post2/` both
+    /// become `index.md` in their respective directories.
+    ///
+    /// When enabled: `/blog/post1/` → `blog-post1.md`,
+    /// `/blog/post2/` → `blog-post2.md`.
+    #[arg(long, default_value = "false", env = "RUST_SCRAPER_ONE_FILE_PER_URL")]
+    #[clap(next_help_heading = "Output")]
+    pub one_file_per_url: bool,
 
     /// Add rich metadata to frontmatter (word count, reading time, language)
     ///
@@ -958,12 +970,20 @@ pub struct Args {
     pub timeout_secs: u64,
 
     /// URL patterns to include (glob-style, can be repeated)
-    #[arg(long = "include-pattern", env = "RUST_SCRAPER_INCLUDE", value_delimiter = ',')]
+    #[arg(
+        long = "include-pattern",
+        env = "RUST_SCRAPER_INCLUDE",
+        value_delimiter = ','
+    )]
     #[clap(next_help_heading = "Crawler Settings")]
     pub include_patterns: Vec<String>,
 
     /// URL patterns to exclude (glob-style, can be repeated)
-    #[arg(long = "exclude-pattern", env = "RUST_SCRAPER_EXCLUDE", value_delimiter = ',')]
+    #[arg(
+        long = "exclude-pattern",
+        env = "RUST_SCRAPER_EXCLUDE",
+        value_delimiter = ','
+    )]
     #[clap(next_help_heading = "Crawler Settings")]
     pub exclude_patterns: Vec<String>,
 
@@ -984,7 +1004,11 @@ pub struct Args {
     pub backoff_max_ms: u64,
 
     /// Accept-Language header value
-    #[arg(long, default_value = "en-US,en;q=0.9", env = "RUST_SCRAPER_ACCEPT_LANGUAGE")]
+    #[arg(
+        long,
+        default_value = "en-US,en;q=0.9",
+        env = "RUST_SCRAPER_ACCEPT_LANGUAGE"
+    )]
     #[clap(next_help_heading = "HTTP Client Settings")]
     pub accept_language: String,
 

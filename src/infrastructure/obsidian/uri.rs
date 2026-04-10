@@ -6,6 +6,37 @@
 
 use std::path::Path;
 
+/// Minimal encoding for Obsidian URI parameters.
+///
+/// Unlike full URL encoding, this preserves forward slashes and other
+/// characters that Obsidian expects unencoded in URI query values.
+/// Only encodes characters that would break URI parsing: `&`, `=`,
+/// `#`, `?`, `%`, `+`, space, and non-ASCII.
+fn encode_obsidian_param(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' | '=' | '#' | '?' | '%' | '+' => {
+                out.push_str(&format!("%{:02X}", ch as u32));
+            },
+            ' ' => {
+                out.push_str("%20");
+            },
+            c if c.is_ascii() => {
+                out.push(c);
+            },
+            c => {
+                // Non-ASCII: UTF-8 percent-encode each byte
+                let mut buf = [0u8; 4];
+                for &byte in c.encode_utf8(&mut buf).as_bytes() {
+                    out.push_str(&format!("%{:02X}", byte));
+                }
+            },
+        }
+    }
+    out
+}
+
 /// Build an Obsidian URI from vault name and file path.
 ///
 /// # Arguments
@@ -17,8 +48,8 @@ use std::path::Path;
 pub fn build_obsidian_uri(vault_name: &str, file_path: &str) -> String {
     format!(
         "obsidian://open?vault={}&file={}",
-        urlencoding::encode(vault_name),
-        urlencoding::encode(file_path)
+        encode_obsidian_param(vault_name),
+        encode_obsidian_param(file_path)
     )
 }
 
@@ -102,14 +133,28 @@ mod tests {
     #[test]
     fn test_build_obsidian_uri_simple() {
         let uri = build_obsidian_uri("MyVault", "Inbox/example");
-        assert!(uri.starts_with("obsidian://open?vault=MyVault&file=Inbox%2Fexample"));
+        assert_eq!(uri, "obsidian://open?vault=MyVault&file=Inbox/example");
     }
 
     #[test]
     fn test_build_obsidian_uri_with_spaces() {
         let uri = build_obsidian_uri("My Vault", "Inbox/notes");
         assert!(uri.contains("vault=My%20Vault"));
-        assert!(uri.contains("file=Inbox%2Fnotes"));
+        assert!(uri.contains("file=Inbox/notes"));
+    }
+
+    #[test]
+    fn test_build_obsidian_uri_preserves_slashes() {
+        let uri = build_obsidian_uri("MyVault", "Folder/Subfolder/note");
+        assert!(uri.contains("file=Folder/Subfolder/note"));
+        assert!(!uri.contains("%2F"));
+    }
+
+    #[test]
+    fn test_build_obsidian_uri_encodes_special_chars() {
+        let uri = build_obsidian_uri("My&Vault", "note=1");
+        assert!(uri.contains("vault=My%26Vault"));
+        assert!(uri.contains("file=note%3D1"));
     }
 
     #[test]

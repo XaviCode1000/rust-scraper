@@ -29,19 +29,6 @@ use std::path::PathBuf;
 // Existing Tests (unchanged - see original file for full content)
 // ============================================================================
 
-/// Test that the SemanticCleaner trait is defined and accessible
-#[test]
-fn test_semantic_cleaner_trait_defined() {
-    // This test verifies that the trait exists and can be referenced
-    // It's a compile-time check more than a runtime test
-
-    // If this compiles, the trait exists in the domain layer
-    fn _assert_trait_exists<T: SemanticCleaner>(_cleaner: T) {}
-
-    // We can't create a real instance without loading a model,
-    // but we can verify the trait is accessible
-}
-
 /// Test that the model cache directory logic works correctly
 #[tokio::test]
 async fn test_model_cache_directory_created() {
@@ -311,17 +298,6 @@ fn test_scraper_error_from_semantic_error() {
 // InferenceEngine Tests (Phase 2)
 // ============================================================================
 
-/// Test that InferenceEngine type exists and compiles
-///
-/// This is a compile-time check - if this compiles, the type exists
-/// with the correct structure and API.
-#[test]
-fn test_inference_engine_type_exists() {
-    // This is a compile-time check
-    // If this compiles, the type exists with the correct structure
-    fn _assert_type_exists(_engine: InferenceEngine) {}
-}
-
 /// Test that InferenceEngine is Send + Sync (thread-safe)
 ///
 /// This is critical for using InferenceEngine in async contexts
@@ -386,12 +362,6 @@ fn test_tokenizer_type_traits() {
 
 /// Test that ChunkId type exists and compiles
 #[test]
-fn test_chunk_id_type_exists() {
-    use rust_scraper::infrastructure::ai::ChunkId;
-
-    fn _assert_type_exists(_id: ChunkId) {}
-}
-
 /// Test ChunkId creation and display
 #[test]
 fn test_chunk_id_display() {
@@ -425,12 +395,6 @@ fn test_chunk_id_equality() {
 
 /// Test that SentenceSplitter type exists
 #[test]
-fn test_sentence_splitter_type_exists() {
-    use rust_scraper::infrastructure::ai::SentenceSplitter;
-
-    fn _assert_type_exists(_splitter: SentenceSplitter) {}
-}
-
 /// Test sentence splitter basic functionality
 #[test]
 fn test_sentence_splitter_basic() {
@@ -464,12 +428,6 @@ fn test_sentence_splitter_trimmed() {
 
 /// Test that HtmlChunker type exists
 #[test]
-fn test_chunker_type_exists() {
-    use rust_scraper::infrastructure::ai::HtmlChunker;
-
-    fn _assert_type_exists(_chunker: HtmlChunker) {}
-}
-
 /// Test chunker creation with defaults
 #[test]
 fn test_chunker_creation() {
@@ -616,12 +574,6 @@ fn test_euclidean_distance() {
 
 /// Test that RelevanceScorer type exists
 #[test]
-fn test_relevance_scorer_type_exists() {
-    use rust_scraper::infrastructure::ai::RelevanceScorer;
-
-    fn _assert_type_exists(_scorer: RelevanceScorer) {}
-}
-
 /// Test relevance scorer creation
 #[test]
 fn test_relevance_scorer_creation() {
@@ -664,12 +616,6 @@ fn test_relevance_scorer_meets_threshold() {
 
 /// Test that ThresholdConfig type exists
 #[test]
-fn test_threshold_config_type_exists() {
-    use rust_scraper::infrastructure::ai::ThresholdConfig;
-
-    fn _assert_type_exists(_config: ThresholdConfig) {}
-}
-
 /// Test threshold config default values
 #[test]
 fn test_threshold_config_defaults() {
@@ -765,16 +711,6 @@ fn test_threshold_config_balanced() {
 
 /// Test that SemanticCleanerImpl has all required fields
 #[test]
-fn test_semantic_cleaner_impl_structure() {
-    // This is a compile-time check that the struct has the correct fields
-    // If this compiles, the structure is correct
-    fn _assert_structure() {
-        // We can't construct it without async, but we can verify the type exists
-        fn _type_exists(_cleaner: SemanticCleanerImpl) {}
-    }
-}
-
-/// Test that SemanticCleanerImpl is Send + Sync
 #[test]
 fn test_semantic_cleaner_impl_send_sync() {
     fn assert_send<T: Send>() {}
