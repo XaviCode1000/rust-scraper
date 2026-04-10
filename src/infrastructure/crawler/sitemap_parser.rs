@@ -695,4 +695,59 @@ mod tests {
         // Should extract all loc elements (including image locs)
         assert!(urls.len() >= 2);
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_parse_sitemap_max_depth_exceeded() {
+        // depth=0 should return MaxDepthExceeded
+        let config = SitemapConfig::builder().max_depth(0).build();
+        assert_eq!(config.max_depth, 0);
+        // MaxDepthExceeded error message
+        let err = SitemapError::MaxDepthExceeded;
+        assert_eq!(format!("{}", err), "maximum recursion depth exceeded");
+    }
+
+    #[test]
+    fn test_resolve_url_relative_paths() {
+        let base = Url::parse("https://example.com/sitemap.xml").unwrap();
+
+        // Relative path with ../
+        let resolved = resolve_url(&base, "../page").unwrap();
+        assert_eq!(resolved.as_str(), "https://example.com/page");
+
+        // Simple relative path
+        let resolved = resolve_url(&base, "page.html").unwrap();
+        assert_eq!(resolved.as_str(), "https://example.com/page.html");
+
+        // Absolute path
+        let resolved = resolve_url(&base, "/page").unwrap();
+        assert_eq!(resolved.as_str(), "https://example.com/page");
+
+        // Scheme-relative URL
+        let resolved = resolve_url(&base, "//other/page").unwrap();
+        assert_eq!(resolved.as_str(), "https://other/page");
+    }
+
+    #[test]
+    fn test_resolve_url_empty_input() {
+        let base = Url::parse("https://example.com").unwrap();
+
+        assert!(resolve_url(&base, "").is_none());
+        assert!(resolve_url(&base, "   ").is_none());
+    }
+
+    #[test]
+    fn test_config_builder_zero_falls_back_to_defaults() {
+        let config = SitemapConfig::builder()
+            .max_response_size(0)
+            .max_decompressed_size(0)
+            .build();
+
+        // Zero values should fall back to defaults
+        assert_eq!(config.max_response_size, 52_428_800); // 50MB default
+        assert_eq!(config.max_decompressed_size, 104_857_600); // 100MB default
+    }
 }

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation - Rust Scraper</title>
+    <meta name="description" content="Comprehensive API documentation for the Rust Scraper library">
+    <link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+    <nav class="global-nav" aria-label="Main navigation">
+        <div class="site-title">Rust Scraper Docs</div>
+        <ul class="global-nav-list">
+            <li><a href="/">Home</a></li>
+            <li><a href="/getting-started">Getting Started</a></li>
+            <li><a href="/api">API Reference</a></li>
+            <li><a href="/examples">Examples</a></li>
+        </ul>
+        <div class="search">
+            <input type="search" placeholder="Search documentation..." aria-label="Search">
+        </div>
+    </nav>
+
+    <div class="sl-breadcrumbs" aria-label="Breadcrumb">
+        <a href="/">Docs</a> / <a href="/api">API</a> / <span>ScraperConfig</span>
+    </div>
+
+    <aside class="right-sidebar">
+        <nav class="sl-sidebar">
+            <h3>On this page</h3>
+            <ul>
+                <li><a href="#overview">Overview</a></li>
+                <li><a href="#methods">Methods</a></li>
+                <li><a href="#examples">Examples</a></li>
+            </ul>
+        </nav>
+    </aside>
+
+    <main>
+        <article>
+            <h1 id="overview">ScraperConfig</h1>
+            <p>Configuration options for the scraper. Uses the builder pattern for ergonomic setup.</p>
+
+            <h2 id="methods">Methods</h2>
+
+            <h3><code>with_images()</code></h3>
+            <p>Enable image downloading. Supported formats: PNG, JPG, GIF, WEBP, SVG, BMP.</p>
+
+            <h3><code>with_documents()</code></h3>
+            <p>Enable document downloading. Supported formats: PDF, DOCX, XLSX, PPTX.</p>
+
+            <h3><code>with_output_dir(path)</code></h3>
+            <p>Set the output directory for downloaded assets.</p>
+
+            <h3><code>with_scraper_concurrency(n)</code></h3>
+            <p>Set the maximum number of concurrent scrapers. Default: 3 (HDD-aware).</p>
+
+            <h2 id="examples">Examples</h2>
+
+            <pre><code>let config = ScraperConfig::default()
+    .with_images()
+    .with_documents()
+    .with_output_dir("./output".into())
+    .with_scraper_concurrency(5);
+
+assert!(config.download_images);
+assert!(config.download_documents);
+assert_eq!(config.scraper_concurrency, 5);</code></pre>
+
+            <div class="page-feedback">
+                <p>Was this page helpful?</p>
+                <button>👍 Yes</button>
+                <button>👎 No</button>
+            </div>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 Rust Scraper Project. MIT License.</p>
+        <div class="social-icons">
+            <a href="https://github.com" aria-label="GitHub">GitHub</a>
+        </div>
+    </footer>
+
+    <script>
+        // Documentation site analytics
+        console.log('Page loaded');
+    </script>
+    <noscript>JavaScript is disabled</noscript>
+</body>
+</html>

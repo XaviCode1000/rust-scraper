@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Malformed Test Page
+    <meta charset="UTF-8">
+    <!-- Missing closing head tag -->
+<body>
+    <h1>Malformed HTML Page</h1>
+    <p>This page has intentionally broken HTML for resilience testing.
+
+    <!-- Unclosed tags -->
+    <div>
+        <p>Paragraph without closing tag
+        <strong>Bold text without closing
+        <em>Italic inside bold
+
+    <!-- Nested incorrectly -->
+    <div>
+        <p>
+            <a href="/page1">
+                <span>Link with unclosed span
+            </a>
+        </p>
+    </div>
+
+    <!-- Self-closing issues -->
+    <img src="/broken.png" alt="No closing slash">
+    <br>
+    <hr>
+
+    <!-- Invalid nesting -->
+    <p>
+        <div>This div is inside a paragraph</div>
+    </p>
+
+    <!-- Malformed attributes -->
+    <a href=/no-quotes>Unquoted href</a>
+    <input type=text disabled>
+    <div class="multi spaces class">Multi-space class</div>
+
+    <!-- Broken entities -->
+    <p>Text with &nbsp; and &amp; and &lt;broken&gt;</p>
+    <p>Invalid entity: &foobar;</p>
+
+    <!-- Strange characters in content -->
+    <p>Content with <script>alert('xss')</script> injection attempt</p>
+
+    <!-- Multiple closing tags -->
+    </div></div></div>
+
+    <!-- Comments everywhere -->
+    <!--
+        This is a multi-line comment
+        that spans several lines
+    -->
+
+    <footer>
+        <p>Footer content
+    <!-- Missing closing footer, body, and html tags -->

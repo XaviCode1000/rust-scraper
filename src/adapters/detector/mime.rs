@@ -269,4 +269,39 @@ mod tests {
             Some("application/pdf")
         );
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_detect_unknown_no_extension() {
+        // URL like `https://example.com/download` has no extension → Unknown
+        let asset_type = detect_from_url("https://example.com/download");
+        assert_eq!(asset_type, AssetType::Unknown);
+        assert!(!asset_type.is_image());
+        assert!(!asset_type.is_document());
+    }
+
+    #[test]
+    fn test_detect_case_insensitive() {
+        // .PNG should be detected same as .png
+        let png_upper = detect_from_url("https://example.com/image.PNG");
+        let png_lower = detect_from_url("https://example.com/image.png");
+        assert_eq!(png_upper, png_lower);
+        assert!(png_upper.is_image());
+
+        // .PDF should be detected same as .pdf
+        let pdf_upper = detect_from_url("https://example.com/doc.PDF");
+        let pdf_lower = detect_from_url("https://example.com/doc.pdf");
+        assert_eq!(pdf_upper, pdf_lower);
+        assert!(pdf_upper.is_document());
+    }
+
+    #[test]
+    fn test_detect_invalid_url() {
+        // Invalid URL should return Unknown
+        let asset_type = detect_from_url("not-a-valid-url-at-all");
+        assert_eq!(asset_type, AssetType::Unknown);
+    }
 }

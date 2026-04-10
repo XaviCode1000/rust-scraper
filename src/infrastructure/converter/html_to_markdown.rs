@@ -95,4 +95,64 @@ mod tests {
         assert!(md.contains("Title"));
         assert!(md.contains("Content"));
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_convert_links_to_markdown() {
+        let html = r#"<p>Visit <a href="https://example.com">Example</a> for more info.</p>"#;
+        let md = convert_to_markdown(html);
+        assert!(
+            md.contains("[Example](https://example.com)"),
+            "link should be converted to markdown"
+        );
+    }
+
+    #[test]
+    fn test_convert_lists() {
+        let html = r#"
+            <ul>
+                <li>Item 1</li>
+                <li>Item 2</li>
+                <li>Item 3</li>
+            </ul>
+            <ol>
+                <li>First</li>
+                <li>Second</li>
+            </ol>
+        "#;
+        let md = convert_to_markdown(html);
+        // Unordered list items should have bullet markers
+        assert!(md.contains("Item 1"));
+        assert!(md.contains("Item 2"));
+        assert!(md.contains("Item 3"));
+        // Ordered list items should be present
+        assert!(md.contains("First"));
+        assert!(md.contains("Second"));
+    }
+
+    #[test]
+    fn test_convert_tables() {
+        let html = r#"
+            <table>
+                <thead>
+                    <tr><th>Name</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Foo</td><td>42</td></tr>
+                    <tr><td>Bar</td><td>99</td></tr>
+                </tbody>
+            </table>
+        "#;
+        let md = convert_to_markdown(html);
+        // Table content should be present
+        assert!(md.contains("Name"));
+        assert!(md.contains("Value"));
+        assert!(md.contains("Foo"));
+        assert!(md.contains("Bar"));
+        // Markdown tables use pipe separators
+        assert!(md.contains("|"));
+    }
 }

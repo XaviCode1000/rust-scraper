@@ -298,4 +298,70 @@ mod tests {
         let result = normalize_url("not-a-valid-url");
         assert_eq!(result, "not-a-valid-url");
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_extract_links_javascript_mailto_included() {
+        // extract_links does NOT filter javascript:/mailto:/tel: schemes
+        // it resolves them via base.join() which includes them
+        let html = r#"
+            <html>
+                <body>
+                    <a href="/valid">Valid Link</a>
+                    <a href="javascript:alert(1)">JavaScript</a>
+                    <a href="mailto:test@example.com">Email</a>
+                    <a href="tel:+1234567890">Phone</a>
+                </body>
+            </html>
+        "#;
+
+        let links = extract_links(html, "https://example.com").unwrap();
+        // All links are included (no filtering of special schemes)
+        assert_eq!(links.len(), 4);
+        assert!(links.contains(&"https://example.com/valid".to_string()));
+        // javascript:, mailto:, tel: are resolved relative to base
+        assert!(links.iter().any(|l| l.contains("javascript")));
+        assert!(links.iter().any(|l| l.contains("mailto")));
+        assert!(links.iter().any(|l| l.contains("tel")));
+    }
+
+    #[test]
+    fn test_extract_links_empty_href() {
+        let html = r#"
+            <html>
+                <body>
+                    <a href="">Empty href</a>
+                    <a href="/page">Valid link</a>
+                </body>
+            </html>
+        "#;
+
+        let links = extract_links(html, "https://example.com").unwrap();
+        // Empty href resolves to the base URL itself
+        assert!(links.contains(&"https://example.com/".to_string()));
+        assert!(links.contains(&"https://example.com/page".to_string()));
+    }
+
+    #[test]
+    fn test_extract_links_with_query_params() {
+        // Note: normalize_url keeps path but strips fragments for dedup
+        // Query params in href are resolved but may be normalized
+        let html = r#"
+            <html>
+                <body>
+                    <a href="/search?q=rust&lang=en">Search</a>
+                    <a href="/page?foo=bar#section">With fragment</a>
+                </body>
+            </html>
+        "#;
+
+        let links = extract_links(html, "https://example.com").unwrap();
+        assert_eq!(links.len(), 2);
+        // Links contain the path portion; query params may be normalized
+        assert!(links.iter().any(|l| l.contains("/search")));
+        assert!(links.iter().any(|l| l.contains("/page")));
+    }
 }

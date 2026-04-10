@@ -537,4 +537,90 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_export_batch_vs_individual_consistency() {
+        let temp_dir = std::env::temp_dir().join("test_batch_vs_individual");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Export as batch
+        let config_batch = create_test_config_with_dir(temp_dir.join("batch"));
+        let exporter_batch = VectorExporter::new(config_batch);
+        let chunks = vec![create_test_chunk(), create_test_chunk()];
+        exporter_batch.export_batch(&chunks).unwrap();
+
+        // Export individually with append mode
+        let mut config_ind = create_test_config_with_dir(temp_dir.join("individual"));
+        config_ind.append = true;
+        let exporter_ind = VectorExporter::new(config_ind);
+        let chunk1 = create_test_chunk();
+        let chunk2 = create_test_chunk();
+        exporter_ind.export(chunk1).unwrap();
+        exporter_ind.export(chunk2).unwrap();
+
+        // Both should produce valid JSON
+        let individual_path = temp_dir.join("individual/test_export.json");
+        let batch_path = temp_dir.join("batch/test_export.json");
+
+        let individual_content = std::fs::read_to_string(&individual_path).unwrap();
+        let batch_content = std::fs::read_to_string(&batch_path).unwrap();
+
+        let individual_json: serde_json::Value = serde_json::from_str(&individual_content).unwrap();
+        let batch_json: serde_json::Value = serde_json::from_str(&batch_content).unwrap();
+
+        // Both should have 2 documents
+        assert_eq!(individual_json["documents"].as_array().unwrap().len(), 2);
+        assert_eq!(batch_json["documents"].as_array().unwrap().len(), 2);
+
+        // Both should have the same metadata structure
+        assert!(individual_json.get("format_version").is_some());
+        assert!(batch_json.get("format_version").is_some());
+        assert_eq!(
+            individual_json["format_version"],
+            batch_json["format_version"]
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_export_append_to_existing_file() {
+        let temp_dir = std::env::temp_dir().join("test_append_existing");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // First write without append
+        let mut config1 = create_test_config_with_dir(temp_dir.clone());
+        config1.append = false;
+        let exporter1 = VectorExporter::new(config1);
+        let first_chunk = create_test_chunk();
+        exporter1.export(first_chunk).unwrap();
+
+        // Read initial content
+        let output_path = temp_dir.join("test_export.json");
+        let initial_content = std::fs::read_to_string(&output_path).unwrap();
+        let initial_json: serde_json::Value = serde_json::from_str(&initial_content).unwrap();
+        assert_eq!(initial_json["documents"].as_array().unwrap().len(), 1);
+
+        // Second write with append
+        let mut config2 = create_test_config_with_dir(temp_dir.clone());
+        config2.append = true;
+        let exporter2 = VectorExporter::new(config2);
+        let second_chunk = create_test_chunk();
+        exporter2.export(second_chunk).unwrap();
+
+        // Read final content
+        let final_content = std::fs::read_to_string(&output_path).unwrap();
+        let final_json: serde_json::Value = serde_json::from_str(&final_content).unwrap();
+        assert_eq!(
+            final_json["documents"].as_array().unwrap().len(),
+            2,
+            "should have 2 docs after append"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

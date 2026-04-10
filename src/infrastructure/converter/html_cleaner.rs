@@ -126,4 +126,66 @@ mod tests {
         // Should not panic
         assert!(cleaned.is_empty() || cleaned.contains("<html>"));
     }
+
+    // ============================================================================
+    // Error path tests
+    // ============================================================================
+
+    #[test]
+    fn test_clean_removes_css_selectors() {
+        let html = r#"
+            <html>
+                <body>
+                    <nav class="global-nav">
+                        <span class="site-title">My Site</span>
+                        <ul class="global-nav-list">
+                            <li><a href="/">Home</a></li>
+                        </ul>
+                    </nav>
+                    <main>
+                        <h1>Main Content</h1>
+                        <p>This should remain</p>
+                    </main>
+                </body>
+            </html>
+        "#;
+        let cleaned = clean_html(html);
+        assert!(!cleaned.contains("global-nav"));
+        assert!(!cleaned.contains("site-title"));
+        assert!(cleaned.contains("Main Content"));
+        assert!(cleaned.contains("This should remain"));
+    }
+
+    #[test]
+    fn test_clean_preserves_href_attribute() {
+        let html = r#"<html><body><a href="https://example.com" onclick="alert(1)" class="link">Click</a></body></html>"#;
+        let cleaned = clean_html(html);
+        assert!(cleaned.contains("href="), "href should be preserved");
+        assert!(
+            cleaned.contains("https://example.com"),
+            "href URL should be preserved"
+        );
+        assert!(!cleaned.contains("onclick"), "onclick should be stripped");
+    }
+
+    #[test]
+    fn test_clean_whitespace_normalization() {
+        let html = "<html><body><p>  Too   many    spaces  </p><p>
+
+	Newlines		</p></body></html>";
+        let cleaned = clean_html(html);
+        // Whitespace should be normalized (collapsed)
+        assert!(
+            !cleaned.contains("   "),
+            "multiple spaces should be collapsed"
+        );
+        assert!(
+            !cleaned.contains(
+                "
+
+"
+            ),
+            "multiple newlines should be collapsed"
+        );
+    }
 }
