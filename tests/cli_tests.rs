@@ -36,7 +36,6 @@ fn test_args_defaults() {
     assert!(!args.obsidian_relative_assets);
     assert!(args.vault.is_none());
     assert!(!args.quick_save);
-    assert!(!args.one_file_per_url);
     assert!(!args.obsidian_rich_metadata);
     assert_eq!(args.max_depth, 2);
     assert_eq!(args.timeout_secs, 30);
@@ -314,7 +313,6 @@ fn test_args_boolean_flags_default_false() {
     assert!(!args.dry_run);
     assert!(!args.quiet);
     assert!(!args.quick_save);
-    assert!(!args.one_file_per_url);
 }
 
 #[test]

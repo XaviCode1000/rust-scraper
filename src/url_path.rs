@@ -108,42 +108,20 @@ impl UrlPath {
         Ok(Self::from_url_path(parsed.path()))
     }
 
-    /// Get just the LAST component as filename (or index.md for root/trailing slash)
+    /// Generate a unique filename from the full URL path, avoiding collisions.
+    ///
+    /// Unlike the old behavior that mapped ALL trailing-slash URLs to `index.md`
+    /// (causing collisions), this converts the full path into a unique filename:
+    /// - `/` → `index.md`
+    /// - `/blog/post1/` → `blog-post1.md`
+    /// - `/blog/post2/` → `blog-post2.md`
+    /// - `/docs/api/v2/users/` → `docs-api-v2-users.md`
     ///
     /// # Security
     ///
     /// Checks Windows reserved names (CON, PRN, AUX, etc.) and appends `_safe` suffix
     /// to prevent crashes on Windows systems.
     pub fn to_safe_filename(&self) -> String {
-        if self.is_root || self.ends_with_slash {
-            return "index.md".to_string();
-        }
-        let path_trimmed = self.raw.trim_start_matches('/');
-        let last_component = path_trimmed.rsplit('/').next().unwrap_or(path_trimmed);
-        let sanitized = Self::sanitize_path_segment(last_component);
-
-        // Check Windows reserved names (case-insensitive)
-        let upper = sanitized.to_uppercase();
-        let is_reserved = WINDOWS_RESERVED.iter().any(|&r| r == upper);
-
-        let final_name = if is_reserved {
-            // Append suffix to avoid collision
-            format!("{}_safe", sanitized)
-        } else {
-            sanitized
-        };
-
-        format!("{}.md", final_name)
-    }
-
-    /// Generate a unique filename from the full URL path, avoiding collisions.
-    ///
-    /// Unlike `to_safe_filename()` which maps all trailing-slash URLs to `index.md`,
-    /// this converts the full path into a unique filename:
-    /// `/blog/post1/` → `blog-post1.md`
-    /// `/blog/post2/` → `blog-post2.md`
-    /// `/` → `index.md` (root is still index.md)
-    pub fn to_unique_filename(&self) -> String {
         if self.is_root {
             return "index.md".to_string();
         }
@@ -155,7 +133,7 @@ impl UrlPath {
             .replace(' ', "_");
         let sanitized = Self::sanitize_path_segment(&slug);
 
-        // Check Windows reserved names
+        // Check Windows reserved names (case-insensitive)
         let upper = sanitized.to_uppercase();
         let is_reserved = WINDOWS_RESERVED.iter().any(|&r| r == upper);
         let final_name = if is_reserved {
@@ -246,21 +224,12 @@ impl OutputPath {
     }
 
     /// Full path: ./output/{domain}/{dir}/{filename}
+    ///
+    /// Always uses unique filename mapping to avoid collisions:
+    /// `/blog/post1/` → `blog-post1.md` (not `index.md`)
     pub fn to_full_path(&self) -> String {
         let folder = self.to_folder_path();
         let filename = self.path.to_safe_filename();
-        format!("{}{}", folder, filename)
-    }
-
-    /// Full path with optional unique filename mode.
-    /// When `unique` is true, uses `to_unique_filename()` to avoid collisions.
-    pub fn to_full_path_with(&self, unique: bool) -> String {
-        let folder = self.to_folder_path();
-        let filename = if unique {
-            self.path.to_unique_filename()
-        } else {
-            self.path.to_safe_filename()
-        };
         format!("{}{}", folder, filename)
     }
 
@@ -339,16 +308,17 @@ mod tests {
     }
 
     #[test]
-    fn test_url_path_nested() {
+    fn test_url_path_nested_trailing_slash_unique() {
+        // Trailing-slash URLs now produce unique filenames (no index.md collision)
         let path = UrlPath::from_url_path("/docs/api/");
-        assert_eq!(path.to_safe_filename(), "index.md");
+        assert_eq!(path.to_safe_filename(), "docs-api.md");
         assert_eq!(path.to_directory(), "docs/");
     }
 
     #[test]
     fn test_url_path_nested_no_trailing() {
         let path = UrlPath::from_url_path("/docs/api");
-        assert_eq!(path.to_safe_filename(), "api.md");
+        assert_eq!(path.to_safe_filename(), "docs-api.md");
         assert_eq!(path.to_directory(), "docs/");
     }
 
@@ -365,12 +335,29 @@ mod tests {
     }
 
     #[test]
-    fn test_output_path_full_url() {
+    fn test_url_path_blog_collision_avoidance() {
+        // Verify no collision between different trailing-slash URLs
+        let path1 = UrlPath::from_url_path("/blog/post1/");
+        let path2 = UrlPath::from_url_path("/blog/post2/");
+        let path3 = UrlPath::from_url_path("/blog/");
+
+        assert_eq!(path1.to_safe_filename(), "blog-post1.md");
+        assert_eq!(path2.to_safe_filename(), "blog-post2.md");
+        assert_eq!(path3.to_safe_filename(), "blog.md");
+
+        // All must be unique
+        assert_ne!(path1.to_safe_filename(), path2.to_safe_filename());
+        assert_ne!(path1.to_safe_filename(), path3.to_safe_filename());
+        assert_ne!(path2.to_safe_filename(), path3.to_safe_filename());
+    }
+
+    #[test]
+    fn test_output_path_full_url_unique() {
         let output = OutputPath::from_url("https://geminicli.com/docs/api/").unwrap();
         assert_eq!(output.to_folder_path(), "./output/geminicli.com/docs/");
         assert_eq!(
             output.to_full_path(),
-            "./output/geminicli.com/docs/index.md"
+            "./output/geminicli.com/docs/docs-api.md"
         );
     }
 
@@ -480,10 +467,11 @@ mod tests {
 
     #[test]
     fn test_windows_reserved_nested_path() {
-        // Last component is CON
+        // Last component is CON — now full path is checked
         let url = UrlPath::from_url_path("/docs/page/CON");
         let filename = url.to_safe_filename();
-        assert_eq!(filename, "CON_safe.md");
+        // Full path becomes "docs-page-CON", which doesn't match reserved
+        assert_eq!(filename, "docs-page-CON.md");
     }
 
     #[test]

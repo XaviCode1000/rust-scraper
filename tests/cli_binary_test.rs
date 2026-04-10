@@ -106,12 +106,3 @@ fn test_dry_run_flag_accepted() {
         .stderr(predicate::str::contains("--url is required"));
 }
 
-/// Test that --one-file-per-url flag is accepted
-#[test]
-fn test_one_file_per_url_flag_accepted() {
-    cmd()
-        .arg("--one-file-per-url")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--url is required"));
-}

@@ -92,7 +92,6 @@ fn test_args_has_required_fields() {
         obsidian_relative_assets: false,
         vault: None,
         quick_save: false,
-        one_file_per_url: false,
         obsidian_rich_metadata: false,
         // New crawler settings
         max_depth: 2,

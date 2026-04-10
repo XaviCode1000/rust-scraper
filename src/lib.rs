@@ -802,18 +802,6 @@ pub struct Args {
     #[clap(next_help_heading = "Obsidian")]
     pub quick_save: bool,
 
-    /// Use unique filenames for each URL path instead of collapsing
-    /// trailing-slash URLs to `index.md`.
-    ///
-    /// When disabled (default): `/blog/post1/` and `/blog/post2/` both
-    /// become `index.md` in their respective directories.
-    ///
-    /// When enabled: `/blog/post1/` → `blog-post1.md`,
-    /// `/blog/post2/` → `blog-post2.md`.
-    #[arg(long, default_value = "false", env = "RUST_SCRAPER_ONE_FILE_PER_URL")]
-    #[clap(next_help_heading = "Output")]
-    pub one_file_per_url: bool,
-
     /// Add rich metadata to frontmatter (word count, reading time, language)
     ///
     /// Adds wordCount, readingTime, language, contentType, scrapeDate,

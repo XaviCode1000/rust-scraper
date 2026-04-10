@@ -661,7 +661,7 @@ async fn main() -> CliExit {
         rich_metadata: args.obsidian_rich_metadata,
         quick_save: args.quick_save,
         vault_path: vault_path.clone(),
-        one_file_per_url: args.one_file_per_url,
+
     };
 
     if let Err(e) = save_results(&results, &output_dir, &args.format, &obsidian_options) {

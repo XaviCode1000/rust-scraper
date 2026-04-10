@@ -32,8 +32,6 @@ pub struct ObsidianOptions {
     pub quick_save: bool,
     /// Vault path for Obsidian integration
     pub vault_path: Option<std::path::PathBuf>,
-    /// Use unique filenames per URL (avoid index.md collisions)
-    pub one_file_per_url: bool,
 }
 
 /// Save scraped results to output directory
@@ -85,7 +83,7 @@ fn save_as_markdown(
             },
         };
 
-        let full_path_str = output_path.to_full_path_with(obsidian.one_file_per_url);
+        let full_path_str = output_path.to_full_path();
         let relative_path = full_path_str.trim_start_matches("./output/");
         let full_path = output_dir.join(relative_path);
         let md_file_dir = full_path.parent().unwrap_or(output_dir);
@@ -148,7 +146,7 @@ fn save_as_markdown(
 fn save_as_text(
     results: &[ScrapedContent],
     output_dir: &Path,
-    obsidian: &ObsidianOptions,
+    _obsidian: &ObsidianOptions,
 ) -> Result<()> {
     use std::fs;
 
@@ -165,7 +163,7 @@ fn save_as_text(
 
         let full_path = output_dir.join(
             output_path
-                .to_full_path_with(obsidian.one_file_per_url)
+                .to_full_path()
                 .trim_start_matches("./")
                 .replace(".md", ".txt"),
         );
