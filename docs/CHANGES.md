@@ -76,7 +76,49 @@
 **Work on main after v1.1.0, not yet tagged**
 **Key Focus**: SPA detection (Issue #16 Phase 1) + WAF evasion for 2026
 
-#### Changes
+#### Content Extraction Pipeline Fix (Obsidian-quality output)
+
+**Problem**: Obsidian Markdown files contained ~60% noise (JavaScript bundles, CSS, navigation, sidebars, footers, ads) because raw HTML (500KB+) was stored in `ScrapedContent.html` and passed directly to Markdown converters.
+
+**Root cause**: Two independent paths both stored raw HTML:
+1. `scraper_service.rs` — used by `scrape_with_config()` 
+2. `crawler_service.rs:scrape_single_url_for_tui()` — used by quick-save/TUI mode
+
+Both bypassed `html-cleaning` and stored the full 500KB raw HTML instead of Readability's clean output.
+
+**Solution** — Three-layer pipeline:
+```
+Raw HTML (500KB)
+    ↓
+html-cleaning::clean_html()  ← Removes scripts, styles, nav, sidebar, footer, SVGs
+    ↓
+legible::parse()              ← Mozilla Readability.js (Firefox Reader View)
+    ↓
+Article.content (clean HTML)  ← ~15-50KB, no chrome
+    ↓
+htmd::convert()               ← Turndown-like HTML→Markdown (primary)
+    ↓                           Fallback: html_to_markdown::convert()
+Markdown limpio para Obsidian ✅
+```
+
+**Changes:**
+- ✅ `src/application/scraper_service.rs` — Added `html-cleaning` BEFORE legible, store `article.content` (clean HTML)
+- ✅ `src/application/crawler_service.rs` — Same fix in `scrape_single_url_for_tui()` (the quick-save path)
+- ✅ `src/infrastructure/scraper/readability.rs` — Added `content` field to `Article` struct (clean HTML from legible)
+- ✅ `src/infrastructure/output/file_saver.rs` — Use `htmd` as primary converter, fallback to `html_to_markdown`
+- ✅ `Cargo.toml` — Removed `defuddle-rs` (too immature, 0 stars, content scorer broken for doc sites)
+
+**Quality improvement** (Mintlify doc sites as benchmark):
+
+| Version | exploring.md | debugging.md | refactoring.md |
+|---------|-------------|-------------|----------------|
+| Defuddle-rs only | 863B / 28 lines ❌ | 881B / 29 lines ❌ | 922B / 32 lines ❌ |
+| Raw HTML → htmd | 298KB / 634 lines ❌ | 329KB / 629 lines ❌ | 415KB / 831 lines ❌ |
+| **Cleaned → legible → htmd** | **7.0KB / 185 lines** ✅ | **7.1KB / 193 lines** ✅ | **10KB / 288 lines** ✅ |
+
+**Result**: 42x less noise, clean content with code blocks, tables, and headings preserved.
+
+#### Other Changes
 - ✅ **SPA Detection:** `detect_spa_content()` function in `scraper_service.rs`
   - Warns via `tracing::warn!` when extracted content is below 50 chars
   - Returns `SpaDetectionResult` with diagnostic info (char count, empty title, SPA markers)

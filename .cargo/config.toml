@@ -1,3 +1,5 @@
 # Cargo configuration for local development
-# For sccache, set RUSTC_WRAPPER=sccache in your shell environment
-# CI uses Swatinem/rust-cache@v2 instead
+#
+# Build optimizations (sccache, mold, sparse registry) are configured
+# globally in ~/.cargo/config.toml — they are machine-level, not project-level.
+# CI uses Swatinem/rust-cache@v2.

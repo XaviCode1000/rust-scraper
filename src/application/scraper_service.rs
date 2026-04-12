@@ -152,8 +152,19 @@ pub async fn scrape_with_config(
         });
     }
 
+    // Clean HTML boilerplate (scripts, styles, nav, sidebar, footer) BEFORE
+    // Readability. This helps legible find the main content without being
+    // confused by navigation elements, JavaScript bundles, and CSS.
+    let cleaned_html = crate::infrastructure::converter::html_cleaner::clean_html(&html);
+    debug!(
+        "🧹 Cleaned HTML: {} → {} bytes ({}% reduction)",
+        html.len(),
+        cleaned_html.len(),
+        ((html.len() - cleaned_html.len()) as f64 / html.len() as f64 * 100.0).round()
+    );
+
     // Try Readability first, fallback to plain text extraction
-    match crate::infrastructure::scraper::readability::parse(&html, Some(url.as_str())) {
+    match crate::infrastructure::scraper::readability::parse(&cleaned_html, Some(url.as_str())) {
         Ok(article) => {
             let assets = download_assets_if_enabled(&html, url, config).await?;
 
@@ -179,7 +190,9 @@ pub async fn scrape_with_config(
                 excerpt: article.excerpt,
                 author: article.byline,
                 date: article.published_time,
-                html: Some(html),
+                // Store CLEAN HTML from Readability (not raw HTML with nav/ads/footer)
+                // This is what downstream Markdown converters receive.
+                html: Some(article.content),
                 assets,
             });
         },

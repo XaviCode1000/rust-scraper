@@ -12,6 +12,8 @@ use crate::error::{Result, ScraperError};
 pub struct Article {
     /// Article title
     pub title: String,
+    /// Clean HTML content (nav/sidebar/footer/ads removed)
+    pub content: String,
     /// Text content (clean, without ads/nav)
     pub text_content: String,
     /// Excerpt/summary if available
@@ -48,6 +50,7 @@ pub fn parse(html: &str, url: Option<&str>) -> Result<Article> {
 
     Ok(Article {
         title: article.title,
+        content: article.content,
         text_content: article.text_content,
         excerpt: article.excerpt,
         byline: article.byline,

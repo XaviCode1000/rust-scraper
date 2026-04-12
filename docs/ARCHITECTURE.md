@@ -295,11 +295,33 @@ pub fn create_http_client() -> Result<wreq::Client> {
 
 ### Scraper Service (`scraper_service.rs`)
 
+**Pipeline**: Raw HTML → `html-cleaning` → `legible::parse()` → clean HTML stored in `ScrapedContent.html`
+
 **Public functions:**
 - `scrape_with_readability(url: &str)` — Clean content extraction
 - `scrape_with_config(url: &str, config: &ScraperConfig)` — Scraping with options
 - `scrape_multiple_with_limit(urls: Vec<&str>, limit: usize)` — Bounded concurrency
 - `detect_spa_content(url: &str, content: &str)` — SPA detection heuristic (v1.3.0)
+
+**Content extraction flow:**
+```rust
+// 1. Fetch raw HTML (500KB for Mintlify)
+let html = response.text().await?;
+
+// 2. Clean boilerplate (scripts, styles, nav, sidebar, footer)
+let cleaned_html = html_cleaner::clean_html(&html);  // → 50-150KB
+
+// 3. Extract main content with Readability
+let article = legible::parse(&cleaned_html, url)?;
+
+// 4. Store CLEAN HTML (not raw HTML with nav/ads/footer)
+ScrapedContent {
+    html: Some(article.content),  // ← Clean HTML, ~15-50KB
+    content: article.text_content, // ← Plain text
+    title: article.title,
+    ...
+}
+```
 
 **SPA Detection (v1.3.0):**
 ```rust
@@ -318,13 +340,16 @@ const MAX_CONCURRENT_SCRAPES: usize = 3;
 
 ### Crawler Service (`crawler_service.rs`)
 
-**Largest service:** 942 LOC
+**Largest service:** ~1,135 LOC
+
+**Same cleaning pipeline** as `scraper_service.rs` — `html-cleaning` → `legible` → clean HTML storage
 
 **Public functions:**
 - `crawl_site(config: &CrawlerConfig)` — Full site crawl
 - `crawl_with_sitemap(sitemap_url: &str)` — Crawl via sitemap.xml
 - `discover_urls_for_tui(base_url: &str)` — TUI URL discovery
 - `scrape_urls_for_tui(urls: Vec<ValidUrl>)` — TUI scraping
+- `scrape_single_url_for_tui(...)` — Single URL scrape (used by quick-save)
 
 **Features:**
 - Rate limiting with `governor` crate
@@ -348,8 +373,8 @@ const MAX_CONCURRENT_SCRAPES: usize = 3;
 
 ## Infrastructure Layer (`src/infrastructure/`)
 
-**Total:** 7,507 lines of code  
-**Role:** External implementations (HTTP, FS, converters, AI)
+**Total:** ~7,700 lines of code
+**Role:** External implementations (HTTP, FS, converters, AI, HTML cleaning)
 
 ### Module Structure
 
@@ -360,16 +385,17 @@ src/infrastructure/
 │   └── mod.rs                  (6 LOC)    — HTTP re-exports
 ├── scraper/
 │   ├── mod.rs                  (11 LOC)
-│   ├── readability.rs          (111 LOC)  — legible wrapper
+│   ├── readability.rs          (~115 LOC) — legible wrapper + clean HTML extraction
 │   ├── fallback.rs             (70 LOC)   — htmd fallback
 │   └── asset_download.rs       (168 LOC)  — Asset downloading
 ├── converter/
 │   ├── mod.rs                  (4 LOC)
-│   ├── html_to_markdown.rs     (68 LOC)   — HTML→Markdown
+│   ├── html_cleaner.rs         (~180 LOC) — HTML boilerplate removal (NEW)
+│   ├── html_to_markdown.rs     (68 LOC)   — HTML→Markdown (fallback)
 │   └── syntax_highlight.rs     (152 LOC)  — Code highlighting
 ├── output/
 │   ├── mod.rs                  (4 LOC)
-│   ├── file_saver.rs           (192 LOC)  — File I/O
+│   ├── file_saver.rs           (~280 LOC) — File I/O + htmd conversion
 │   └── frontmatter.rs          (117 LOC)  — YAML frontmatter
 ├── crawler/
 │   ├── mod.rs                  (17 LOC)
@@ -382,39 +408,39 @@ src/infrastructure/
 │   ├── jsonl_exporter.rs       (207 LOC)  — JSONL export
 │   └── state_store.rs          (433 LOC)  — Export state tracking
 └── ai/ (feature-gated)
-    ├── mod.rs                  (141 LOC)
-    ├── chunk_id.rs             (107 LOC)  — Chunk ID generation
-    ├── chunker.rs              (473 LOC)  — Semantic chunking
-    ├── embedding_ops.rs        (354 LOC)  — Embedding operations
-    ├── inference_engine.rs     (447 LOC)  — ONNX inference
-    ├── model_cache.rs          (648 LOC)  — Model caching
-    ├── model_downloader.rs     (266 LOC)  — Model downloads
-    ├── relevance_scorer.rs     (473 LOC)  — Relevance scoring
-    ├── semantic_cleaner_impl.rs (787 LOC) — SemanticCleaner impl
-    ├── sentence.rs             (176 LOC)  — Sentence segmentation
-    ├── threshold_config.rs     (364 LOC)  — Threshold configuration
-    └── tokenizer.rs            (393 LOC)  — Tokenization
+    └── ... (unchanged)
 ```
 
 ### Key Modules
 
-#### Scraper Module (365 LOC)
+#### Scraper Module
+
+**HTML Cleaning (`html_cleaner.rs`):**
+- Uses `html-cleaning` + `dom_query` crates
+- Removes: `<script>`, `<style>`, `<noscript>`, `<svg>`, `<nav>`, `<header>`, `<footer>`, `<aside>`, `<iframe>`, `<form>`
+- CSS selectors: `.global-nav`, `.right-sidebar`, `.site-title`, `[aria-hidden]`, etc.
+- Runs BEFORE Readability to help it find main content without JS/CSS noise
 
 **Readability (`readability.rs`):**
 ```rust
-pub fn extract_content(html: &str, url: &Url) -> Result<ScrapedContent, ScraperError> {
-    let doc = legible::parse(html, url)
-        .ok_or_else(|| ScraperError::Readability("Failed to parse".into()))?;
-    
-    Ok(ScrapedContent {
-        title: doc.title,
-        content: doc.content,
-        url: ValidUrl::new(url.clone()),
-        excerpt: doc.excerpt,
-        author: doc.author,
-        date: doc.date,
-        html: None,
-        assets: vec![],
+pub struct Article {
+    pub title: String,
+    pub content: String,          // Clean HTML (nav/sidebar/footer removed)
+    pub text_content: String,     // Plain text
+    pub excerpt: Option<String>,
+    pub byline: Option<String>,
+    pub published_time: Option<String>,
+}
+
+pub fn parse(html: &str, url: Option<&str>) -> Result<Article> {
+    let article = legible::parse(html, url, None)?;
+    Ok(Article {
+        title: article.title,
+        content: article.content,   // Clean HTML, NOT raw HTML
+        text_content: article.text_content,
+        excerpt: article.excerpt,
+        byline: article.byline,
+        published_time: article.published_time,
     })
 }
 ```
@@ -428,27 +454,42 @@ pub fn extract_content(html: &str, url: &Url) -> Result<ScrapedContent, ScraperE
 - File size validation (50MB max)
 - 30s timeout per download
 
-#### Converter Module (224 LOC)
+#### Converter Module
+
+**HTML Cleaning (`html_cleaner.rs`):**
+- First step in the pipeline — cleans raw HTML BEFORE Readability
+- Uses `html-cleaning` crate with custom selectors for common doc-site patterns
+- Removes scripts (120+ on Mintlify), styles, nav, sidebar, footer, SVGs, iframes
+- Reduces 500KB HTML to ~50-150KB clean content
 
 **HTML to Markdown (`html_to_markdown.rs`):**
 - Uses `html-to-markdown-rs` crate
 - Preserves headings, code blocks, lists
+- Fallback converter when htmd produces empty output
+
+**htmd (primary Markdown converter):**
+- Uses `htmd` crate (turndown-inspired, 394K downloads)
+- Better handling of modern HTML structures
+- First choice in `file_saver.rs`
 
 **Syntax Highlighting (`syntax_highlight.rs`):**
 - Uses `syntect` crate
 - Supports 100+ languages
 - Theme customization
 
-#### Output Module (313 LOC)
+#### Output Module
 
 **File Saver (`file_saver.rs`):**
 - Domain-based folder structure
-- Atomic writes with temp files
-- Conflict resolution
+- HTML→Markdown conversion: `htmd` (primary) → `html_to_markdown` (fallback)
+- Wiki-link conversion for Obsidian
+- Relative asset path rewriting
+- Rich metadata generation
 
 **Frontmatter (`frontmatter.rs`):**
 - YAML frontmatter generation
 - Metadata: title, date, author, excerpt, URL
+- Rich fields: wordCount, readingTime, language, contentType, status
 
 #### Crawler Module (1,201 LOC)
 
@@ -712,12 +753,22 @@ URL Input (String)
          │
          ▼
 ┌─────────────────┐
+│ Infrastructure  │  html-cleaning::clean_html()  ← NEW: Remove JS/CSS/nav/sidebar
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
 │ Infrastructure  │  legible::parse() (Readability algorithm)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Infrastructure  │  html_to_markdown::convert()
+│   Domain        │  ScrapedContent { html: Some(article.content) }  ← clean HTML
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Infrastructure  │  htmd::convert() (primary) or html_to_markdown (fallback)
 └────────┬────────┘
          │
          ▼
@@ -735,7 +786,7 @@ URL Input (String)
 │ Infrastructure  │  file_saver::save_results() (atomic write)
 └─────────────────┘
 
-Output: Markdown file with YAML frontmatter
+Output: Markdown file with YAML frontmatter (clean, no JS/CSS/nav noise)
 ```
 
 ### Web Crawler Workflow

@@ -17,6 +17,31 @@ use crate::OutputFormat;
 use std::path::Path;
 use tracing::warn;
 
+/// Convert HTML to Markdown using the best available converter.
+///
+/// Pipeline strategy:
+/// 1. Try `htmd` first (turndown-like, handles modern HTML well)
+/// 2. Fall back to `html_to_markdown` if htmd produces empty output or errors
+/// 3. If both fail, return the input as-is (shouldn't happen with valid HTML)
+fn convert_html_to_markdown(html: &str) -> String {
+    // Try htmd (turndown-inspired converter)
+    if let Ok(md) = htmd::convert(html) {
+        if !md.trim().is_empty() {
+            return md;
+        }
+    }
+
+    // Fallback to html_to_markdown
+    let fallback = html_to_markdown::convert_to_markdown(html);
+    if !fallback.trim().is_empty() {
+        return fallback;
+    }
+
+    // Last resort: return the HTML as-is
+    warn!("Both Markdown converters produced empty output, returning raw HTML");
+    html.to_string()
+}
+
 /// Configuration for Obsidian-compatible output.
 #[derive(Debug, Clone, Default)]
 pub struct ObsidianOptions {
@@ -91,12 +116,13 @@ fn save_as_markdown(
             fs::create_dir_all(parent)?;
         }
 
-        // Convert raw HTML to Markdown to preserve headings, code blocks, links,
-        // tables, and lists. The readability-extracted text (item.content) loses
-        // all HTML structure, so we prefer the raw HTML for Markdown output.
-        // For Text format, item.content (readability text) is still used.
+        // Convert HTML to Markdown.
+        // The HTML stored in item.html should be clean HTML (already processed
+        // by Readability/legible to remove nav, sidebar, footer, ads).
+        // We use htmd (turndown-like) as primary converter, with html_to_markdown
+        // as fallback.
         let markdown_content = if let Some(html) = &item.html {
-            html_to_markdown::convert_to_markdown(html)
+            convert_html_to_markdown(html)
         } else if !item.content.is_empty() {
             // Fallback: use readability text directly (no structure)
             item.content.clone()

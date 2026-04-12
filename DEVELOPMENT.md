@@ -34,15 +34,15 @@
 
 ```bash
 # Install tools (one-time)
-cargo install cargo-nextest cargo-llvm-cov sccache
+cargo binstall just cargo-nextest cargo-llvm-cov cargo-audit cargo-machete
 
-# Run tests (4x faster than cargo test)
-cargo nextest run
+# Run tests (HDD-optimized)
+just test
 
-# Run clippy
-cargo clippy -- -D warnings
+# Run full check (fmt + clippy)
+just check
 
-# Run bacon for background checking
+# Run background checker
 bacon
 ```
 
@@ -52,25 +52,42 @@ bacon
 
 | Herramienta | Versión | Propósito |
 |-------------|---------|-----------|
-| **Rust** | 1.93.0 | Latest stable |
-| **cargo-nextest** | 0.9.130 | Test runner (4x faster) |
-| **cargo-llvm-cov** | latest | Cobertura nativa LLVM (10x faster) |
-| **sccache** | 0.14.0 | Cache de compilación (6x faster) |
-| **bacon** | latest | Background checker (replaces cargo-watch) |
-| **mold** | latest | Linker (seconds → milliseconds) |
+| **Rust** | 1.88 | MSRV del proyecto |
+| **just** | 1.49 | Task runner (orquesta tareas) |
+| **cargo-nextest** | 0.9+ | Test runner (paraleliza) |
+| **cargo-llvm-cov** | latest | Cobertura nativa LLVM |
+| **cargo-audit** | latest | Vulnerabilidades conocidas |
+| **cargo-deny** | 0.16+ | Licencias y deps |
+| **cargo-machete** | 0.9+ | Deps huérfanas |
+| **sccache** | 0.14 | Cache de compilación |
+| **bacon** | latest | Background checker |
+| **mold** | 2.40 | Linker rápido |
 
 ---
 
 ## 🛠️ Commands
 
+### Just Recipes (preferred)
+
+```bash
+just                # default: check (fmt + clippy)
+just check          # fmt + clippy --all-targets --all-features
+just check-fast     # cargo check
+just test           # cargo nextest run --test-threads 2
+just test-ai        # nextest with --features ai
+just audit          # cargo audit + cargo deny check + cargo machete
+just cov            # cargo llvm-cov --html
+just fmt            # cargo fmt
+just build-release  # cargo build --release
+```
+
+### Raw Commands
+
 ### Tests
 
 ```bash
-# Traditional (slow) - NOT RECOMMENDED
-cargo test -- --test-threads 2
-
-# Nextest (4x faster) ✅
-cargo nextest run
+# Nextest (preferred)
+cargo nextest run --test-threads 2
 
 # Run only failed tests
 cargo nextest run --failed
@@ -82,10 +99,7 @@ cargo nextest run --run-ignored ignored-only
 ### Cobertura
 
 ```bash
-# Tarpaulin (slow, ~5min)
-cargo tarpaulin --out Html
-
-# LLVM-Cov (fast, ~30s) ✅
+# LLVM-Cov (preferred)
 cargo llvm-cov nextest --html --output-dir coverage-llvm
 ```
 
@@ -95,14 +109,14 @@ cargo llvm-cov nextest --html --output-dir coverage-llvm
 # Standard build
 cargo build --release
 
-# With sccache (6x faster) ✅
+# With sccache (auto-configured via RUSTC_WRAPPER)
 sccache --show-stats  # View cache stats
 ```
 
 ### Linting
 
 ```bash
-# Clippy with warnings as errors ✅
+# Clippy with warnings as errors
 cargo clippy -- -D warnings
 
 # Auto-fix
@@ -125,8 +139,20 @@ cargo fmt
 # Run bacon (auto-runs clippy on changes)
 bacon
 
-# Custom jobs in bacon.toml:
-# t = nextest, f = nextest --failed, c = clippy
+# Keybindings: t=nextest, c=clippy, n=nextest, r=run
+```
+
+### Audit
+
+```bash
+# Security vulnerabilities
+cargo audit
+
+# License and dependency policy
+cargo deny check
+
+# Unused dependencies
+cargo machete
 ```
 
 ---
@@ -139,6 +165,7 @@ bacon
 | **Coverage** | `tarpaulin` (5min) | `llvm-cov` (30s) | **~10x** |
 | **Build** | Clean (60s) | `sccache` (10s) | **~6x** |
 | **Linting** | Manual | `bacon` (instant) | **Instant** |
+| **Multi-step** | Manual secuencial | `just audit` (un paso) | **Orquestado** |
 
 ---
 
@@ -177,11 +204,24 @@ r = "build --release"
 
 ```toml
 # Cargo configuration for local development
-# For sccache, set RUSTC_WRAPPER=sccache in your shell environment
+# sccache is configured globally (~/.cargo/config.toml) via rustc-wrapper
 # CI uses Swatinem/rust-cache@v2 instead
 ```
 
-The file is minimal — sccache is configured via environment variable (`RUSTC_WRAPPER=sccache`), not config file.
+Local config is intentionally minimal — `sccache`, `mold`, and `sparse registry` are configured **globally** in `~/.cargo/config.toml` because they're machine-level optimizations, not project-specific settings.
+
+### justfile
+
+Task runner for multi-step orchestration:
+
+```makefile
+just check        # fmt + clippy strict
+just test         # nextest --test-threads 2
+just audit        # audit + deny + machete
+just cov          # coverage report
+```
+
+Complements `bacon` (inner loop watch mode) — `just` is for explicit one-off commands.
 
 ### sccache Stats
 
@@ -203,7 +243,7 @@ sccache --zero-stats
 ```
 rust_scraper/
 ├── .cargo/
-│   └── config.toml          # sccache + mold linker
+│   └── config.toml          # Minimal — sccache/mold are global
 ├── src/
 │   ├── application/
 │   │   └── http_client.rs   # HttpClient wrapper (Option A)
@@ -214,8 +254,10 @@ rust_scraper/
 │   ├── http_client_integration.rs  # Real site tests (ignored)
 │   └── ai_integration.rs            # AI tests (feature-gated)
 ├── docs/
+├── justfile                 # Task runner recipes
 ├── nextest.toml             # Test configuration
 ├── bacon.toml              # Background checker
+├── deny.toml               # License/dependency policy
 └── Cargo.toml
 ```
 
@@ -235,7 +277,10 @@ bacon
 ### 2. Before Commit
 
 ```bash
-# Format + lint + test
+# Option A: Just recipe (preferred)
+just check && just test
+
+# Option B: Manual
 cargo fmt
 cargo clippy -- -D warnings
 cargo nextest run
@@ -339,11 +384,15 @@ See comments in `Cargo.toml` for details. Do NOT try to unify them.
 - [cargo-llvm-cov docs](https://github.com/taiki-e/cargo-llvm-cov)
 - [sccache docs](https://github.com/mozilla/sccache)
 - [bacon docs](https://dystroy.org/bacon/)
-- [Rust 2025-26 Best Practices](https://rust-lang.github.io/api-guidelines/)
+- [just docs](https://github.com/casey/just)
+- [cargo-deny docs](https://embarkstudios.github.io/cargo-deny/)
+- [cargo-audit docs](https://github.com/rustsec/rustsec/tree/main/cargo-audit)
+- [cargo-machete docs](https://github.com/bnjbvr/cargo-machete)
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
 
 ---
 
-**Last updated**: 2026-04-07
-**Rust version**: 1.93.0
-**Stack version**: 2025-26 optimal
+**Last updated**: 2026-04-12
+**Rust version**: 1.88
+**Stack**: sccache + mold + nextest + just + bacon + cargo-deny + cargo-audit + cargo-machete
 **Tests**: ~271 passing (nextest)

@@ -8,8 +8,14 @@
 # Prevenir thrashing del HDD con 2 hilos máximo
 threads-required = 2
 
-# Reintentos para tests que pueden fallar por I/O
-retries = 2
+# Reintentos con backoff exponencial para tests flaky por I/O
+retries = { backoff = "exponential", count = 2, delay = "1s" }
+
+# Output limpio pero completo al fallar
+failure-output = "final"
+
+# No mostrar skips para reducir ruido
+status-level = "skip"
 
 # Timeout más largo para tests que usan red/disco
 slow-timeout = { period = "60s", terminate-after = 3 }
@@ -18,6 +24,8 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 # Configuración más agresiva para CI
 threads-required = 4
 retries = 0
+fail-fast = false
+failure-output = "immediate-final"
 slow-timeout = { period = "120s", terminate-after = 2 }
 
 [filter]

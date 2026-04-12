@@ -9,6 +9,21 @@ Production-ready web scraper with Clean Architecture, TUI selector, and AI seman
 
 ## Key Commands
 
+### Just Recipes (preferred — orchestrate tasks)
+
+```bash
+just check          # fmt + clippy strict
+just check-fast     # cargo check (fastest)
+just test           # nextest --test-threads 2
+just test-ai        # nextest with AI features
+just audit          # audit + deny + machete
+just cov            # coverage HTML report
+just fmt            # format code
+just build-release  # optimized build
+```
+
+### Raw Commands (when Just isn't available)
+
 ```bash
 # Verify compilation (FAST — use this)
 cargo check
@@ -137,6 +152,7 @@ Responses are scanned for 19 WAF signatures (Cloudflare, reCAPTCHA, hCaptcha, Da
 - Use `cargo nextest run` (never `cargo test`)
 - Use `cargo llvm-cov` (never `cargo tarpaulin`)
 - Use `bacon` for background checking (never `cargo-watch`)
+- Use `just` recipes for multi-step tasks (audit, coverage, release)
 
 ### ⚠️ Ask first
 
@@ -158,6 +174,7 @@ Responses are scanned for 19 WAF signatures (Cloudflare, reCAPTCHA, hCaptcha, Da
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architecture details
 - [DEVELOPMENT.md](DEVELOPMENT.md) — Dev workflow and tooling
+- [justfile](justfile) — Task recipes (check, test, audit, cov)
 
 ---
 

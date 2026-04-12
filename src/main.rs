@@ -854,7 +854,13 @@ fn apply_config_defaults(mut args: Args, config: &ConfigDefaults) -> Args {
         }
     }
 
-    // Obsidian config
+    // Obsidian config — trim whitespace from CLI tags (clap value_delimiter doesn't trim)
+    if let Some(ref mut tags) = args.obsidian_tags {
+        for tag in tags.iter_mut() {
+            *tag = tag.trim().to_string();
+        }
+        tags.retain(|t| !t.is_empty());
+    }
     if let Some(ref tags_str) = config.obsidian_tags {
         if args.obsidian_tags.is_none() {
             args.obsidian_tags = Some(

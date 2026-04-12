@@ -259,8 +259,13 @@ pub async fn scrape_single_url_for_tui(
         .await
         .map_err(|e| ScraperError::Network(e.to_string()))?;
 
+    // Clean HTML boilerplate (scripts, styles, nav, sidebar, footer) BEFORE
+    // Readability. This helps legible find the main content without being
+    // confused by navigation elements, JavaScript bundles, and CSS.
+    let cleaned_html = crate::infrastructure::converter::html_cleaner::clean_html(&html);
+
     // Try Readability first, fallback to plain text extraction
-    match readability::parse(&html, Some(url.as_str())) {
+    match readability::parse(&cleaned_html, Some(url.as_str())) {
         Ok(article) => {
             let assets = download_assets_if_enabled(&html, url, config).await?;
 
@@ -271,7 +276,8 @@ pub async fn scrape_single_url_for_tui(
                 excerpt: article.excerpt,
                 author: article.byline,
                 date: article.published_time,
-                html: Some(html),
+                // Store CLEAN HTML from Readability (not raw HTML with nav/ads/footer)
+                html: Some(article.content),
                 assets,
             })
         },

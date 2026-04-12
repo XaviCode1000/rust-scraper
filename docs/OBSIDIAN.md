@@ -160,6 +160,32 @@ src/infrastructure/obsidian/
 └── uri.rs              # Obsidian URI builder + xdg-open
 ```
 
+## Content Extraction Pipeline
+
+When saving to Obsidian (via `--quick-save` or TUI), content goes through a three-layer cleaning pipeline:
+
+```
+Raw HTML (500KB, with JS/CSS/nav/sidebar/footer/ads)
+    ↓
+html-cleaning::clean_html()  ← Removes 120+ scripts, styles, nav, sidebar
+    ↓
+legible::parse()              ← Mozilla Readability.js (Firefox Reader View)
+    ↓
+Clean HTML (~15-50KB, article content only)
+    ↓
+htmd::convert()               ← HTML → Markdown (turndown-inspired)
+    ↓
+Markdown file with frontmatter (7-10KB for typical doc page)
+```
+
+**Quality comparison** (Mintlify documentation sites):
+
+| Pipeline Stage | Output Size | Content Quality |
+|----------------|-------------|-----------------|
+| Raw HTML → Markdown | 300KB+ | ❌ 60% noise (JS, CSS, nav, footer) |
+| Defuddle-rs only | <1KB | ❌ Too aggressive, removes content |
+| **Cleaned → legible → htmd** | **7-10KB** | ✅ Clean content, code blocks, tables |
+
 ## Dependencies
 
 | Crate | Version | Purpose |
@@ -168,6 +194,12 @@ src/infrastructure/obsidian/
 | `whatlang` | 0.18 | Language detection (pure Rust, ~81KB) |
 | `urlencoding` | 2.1 | URL encoding for Obsidian URI |
 | `slug` | 0.1 | URL slug generation for filenames |
+| `html-cleaning` | 0.3 | HTML boilerplate removal (nav, scripts, etc.) |
+| `dom_query` | 0.24 | DOM manipulation for HTML cleaning |
+| `htmd` | 0.5 | Primary HTML→Markdown converter |
+| `html-to-markdown-rs` | 2.x | Fallback HTML→Markdown converter |
+| `legible` | 0.4 | Mozilla Readability.js (content extraction) |
+| `scraper` | 0.22 | CSS selector support |
 
 ## Troubleshooting
 
