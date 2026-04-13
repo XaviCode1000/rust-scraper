@@ -37,7 +37,7 @@ use crate::infrastructure::crawler::{
 };
 
 // FASE 3: Sitemap support
-use crate::infrastructure::crawler::sitemap_parser::{SitemapConfig, SitemapParser};
+use crate::infrastructure::crawler::{SitemapConfig, SitemapParser};
 
 // FASE 4: TUI support - re-exports
 use crate::error::{Result as ScraperResult, ScraperError};
