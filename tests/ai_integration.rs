@@ -16,7 +16,7 @@
 #![cfg(feature = "ai")]
 
 use rust_scraper::domain::DocumentChunk;
-use rust_scraper::infrastructure::ai::model_cache::{
+use rust_scraper::infrastructure::ai::{
     default_cache_dir, CacheConfig, ModelCache, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO,
 };
 use rust_scraper::infrastructure::ai::model_downloader::ModelDownloader;
@@ -361,7 +361,6 @@ fn test_tokenizer_type_traits() {
 // ============================================================================
 
 /// Test that ChunkId type exists and compiles
-#[test]
 /// Test ChunkId creation and display
 #[test]
 fn test_chunk_id_display() {
@@ -395,8 +394,6 @@ fn test_chunk_id_equality() {
 
 /// Test that SentenceSplitter type exists
 #[test]
-/// Test sentence splitter basic functionality
-#[test]
 fn test_sentence_splitter_basic() {
     use rust_scraper::infrastructure::ai::SentenceSplitter;
 
@@ -427,7 +424,6 @@ fn test_sentence_splitter_trimmed() {
 }
 
 /// Test that HtmlChunker type exists
-#[test]
 /// Test chunker creation with defaults
 #[test]
 fn test_chunker_creation() {
@@ -572,10 +568,8 @@ fn test_euclidean_distance() {
     assert!((dist - 5.0).abs() < 0.001); // 3-4-5 triangle
 }
 
-/// Test that RelevanceScorer type exists
 #[test]
 /// Test relevance scorer creation
-#[test]
 fn test_relevance_scorer_creation() {
     use rust_scraper::infrastructure::ai::RelevanceScorer;
 
@@ -613,11 +607,9 @@ fn test_relevance_scorer_meets_threshold() {
     assert!(scorer.meets_threshold(0.5));
     assert!(!scorer.meets_threshold(0.4));
 }
-
 /// Test that ThresholdConfig type exists
 #[test]
 /// Test threshold config default values
-#[test]
 fn test_threshold_config_defaults() {
     use rust_scraper::infrastructure::ai::ThresholdConfig;
 
@@ -710,7 +702,6 @@ fn test_threshold_config_balanced() {
 // ============================================================================
 
 /// Test that SemanticCleanerImpl has all required fields
-#[test]
 #[test]
 fn test_semantic_cleaner_impl_send_sync() {
     fn assert_send<T: Send>() {}

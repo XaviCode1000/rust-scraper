@@ -105,4 +105,3 @@ fn test_dry_run_flag_accepted() {
         .failure()
         .stderr(predicate::str::contains("--url is required"));
 }
-

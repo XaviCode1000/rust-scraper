@@ -26,11 +26,11 @@
 //! - No `<loc>` elements found
 
 use async_compression::tokio::bufread::GzipDecoder;
+use super::sitemap_config::{SitemapConfig};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::HashSet;
 use thiserror::Error;
-use tokio::io::BufReader;
 use url::Url;
 
 /// Sitemap parser errors
@@ -122,108 +122,6 @@ pub fn resolve_url(base: &Url, input: &str) -> Option<Url> {
     base.join(input).ok()
 }
 
-/// Sitemap parser configuration (builder pattern)
-///
-/// Following api-builder-pattern: clear, self-documenting API
-#[derive(Debug, Clone)]
-pub struct SitemapConfig {
-    /// Enable gzip decompression (default: true)
-    pub gzip_enabled: bool,
-    /// Maximum recursion depth for sitemap indexes (default: 3)
-    pub max_depth: u8,
-    /// Concurrent requests for sitemap indexes (default: 5)
-    pub concurrency: usize,
-    /// Maximum HTTP response size in bytes (default: 50MB)
-    pub max_response_size: usize,
-    /// Maximum decompressed gzip size in bytes (default: 100MB)
-    pub max_decompressed_size: usize,
-}
-
-impl Default for SitemapConfig {
-    fn default() -> Self {
-        Self {
-            gzip_enabled: true,
-            max_depth: 3,
-            concurrency: 5,
-            max_response_size: 52_428_800,      // 50MB
-            max_decompressed_size: 104_857_600, // 100MB
-        }
-    }
-}
-
-impl SitemapConfig {
-    /// Create new config builder
-    pub fn builder() -> SitemapConfigBuilder {
-        SitemapConfigBuilder::default()
-    }
-}
-
-/// Builder for SitemapConfig
-///
-/// Following api-builder-must-use: #[must_use] attribute
-#[derive(Default)]
-#[must_use = "builders do nothing unless you call build()"]
-pub struct SitemapConfigBuilder {
-    gzip_enabled: bool,
-    max_depth: u8,
-    concurrency: usize,
-    max_response_size: usize,
-    max_decompressed_size: usize,
-}
-
-impl SitemapConfigBuilder {
-    /// Enable or disable gzip decompression
-    pub fn gzip_enabled(mut self, enabled: bool) -> Self {
-        self.gzip_enabled = enabled;
-        self
-    }
-
-    /// Set maximum recursion depth for sitemap indexes
-    pub fn max_depth(mut self, depth: u8) -> Self {
-        self.max_depth = depth;
-        self
-    }
-
-    /// Set concurrency level for parallel sitemap parsing
-    pub fn concurrency(mut self, count: usize) -> Self {
-        self.concurrency = count;
-        self
-    }
-
-    /// Set maximum HTTP response size in bytes
-    pub fn max_response_size(mut self, size: usize) -> Self {
-        self.max_response_size = size;
-        self
-    }
-
-    /// Set maximum decompressed gzip size in bytes
-    pub fn max_decompressed_size(mut self, size: usize) -> Self {
-        self.max_decompressed_size = size;
-        self
-    }
-
-    /// Build the configuration
-    #[must_use]
-    pub fn build(self) -> SitemapConfig {
-        let defaults = SitemapConfig::default();
-        SitemapConfig {
-            gzip_enabled: self.gzip_enabled,
-            max_depth: self.max_depth,
-            concurrency: self.concurrency,
-            max_response_size: if self.max_response_size == 0 {
-                defaults.max_response_size
-            } else {
-                self.max_response_size
-            },
-            max_decompressed_size: if self.max_decompressed_size == 0 {
-                defaults.max_decompressed_size
-            } else {
-                self.max_decompressed_size
-            },
-        }
-    }
-}
-
 /// Zero-allocation streaming sitemap parser
 ///
 /// Following mem-streaming-large-data: streaming parser, no buffer accumulation
@@ -283,20 +181,15 @@ impl SitemapParser {
             return Err(SitemapError::MaxDepthExceeded);
         }
 
-        // Parse base URL for validation and relative URL resolution
-        // Following own-borrow-over-clone: &str not &String
         let base_url = Url::parse(url)?;
 
         // Fetch sitemap content
-        // Following security-no-unwrap-in-prod: proper error handling
         let response = self.client.get(url).send().await.map_err(|e| {
             tracing::warn!("http request failed for {}: {}", url, e);
             SitemapError::HttpError(e.to_string())
         })?;
 
-        // Check if gzip compressed
-        // Following security-filter-input: validate content type
-        // Validate content type is XML or compatible - reject non-XML responses early
+        // Validate content type
         let content_type = response
             .headers()
             .get("content-type")
@@ -326,7 +219,7 @@ impl SitemapParser {
                 .map(|v| v == "gzip")
                 .unwrap_or(false);
 
-        // Stream response with size limit to prevent OOM
+        // Stream response with size limit
         use futures::StreamExt;
         let mut stream = response.bytes_stream();
         let mut raw_bytes = Vec::with_capacity(8192);
@@ -348,7 +241,6 @@ impl SitemapParser {
         }
 
         // Parse based on compression
-        // Following mem-streaming-large-data: stream, don't accumulate
         let urls = if is_gzip && self.config.gzip_enabled {
             self.parse_gzip_sitemap(&raw_bytes, &base_url).await?
         } else {
@@ -356,7 +248,6 @@ impl SitemapParser {
         };
 
         // Check if sitemap index (recursive)
-        // Following async-no-lock-await: no locks before await
         if self.is_sitemap_index(&urls) {
             tracing::debug!("Detected sitemap index, recursing (depth: {})", depth);
             self.parse_sitemap_index(&urls, depth - 1).await
@@ -366,19 +257,16 @@ impl SitemapParser {
     }
 
     /// Parse gzip-compressed sitemap
-    ///
-    /// Following mem-streaming-large-data: decompress in stream
     async fn parse_gzip_sitemap(&self, bytes: &[u8], base_url: &Url) -> Result<Vec<Url>> {
+        use tokio::io::{AsyncReadExt, BufReader};
         let reader = BufReader::new(bytes);
         let mut decoder = GzipDecoder::new(reader);
 
-        // Limit decompressed size to prevent decompression bombs
         let mut limited =
-            tokio::io::AsyncReadExt::take(&mut decoder, self.config.max_decompressed_size as u64);
+            AsyncReadExt::take(&mut decoder, self.config.max_decompressed_size as u64);
         let mut decompressed = Vec::new();
-        tokio::io::AsyncReadExt::read_to_end(&mut limited, &mut decompressed).await?;
+        AsyncReadExt::read_to_end(&mut limited, &mut decompressed).await?;
 
-        // Check if we hit the limit (possible decompression bomb)
         if decompressed.len() >= self.config.max_decompressed_size {
             tracing::warn!(
                 "Gzip decompression hit size limit ({} bytes) — possible decompression bomb",
@@ -389,36 +277,25 @@ impl SitemapParser {
             ));
         }
 
-        // Parse XML
         self.parse_xml_sitemap(&decompressed, base_url).await
     }
 
     /// Parse XML sitemap (zero-allocation streaming)
-    ///
-    /// Following mem-no-clone-in-loop: no allocations inside parsing loop
     async fn parse_xml_sitemap(&self, bytes: &[u8], base_url: &Url) -> Result<Vec<Url>> {
-        // Create reader with buffer
         let mut reader = Reader::from_reader(bytes);
-        // reader.trim_text(true); // Deprecated in quick_xml 0.37
 
-        // Use HashSet to avoid duplicates
         let mut urls = HashSet::new();
         let mut buf = Vec::new();
         let mut in_loc = false;
 
-        // Streaming parse - no buffer accumulation
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) if e.name().as_ref() == b"loc" => {
                     in_loc = true;
                 },
                 Ok(Event::Text(ref e)) if in_loc => {
-                    // Following own-cow-for-owned-borrowed: unescape returns Cow
                     if let Ok(text) = e.unescape() {
-                        // Following security-filter-input: validate URL scheme
-                        // Use resolve_url() to handle relative URLs safely
                         if let Some(url) = resolve_url(base_url, &text) {
-                            // Only http/https schemes allowed
                             if url.scheme() == "http" || url.scheme() == "https" {
                                 urls.insert(url);
                             } else {
@@ -438,11 +315,9 @@ impl SitemapParser {
                 Err(e) => return Err(SitemapError::XmlError(e)),
                 _ => {},
             }
-            // Following mem-no-clone-in-loop: clear buffer, don't reallocate
             buf.clear();
         }
 
-        // Following security-no-unwrap-in-prod: proper error, not unwrap
         if urls.is_empty() {
             Err(SitemapError::NoUrlsFound)
         } else {
@@ -451,24 +326,17 @@ impl SitemapParser {
     }
 
     /// Check if URLs are sitemap index entries
-    ///
-    /// Following naming-boolean-methods: is_* prefix for boolean methods
     fn is_sitemap_index(&self, urls: &[Url]) -> bool {
-        // Heuristic: if URLs end with .xml or .xml.gz, likely sitemap index
         urls.iter()
             .any(|u| u.path().ends_with(".xml") || u.path().ends_with(".xml.gz"))
     }
 
     /// Parse sitemap index recursively
-    ///
-    /// Following async-clone-channel-before-await: proper concurrency pattern
     async fn parse_sitemap_index(&self, sitemap_urls: &[Url], depth: u8) -> Result<Vec<Url>> {
         use futures::stream::{self, StreamExt};
 
         let mut all_urls = HashSet::new();
 
-        // Concurrent parsing with limit
-        // Following async-channel-bounded: bounded concurrency
         let results = stream::iter(sitemap_urls)
             .map(|url| async move { self.parse_with_depth(url.as_str(), depth).await })
             .buffered(self.config.concurrency)
@@ -490,8 +358,6 @@ impl SitemapParser {
     }
 
     /// Check if gzip is enabled in config
-    ///
-    /// Following naming-boolean-methods: has_* prefix
     #[must_use]
     pub fn has_gzip(&self) -> bool {
         self.config.gzip_enabled
@@ -514,10 +380,8 @@ impl Default for SitemapParser {
 mod tests {
     use super::*;
 
-    // Following test-tokio-test-async: #[tokio::test] for async tests
     #[tokio::test]
     async fn test_parse_simple_sitemap() {
-        // Test with mock data
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
             <url><loc>https://example.com/page1</loc></url>
@@ -540,7 +404,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_sitemap_with_duplicates() {
-        // Test duplicate handling
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
             <url><loc>https://example.com/page1</loc></url>
@@ -555,13 +418,11 @@ mod tests {
             .await
             .unwrap();
 
-        // HashSet should deduplicate
         assert_eq!(urls.len(), 2);
     }
 
     #[tokio::test]
     async fn test_parse_empty_sitemap() {
-        // Test empty sitemap
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
         </urlset>"#;
@@ -575,7 +436,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_malformed_xml() {
-        // Test malformed XML
         let xml = r#"<?xml version="1.0"?>
         <urlset>
             <url><loc>https://example.com/page1</loc>
@@ -586,14 +446,11 @@ mod tests {
         let base = Url::parse("https://example.com").unwrap();
         let result = parser.parse_xml_sitemap(xml.as_bytes(), &base).await;
 
-        // Should handle gracefully (quick_xml is lenient)
-        // At minimum, shouldn't panic
         assert!(result.is_ok() || matches!(result, Err(SitemapError::XmlError(_))));
     }
 
     #[test]
     fn test_config_builder() {
-        // Following api-builder-pattern: test builder API
         let config = SitemapConfig::builder()
             .gzip_enabled(true)
             .max_depth(5)
@@ -607,7 +464,6 @@ mod tests {
 
     #[test]
     fn test_config_default() {
-        // Test default config values
         let config = SitemapConfig::default();
 
         assert!(config.gzip_enabled);
@@ -619,14 +475,12 @@ mod tests {
     fn test_is_sitemap_index() {
         let parser = SitemapParser::new();
 
-        // Test with sitemap index URLs
         let index_urls = vec![
             Url::parse("https://example.com/sitemap1.xml").unwrap(),
             Url::parse("https://example.com/sitemap2.xml.gz").unwrap(),
         ];
         assert!(parser.is_sitemap_index(&index_urls));
 
-        // Test with regular URLs
         let regular_urls = vec![
             Url::parse("https://example.com/page1").unwrap(),
             Url::parse("https://example.com/page2").unwrap(),
@@ -645,10 +499,8 @@ mod tests {
         assert!(!parser_no_gzip.has_gzip());
     }
 
-    // Following test-proptest-for-edge-cases: property-based testing for URLs
     #[tokio::test]
     async fn test_filter_invalid_schemes() {
-        // Test that non-http/https schemes are filtered
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
             <url><loc>https://example.com/valid</loc></url>
@@ -665,7 +517,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Only http/https should be included
         assert_eq!(urls.len(), 2);
         assert!(urls
             .iter()
@@ -674,7 +525,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_sitemap_with_namespaces() {
-        // Test with common namespace variations
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
                 xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
@@ -692,20 +542,13 @@ mod tests {
             .await
             .unwrap();
 
-        // Should extract all loc elements (including image locs)
         assert!(urls.len() >= 2);
     }
 
-    // ============================================================================
-    // Error path tests
-    // ============================================================================
-
     #[test]
     fn test_parse_sitemap_max_depth_exceeded() {
-        // depth=0 should return MaxDepthExceeded
         let config = SitemapConfig::builder().max_depth(0).build();
         assert_eq!(config.max_depth, 0);
-        // MaxDepthExceeded error message
         let err = SitemapError::MaxDepthExceeded;
         assert_eq!(format!("{}", err), "maximum recursion depth exceeded");
     }
@@ -714,19 +557,15 @@ mod tests {
     fn test_resolve_url_relative_paths() {
         let base = Url::parse("https://example.com/sitemap.xml").unwrap();
 
-        // Relative path with ../
         let resolved = resolve_url(&base, "../page").unwrap();
         assert_eq!(resolved.as_str(), "https://example.com/page");
 
-        // Simple relative path
         let resolved = resolve_url(&base, "page.html").unwrap();
         assert_eq!(resolved.as_str(), "https://example.com/page.html");
 
-        // Absolute path
         let resolved = resolve_url(&base, "/page").unwrap();
         assert_eq!(resolved.as_str(), "https://example.com/page");
 
-        // Scheme-relative URL
         let resolved = resolve_url(&base, "//other/page").unwrap();
         assert_eq!(resolved.as_str(), "https://other/page");
     }
@@ -746,8 +585,7 @@ mod tests {
             .max_decompressed_size(0)
             .build();
 
-        // Zero values should fall back to defaults
-        assert_eq!(config.max_response_size, 52_428_800); // 50MB default
-        assert_eq!(config.max_decompressed_size, 104_857_600); // 100MB default
+        assert_eq!(config.max_response_size, 52_428_800);
+        assert_eq!(config.max_decompressed_size, 104_857_600);
     }
 }
