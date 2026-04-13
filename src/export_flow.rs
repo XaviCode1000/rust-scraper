@@ -1,6 +1,6 @@
 //! Export flow — handles result export (standard and AI-cleaned) and file saving.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 use tracing::{info, warn};
 
@@ -181,7 +181,7 @@ async fn run_ai_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit
 /// RAG export (JSONL) already succeeded.
 pub fn save_files(
     results: &[ScrapedContent],
-    output_dir: &PathBuf,
+    output_dir: &Path,
     format: &OutputFormat,
     obsidian_options: &ObsidianOptions,
 ) {

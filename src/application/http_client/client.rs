@@ -239,9 +239,7 @@ impl HttpClient {
                                         .text()
                                         .await
                                         .map_err(|e| HttpError::Request(e.to_string()));
-                                } else if resp.status().as_u16() == 429 {
-                                    continue;
-                                } else if resp.status().is_server_error() {
+                                } else if resp.status().as_u16() == 429 || resp.status().is_server_error() {
                                     continue;
                                 } else {
                                     return Err(HttpError::ClientError(resp.status().as_u16()));
