@@ -20,7 +20,6 @@ full = ["images", "documents"]
 # AI-powered semantic cleaning (Module 3 + 4 + 5 + 7)
 ai = [
     "dep:tokenizers",
-    "dep:async-trait",
     "dep:unicode-segmentation",
     "dep:smallvec",
     "dep:wide",
@@ -222,6 +221,13 @@ strip = false
 
 # Temporary clippy allows to unblock refactoring pipeline
 # These are pedantic lints that are too noisy for a codebase in active refactoring
+# ============================================================================
+# Security patches (FASE 1 — Auditoría #33)
+# ============================================================================
+# RUSTSEC-2026-0099, RUSTSEC-2026-0098: rustls-webpki -> 0.104.0-alpha.6 (via cargo update)
+# RUSTSEC-2026-0009: time -> 0.3.47 (via cargo update)
+# Parches aplicados via `cargo update -p rustls-webpki -p time`
+
 [lints.clippy]
 doc_markdown = "allow"
 uninlined_format_args = "allow"

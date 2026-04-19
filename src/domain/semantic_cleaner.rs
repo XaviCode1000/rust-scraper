@@ -61,7 +61,6 @@ pub(crate) mod private {
 /// - Implementations MUST be thread-safe (`Send + Sync`)
 /// - Implementations MUST cache models to avoid reloading
 /// - Implementations MUST use memory-mapped files for large models (`mem-zero-copy`)
-#[async_trait::async_trait]
 pub trait SemanticCleaner: private::Sealed + Send + Sync {
     /// Clean HTML content and split into semantic chunks
     ///
