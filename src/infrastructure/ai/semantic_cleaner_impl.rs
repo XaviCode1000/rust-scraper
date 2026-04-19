@@ -407,7 +407,6 @@ impl SemanticCleanerImpl {
 // This is required by the sealed trait pattern
 impl private::Sealed for SemanticCleanerImpl {}
 
-#[async_trait::async_trait]
 impl SemanticCleaner for SemanticCleanerImpl {
     async fn clean(&self, html: &str) -> Result<Vec<DocumentChunk>, SemanticError> {
         debug!(
@@ -622,13 +621,17 @@ impl SemanticCleanerImpl {
 ///
 /// This is the main entry point for creating a [`SemanticCleaner`].
 ///
+/// Note: Returns [`SemanticCleanerImpl`] directly instead of `Box<dyn SemanticCleaner>`
+/// because native async fn in traits is not dyn-compatible in Rust 2026.
+/// Users can use [`SemanticCleanerImpl`] directly as it implements the trait.
+///
 /// # Arguments
 ///
 /// * `config` - Model configuration
 ///
 /// # Returns
 ///
-/// * `Ok(Box<dyn SemanticCleaner>)` - Successfully created cleaner
+/// * `Ok(SemanticCleanerImpl)` - Successfully created cleaner
 /// * `Err(SemanticError)` - Creation failed
 ///
 /// # Examples
@@ -649,9 +652,8 @@ impl SemanticCleanerImpl {
 #[allow(dead_code)]
 pub(crate) async fn create_semantic_cleaner(
     config: &ModelConfig,
-) -> Result<Box<dyn SemanticCleaner>, SemanticError> {
-    let cleaner = SemanticCleanerImpl::new(config.clone()).await?;
-    Ok(Box::new(cleaner))
+) -> Result<SemanticCleanerImpl, SemanticError> {
+    SemanticCleanerImpl::new(config.clone()).await
 }
 
 #[cfg(test)]
