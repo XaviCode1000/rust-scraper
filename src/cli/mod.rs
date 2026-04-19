@@ -7,5 +7,6 @@ pub mod completions;
 pub mod config;
 pub mod error;
 pub mod summary;
+pub mod wizard;
 
 pub use args::{Args, Commands, Shell};

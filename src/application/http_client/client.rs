@@ -13,7 +13,6 @@ use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::Client;
 use wreq_util::Emulation;
 
-
 /// Client Hints headers for Chrome 145 (2026 Standard)
 /// These headers must match the TLS fingerprint to avoid "Headless Spoofing" detection
 const CLIENT_HINTS_SEC_CH_UA: &str =
@@ -239,7 +238,9 @@ impl HttpClient {
                                         .text()
                                         .await
                                         .map_err(|e| HttpError::Request(e.to_string()));
-                                } else if resp.status().as_u16() == 429 || resp.status().is_server_error() {
+                                } else if resp.status().as_u16() == 429
+                                    || resp.status().is_server_error()
+                                {
                                     continue;
                                 } else {
                                     return Err(HttpError::ClientError(resp.status().as_u16()));

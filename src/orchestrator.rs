@@ -16,7 +16,7 @@ use rust_scraper::cli::error::{format_cli_error, CliError, CliExit};
 use rust_scraper::cli::summary::ScrapeSummary;
 use rust_scraper::infrastructure::obsidian::detect_vault;
 use rust_scraper::{
-    adapters, get_random_user_agent_from_pool, export_factory, Args, CrawlerConfig,
+    adapters, export_factory, get_random_user_agent_from_pool, Args, CrawlerConfig,
     ObsidianOptions, ScraperConfig, UserAgentCache,
 };
 
@@ -201,9 +201,38 @@ pub async fn run(args: Args) -> CliExit {
         return CliExit::Success;
     }
 
-    // Scraping with per-URL progress bar
+    // Scraping with progress events via mpsc channel
     let start_time = Instant::now();
-    let (results, failures) = scrape_urls(&urls_to_scrape, &scraper_config, &args).await;
+
+    // Create progress channel only if not quiet (--quiet flag skips channel sends)
+    // and run progress view concurrently
+    let progress_handle = if args.quiet {
+        None
+    } else {
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<rust_scraper::adapters::tui::ScrapeProgress>(100);
+
+        // Spawn progress view task
+        let urls_for_progress = urls_to_scrape.clone();
+        let handle = tokio::spawn(async move {
+            use rust_scraper::adapters::tui::run_progress_view;
+            run_progress_view(rx, &urls_for_progress).await
+        });
+
+        Some((tx, handle))
+    };
+
+    // Extract tx for scraping
+    let progress_tx = progress_handle.as_ref().map(|(tx, _)| tx);
+
+    let (results, failures) =
+        scrape_urls(&urls_to_scrape, &scraper_config, &args, progress_tx.cloned()).await;
+
+    // Wait for progress view to complete
+    if let Some((_, handle)) = progress_handle {
+        let _ = handle.await;
+    }
+
     let duration = start_time.elapsed();
 
     if results.is_empty() && !failures.is_empty() {
@@ -230,10 +259,11 @@ pub async fn run(args: Args) -> CliExit {
     );
 
     // Export results
-    let processed_urls = match run_export_flow(&results, &args, &vault_path, state_store.as_ref()).await {
-        Ok(urls) => urls,
-        Err(exit) => return exit,
-    };
+    let processed_urls =
+        match run_export_flow(&results, &args, &vault_path, state_store.as_ref()).await {
+            Ok(urls) => urls,
+            Err(exit) => return exit,
+        };
 
     // Save individual files
     let output_dir = determine_output_dir(&args, &vault_path);
@@ -290,7 +320,7 @@ pub async fn run(args: Args) -> CliExit {
 /// Result of URL selection.
 enum SelectedUrls {
     Urls(Vec<url::Url>),
-    None,    // User cancelled or no selection
+    None, // User cancelled or no selection
     Error(CliExit),
 }
 
@@ -379,7 +409,10 @@ async fn apply_resume_mode(
     urls_to_scrape: Vec<url::Url>,
     args: &Args,
     target_url: &str,
-) -> (Vec<url::Url>, Option<rust_scraper::infrastructure::export::state_store::StateStore>) {
+) -> (
+    Vec<url::Url>,
+    Option<rust_scraper::infrastructure::export::state_store::StateStore>,
+) {
     let state_store = if args.resume {
         info!("Resume mode enabled - tracking processed URLs");
         let state_dir = args.state_dir.clone().unwrap_or_else(|| {
@@ -446,13 +479,21 @@ async fn apply_resume_mode(
     (filtered, state_store)
 }
 
-/// Scrape all URLs with progress bar.
+/// Scrape all URLs with progress events via mpsc channel.
+///
+/// When progress_tx is provided (non-TUI mode), emits ScrapeProgress events.
+/// When progress_tx is None (TUI mode), no progress events are emitted.
+/// The --quiet flag suppresses all output including progress events.
 async fn scrape_urls(
     urls: &[url::Url],
     scraper_config: &ScraperConfig,
     args: &Args,
-) -> (Vec<rust_scraper::domain::ScrapedContent>, Vec<(String, String)>) {
-    use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+    progress_tx: Option<tokio::sync::mpsc::Sender<rust_scraper::adapters::tui::ScrapeProgress>>,
+) -> (
+    Vec<rust_scraper::domain::ScrapedContent>,
+    Vec<(String, String)>,
+) {
+    use rust_scraper::adapters::tui::{ScrapeError, ScrapeProgress, ScrapeStatus};
 
     let http_config = HttpClientConfig {
         max_retries: args.max_retries,
@@ -470,55 +511,88 @@ async fn scrape_urls(
     };
 
     let total_urls = urls.len();
-    let scrape_pb = if !args.quiet {
-        let pb = ProgressBar::new(total_urls as u64);
-        pb.set_draw_target(ProgressDrawTarget::stderr());
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{bar:40.cyan/blue}] {pos}/{len} | {msg}")
-                .expect("valid progress bar template")
-                .progress_chars("=>-"),
-        );
-        Some(pb)
-    } else {
-        None
-    };
 
     let mut results = Vec::with_capacity(total_urls);
     let mut failures: Vec<(String, String)> = Vec::new();
 
     for url in urls {
-        if let Some(pb) = scrape_pb.as_ref() {
-            pb.set_message(format!("Scraping: {}", url.host_str().unwrap_or("unknown")));
+        let url_str = url.as_str();
+        let _url_host = url.host_str().unwrap_or("unknown").to_string();
+
+        // Emit progress event: Started
+        if !args.quiet {
+            if let Some(ref tx) = progress_tx {
+                let _ = tx
+                    .send(ScrapeProgress::Started {
+                        url: url_str.to_string(),
+                    })
+                    .await;
+            }
+        }
+
+        // Emit progress event: StatusChanged to Fetching
+        if !args.quiet {
+            if let Some(ref tx) = progress_tx {
+                let _ = tx
+                    .send(ScrapeProgress::StatusChanged {
+                        url: url_str.to_string(),
+                        status: ScrapeStatus::Fetching,
+                    })
+                    .await;
+            }
         }
 
         match scrape_single_url_for_tui(http_client.client(), url, scraper_config).await {
             Ok(content) => {
+                let chars = content.content.chars().count();
                 results.push(content);
+                // Emit progress event: Completed (only if not quiet)
+                if !args.quiet {
+                    if let Some(ref tx) = progress_tx {
+                        let _ = tx
+                            .send(ScrapeProgress::Completed {
+                                url: url_str.to_string(),
+                                chars,
+                            })
+                            .await;
+                    }
+                }
             },
             Err(e) => {
                 let url_str = url.as_str().to_string();
                 let err_msg = e.to_string();
                 warn!("Failed to scrape {}: {}", url_str, err_msg);
-                failures.push((url_str, err_msg));
+                failures.push((url_str.clone(), err_msg));
+                // Emit progress event: Failed
+                if !args.quiet {
+                    if let Some(ref tx) = progress_tx {
+                        let _ = tx
+                            .send(ScrapeProgress::Failed {
+                                url: url_str.clone(),
+                                error: ScrapeError::Other(format!("{}", e)),
+                            })
+                            .await;
+                    }
+                }
             },
-        }
-
-        if let Some(pb) = scrape_pb.as_ref() {
-            pb.inc(1);
         }
     }
 
-    if let Some(pb) = scrape_pb {
-        let success_count = results.len();
-        let fail_count = failures.len();
-        pb.finish_with_message(
-            format!(
-                "Scraping complete: {} succeeded, {} failed",
-                success_count, fail_count
-            )
-            .to_owned(),
-        );
+    // Count totals from results/failures
+    let total_successful = results.len();
+    let total_failed = failures.len();
+
+    // Emit Finished event when all done (only if not quiet)
+    if !args.quiet {
+        if let Some(ref tx) = progress_tx {
+            let _ = tx
+                .send(ScrapeProgress::Finished {
+                    total: total_urls,
+                    successful: total_successful,
+                    failed: total_failed,
+                })
+                .await;
+        }
     }
 
     (results, failures)

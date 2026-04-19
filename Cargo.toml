@@ -140,6 +140,9 @@ num_cpus = "1"
 # Progress bars
 indicatif = { version = "0.17", features = ["improved_unicode"] }
 
+# Interactive wizard for guided prompting (Phase 1)
+inquire = "0.9"
+
 # Shell completions
 clap_complete = "4"
 

@@ -51,7 +51,8 @@ pub async fn run_export(config: ExportConfig<'_>) -> Result<Vec<String>, CliExit
     if config.clean_ai {
         warn!("--clean-ai requires the 'ai' feature. Recompile with --features ai");
         return Err(CliExit::UsageError(
-            "AI semantic cleaning requires --features ai. Recompile with: cargo run --features ai".into(),
+            "AI semantic cleaning requires --features ai. Recompile with: cargo run --features ai"
+                .into(),
         ));
     }
     run_standard_export(&config)

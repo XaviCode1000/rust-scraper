@@ -109,7 +109,9 @@ pub mod threshold_config;
 
 // Re-exports for convenience (Modules 1-2)
 #[cfg(feature = "ai")]
-pub use cache_config::{default_cache_dir, CacheConfig, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO, DEFAULT_MODEL_SHA256};
+pub use cache_config::{
+    default_cache_dir, CacheConfig, DEFAULT_MODEL_FILE, DEFAULT_MODEL_REPO, DEFAULT_MODEL_SHA256,
+};
 
 #[cfg(feature = "ai")]
 pub use model_cache::ModelCache;

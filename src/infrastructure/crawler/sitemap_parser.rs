@@ -25,8 +25,8 @@
 //! - XML parsing fails
 //! - No `<loc>` elements found
 
+use super::sitemap_config::SitemapConfig;
 use async_compression::tokio::bufread::GzipDecoder;
-use super::sitemap_config::{SitemapConfig};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::HashSet;

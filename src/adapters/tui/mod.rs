@@ -26,9 +26,26 @@
 //! # }
 //! ```
 
+mod error_log_widget;
+mod event_loop;
+mod progress_types;
+mod progress_view;
+mod progress_widget;
 mod terminal;
 mod url_selector;
 
+pub use error_log_widget::{ErrorLogWidget, DEFAULT_MAX_ERRORS};
+
+pub use event_loop::{
+    app_event_channel, run_event_loop, run_event_loop_until_quit, AppEventReceiver, AppEventSender,
+    EventLoopConfig, EventLoopState,
+};
+pub use progress_types::{
+    AppEvent, ErrorEntry, ErrorType, ProgressState, ScrapeError, ScrapeProgress, ScrapeStatus,
+    UrlState,
+};
+pub use progress_view::run_progress_view;
+pub use progress_widget::{ProgressIcons, ProgressWidget};
 pub use terminal::{restore_terminal, setup_terminal};
 pub use url_selector::{run_selector, UrlSelector, UrlSelectorState};
 

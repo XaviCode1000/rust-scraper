@@ -54,15 +54,15 @@ pub mod domain;
 #[cfg(feature = "ai")]
 pub use domain::semantic_cleaner::SemanticCleaner;
 
-pub mod application;
-pub mod infrastructure;
 pub mod adapters;
-pub mod extractor;
-pub mod url_path;
-pub mod user_agent;
-pub mod export_factory;
+pub mod application;
 pub mod cli;
+pub mod export_factory;
+pub mod extractor;
+pub mod infrastructure;
+pub mod url_path;
 pub mod url_validation;
+pub mod user_agent;
 
 // ============================================================================
 // Re-exports
