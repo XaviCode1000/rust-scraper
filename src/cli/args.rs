@@ -169,6 +169,11 @@ pub struct Args {
     #[clap(next_help_heading = "Behavior")]
     pub interactive: bool,
 
+    /// Open configuration TUI to set all scraper options interactively
+    #[arg(long, env = "RUST_SCRAPER_CONFIG_TUI")]
+    #[clap(next_help_heading = "Behavior")]
+    pub config_tui: bool,
+
     /// Use AI-powered semantic cleaning for better RAG output
     #[cfg(feature = "ai")]
     #[arg(long, default_value = "false", env = "RUST_SCRAPER_CLEAN_AI")]

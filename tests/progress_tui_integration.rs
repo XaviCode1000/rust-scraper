@@ -5,9 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use rust_scraper::adapters::tui::{
-    ErrorType, ProgressState, ScrapeError, ScrapeProgress,
-};
+use rust_scraper::adapters::tui::{ProgressState, ScrapeError, ScrapeProgress};
 use tokio::sync::mpsc;
 
 /// Test that progress events are processed within 200ms.
@@ -156,7 +154,9 @@ async fn test_progress_channel_timing() {
 /// without excessive latency.
 #[tokio::test]
 async fn test_concurrent_progress_updates() {
-    let url_strings: Vec<String> = (1..=10).map(|i| format!("https://example.com/{}", i)).collect();
+    let url_strings: Vec<String> = (1..=10)
+        .map(|i| format!("https://example.com/{}", i))
+        .collect();
 
     let mut state = ProgressState::new(url_strings.clone());
 
@@ -164,9 +164,7 @@ async fn test_concurrent_progress_updates() {
 
     // Simulate concurrent progress updates
     for url in &url_strings {
-        state.update(ScrapeProgress::Started {
-            url: url.clone(),
-        });
+        state.update(ScrapeProgress::Started { url: url.clone() });
     }
 
     // Add some completions
@@ -190,7 +188,11 @@ async fn test_concurrent_progress_updates() {
     // Check that remaining 5 URLs are in Pending (not completed or failed)
     // Since we only completed 5, the rest should still be in whatever state they started
     // After Started, they become Fetching, so we check for Fetching for in-progress
-    let in_progress = state.urls.iter().filter(|u| u.status == rust_scraper::adapters::tui::ScrapeStatus::Fetching).count();
+    let in_progress = state
+        .urls
+        .iter()
+        .filter(|u| u.status == rust_scraper::adapters::tui::ScrapeStatus::Fetching)
+        .count();
     assert_eq!(in_progress, 5);
 }
 

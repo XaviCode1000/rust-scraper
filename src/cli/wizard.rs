@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_std_tty_detector_default() {
         // StdTtyDetector is a zero-sized type (ZST), which is valid
-        let _detector = StdTtyDetector::default();
+        let _detector = StdTtyDetector;
         assert!(std::mem::size_of::<StdTtyDetector>() == 0);
     }
 }

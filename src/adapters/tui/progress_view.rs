@@ -70,7 +70,8 @@ pub async fn run_progress_view(
     let mut is_complete = false;
 
     // Run event loop
-    let result = run_progress_tui_loop(&mut terminal, progress_rx, &mut state, &mut is_complete).await;
+    let result =
+        run_progress_tui_loop(&mut terminal, progress_rx, &mut state, &mut is_complete).await;
 
     // Always restore terminal
     let _ = restore_terminal();
@@ -178,7 +179,7 @@ fn render_progress_ui(frame: &mut ratatui::Frame<'_>, state: &ProgressState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),  // Progress widget
+            Constraint::Min(10),   // Progress widget
             Constraint::Length(8), // Error log
         ])
         .split(frame.area());
@@ -218,10 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_progress_state_updates() {
-        let url_strings: Vec<String> = sample_urls()
-            .iter()
-            .map(|u| u.to_string())
-            .collect();
+        let url_strings: Vec<String> = sample_urls().iter().map(|u| u.to_string()).collect();
         let mut state = ProgressState::new(url_strings);
 
         // Test Started event

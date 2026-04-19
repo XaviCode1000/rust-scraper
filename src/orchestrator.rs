@@ -225,8 +225,13 @@ pub async fn run(args: Args) -> CliExit {
     // Extract tx for scraping
     let progress_tx = progress_handle.as_ref().map(|(tx, _)| tx);
 
-    let (results, failures) =
-        scrape_urls(&urls_to_scrape, &scraper_config, &args, progress_tx.cloned()).await;
+    let (results, failures) = scrape_urls(
+        &urls_to_scrape,
+        &scraper_config,
+        &args,
+        progress_tx.cloned(),
+    )
+    .await;
 
     // Wait for progress view to complete
     if let Some((_, handle)) = progress_handle {

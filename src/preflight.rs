@@ -110,6 +110,96 @@ pub fn apply_config_defaults(mut args: Args, config: &ConfigDefaults) -> Args {
 }
 
 // ============================================================================
+// TUI Config Merge
+// ============================================================================
+
+/// Apply config values from TUI form to Args.
+///
+/// This runs after config_tui returns user-submitted values.
+/// Precedence: TUI values > CLI args (they override what was passed).
+pub fn apply_tui_config(mut args: Args, config_values: &serde_json::Value) -> Args {
+    use rust_scraper::OutputFormat as O;
+    use rust_scraper::ExportFormat as E;
+
+    // Output directory
+    if let Some(output) = config_values.get("output").and_then(|v| v.as_str()) {
+        args.output = PathBuf::from(output);
+    }
+
+    // Output format (markdown, json, text)
+    if let Some(fmt) = config_values.get("format").and_then(|v| v.as_str()) {
+        args.format = match fmt {
+            "json" => O::Json,
+            "text" => O::Text,
+            _ => O::Markdown,
+        };
+    }
+
+    // Export format (jsonl, vector, auto)
+    if let Some(fmt) = config_values.get("export_format").and_then(|v| v.as_str()) {
+        args.export_format = match fmt {
+            "vector" => E::Vector,
+            "auto" => E::Auto,
+            _ => E::Jsonl,
+        };
+    }
+
+    // Discovery: use_sitemap
+    if let Some(v) = config_values.get("use_sitemap").and_then(|v| v.as_bool()) {
+        args.use_sitemap = v;
+    }
+
+    // Discovery: max_pages
+    if let Some(v) = config_values.get("max_pages").and_then(|v| v.as_str()) {
+        if let Ok(n) = v.parse() {
+            args.max_pages = n;
+        }
+    }
+
+    // Crawler: max_depth
+    if let Some(v) = config_values.get("max_depth").and_then(|v| v.as_str()) {
+        if let Ok(n) = v.parse() {
+            args.max_depth = n;
+        }
+    }
+
+    // Behavior: download_images
+    if let Some(v) = config_values.get("download_images").and_then(|v| v.as_bool()) {
+        args.download_images = v;
+    }
+
+    // Behavior: download_documents
+    if let Some(v) = config_values.get("download_documents").and_then(|v| v.as_bool()) {
+        args.download_documents = v;
+    }
+
+    // Obsidian: obsidian_wiki_links
+    if let Some(v) = config_values.get("obsidian_wiki_links").and_then(|v| v.as_bool()) {
+        args.obsidian_wiki_links = v;
+    }
+
+    // Obsidian: vault path
+    if let Some(vault) = config_values.get("vault").and_then(|v| v.as_str()) {
+        if !vault.is_empty() {
+            args.vault = Some(PathBuf::from(vault));
+        }
+    }
+
+    // Obsidian: quick_save
+    if let Some(v) = config_values.get("quick_save").and_then(|v| v.as_bool()) {
+        args.quick_save = v;
+    }
+
+    // AI: clean_ai (only applies when feature is enabled)
+    #[cfg(feature = "ai")]
+    if let Some(v) = config_values.get("clean_ai").and_then(|v| v.as_bool()) {
+        args.clean_ai = v;
+    }
+
+    args
+}
+
+// ============================================================================
 // Pre-flight HTTP Connectivity Check (T-070)
 // ============================================================================
 

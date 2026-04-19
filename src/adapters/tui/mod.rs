@@ -26,6 +26,7 @@
 //! # }
 //! ```
 
+mod config_form;
 mod error_log_widget;
 mod event_loop;
 mod progress_types;
@@ -36,6 +37,7 @@ mod url_selector;
 
 pub use error_log_widget::{ErrorLogWidget, DEFAULT_MAX_ERRORS};
 
+pub use config_form::ConfigFormState;
 pub use event_loop::{
     app_event_channel, run_event_loop, run_event_loop_until_quit, AppEventReceiver, AppEventSender,
     EventLoopConfig, EventLoopState,
