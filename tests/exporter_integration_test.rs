@@ -9,19 +9,20 @@ use std::fs;
 
 use rust_scraper::domain::exporter::ExporterConfig;
 use rust_scraper::domain::entities::ExportFormat;
-use rust_scraper::domain::{DocumentChunk, ScrapedContent, ValidUrl};
+use rust_scraper::domain::{DocumentChunkValidated, DocumentChunkUnvalidated};
+use rust_scraper::domain::{ScrapedContent, ValidUrl};
 use rust_scraper::domain::Exporter;
 use rust_scraper::infrastructure::export::file_exporter::FileExporter;
 
-/// Test helper: create a DocumentChunk with known content
-fn make_chunk(url: &str, title: &str, content: &str) -> DocumentChunk {
+/// Test helper: create and validate a DocumentChunk
+fn make_chunk(url: &str, title: &str, content: &str) -> DocumentChunkValidated {
     use chrono::{TimeZone, Utc};
     
-    let mut metadata = HashMap::new();
+    let mut metadata = std::collections::HashMap::new();
     metadata.insert("author".to_string(), "Test Author".to_string());
     metadata.insert("excerpt".to_string(), "Test excerpt".to_string());
     
-    DocumentChunk {
+    let unvalidated = rust_scraper::domain::DocumentChunkUnvalidated {
         id: uuid::Uuid::new_v4(),
         url: url.to_string(),
         title: title.to_string(),
@@ -30,7 +31,10 @@ fn make_chunk(url: &str, title: &str, content: &str) -> DocumentChunk {
         timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
         embeddings: None,
         correlation_id: None,
-    }
+    };
+    
+    // Validate to get DocumentChunkValidated
+    unvalidated.validate().expect("valid document")
 }
 
 /// Test: FileExporter creates file with correct markdown structure
@@ -158,8 +162,9 @@ fn test_scraped_content_conversion() {
         assets: vec![],
     };
     
-    // Use the From implementation
-    let chunk: DocumentChunk = scraped.into();
+    // Conversion from ScrapedContent creates Draft state, then validate
+    let unvalidated: rust_scraper::domain::DocumentChunk<rust_scraper::domain::Draft> = scraped.into();
+    let chunk = unvalidated.validate().expect("should be valid");
     
     assert_eq!(chunk.title, "Article Title");
     assert_eq!(chunk.content, "Article content goes here.");

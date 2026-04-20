@@ -4,12 +4,55 @@
 //! They are serializable for persistence but contain no business logic.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::{CorrelationId, ValidUrl};
+
+// ============================================================================
+// Typestate Markers — Private state types for DocumentChunk
+// ============================================================================
+
+/// Private state marker: DocumentChunk is newly created, not validated
+/// No public constructor - only created via From<ScrapedContent>
+#[derive(Clone, Copy)]
+pub struct Draft;
+
+/// Private state marker: DocumentChunk has passed validation checks
+/// Can be exported to disk
+#[derive(Clone, Copy)]
+pub struct Validated;
+
+/// Private state marker: DocumentChunk has been exported
+/// Metadata includes export path
+#[derive(Clone, Copy)]
+pub struct Exported;
+
+/// Constructor for DocumentChunk<Draft> that bypasses From<ScrapedContent> (tests only)
+#[cfg(test)]
+impl DocumentChunk<Draft> {
+    pub fn test_new(
+        id: Uuid,
+        url: impl Into<String>,
+        title: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id,
+            url: url.into(),
+            title: title.into(),
+            content: content.into(),
+            metadata: HashMap::new(),
+            timestamp: Utc::now(),
+            embeddings: None,
+            correlation_id: None,
+            _state: PhantomData,
+        }
+    }
+}
 
 /// Represents a downloaded asset (image or document)
 ///
@@ -119,8 +162,11 @@ impl ExportFormat {
 /// The embeddings field is optional because in the initial scraping phase
 /// the AI model may not be available yet. It can be populated later
 /// by a separate embedding pipeline.
+///
+/// Uses typestate pattern: must call `.validate()` before export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentChunk {
+#[allow(dead_code)]
+pub struct DocumentChunk<S = Draft> {
     /// Unique identifier for this chunk (UUID v4)
     pub id: Uuid,
     /// Source URL where this content was scraped from
@@ -142,10 +188,56 @@ pub struct DocumentChunk {
     /// Optional - when present, enables request correlation across services
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// Typestate marker (crate-visibile for tests)
+    #[serde(skip)]
+    pub(crate) _state: PhantomData<S>,
 }
 
-impl DocumentChunk {
-    /// Create a new DocumentChunk from ScrapedContent
+/// Alias for backward compatibility - DocumentChunk in Draft state
+/// Use DocumentChunk<Draft> for new code, DocumentChunk for existing code
+pub type DocumentChunkUnvalidated = DocumentChunk<Draft>;
+pub type DocumentChunkValidated = DocumentChunk<Validated>;
+pub type DocumentChunkExported = DocumentChunk<Exported>;
+
+// NOTE: DocumentChunk (non-generic) is re-exported from domain/mod.rs for backward compatibility
+
+/// Conversion from ScrapedContent creates DocumentChunk in Draft state
+impl From<ScrapedContent> for DocumentChunk<Draft> {
+    fn from(scraped: ScrapedContent) -> Self {
+        let mut metadata = HashMap::new();
+
+        if let Some(excerpt) = scraped.excerpt {
+            metadata.insert("excerpt".to_string(), excerpt);
+        }
+        if let Some(author) = scraped.author {
+            metadata.insert("author".to_string(), author);
+        }
+        if let Some(date) = scraped.date {
+            metadata.insert("date".to_string(), date);
+        }
+
+        if let Ok(url) = url::Url::parse(&scraped.url.to_string()) {
+            if let Some(host) = url.host_str() {
+                metadata.insert("domain".to_string(), host.to_string());
+            }
+        }
+
+        Self {
+            id: Uuid::new_v4(),
+            url: scraped.url.to_string(),
+            title: scraped.title,
+            content: scraped.content,
+            metadata,
+            timestamp: Utc::now(),
+            embeddings: None,
+            correlation_id: None,
+            _state: PhantomData,
+        }
+    }
+}
+
+impl DocumentChunk<Draft> {
+    /// Create a new DocumentChunk from ScrapedContent (Draft state)
     ///
     /// This is the main conversion method from the scraper's output
     /// to the RAG pipeline's input format.
@@ -191,6 +283,7 @@ impl DocumentChunk {
             timestamp: Utc::now(),
             embeddings: None,
             correlation_id: correlation_id.map(|c| c.to_traceparent()),
+            _state: PhantomData,
         }
     }
 
@@ -213,16 +306,64 @@ impl DocumentChunk {
         self
     }
 
+    /// Validate this Draft DocumentChunk
+    ///
+    /// Returns Validated state if content is valid:
+    /// - content is not empty
+    /// - title is not empty
+    ///
+    /// # Errors
+    /// Returns error if validation fails
+    pub fn validate(self) -> Result<DocumentChunkValidated, &'static str> {
+        // Validation: content must not be empty
+        if self.content.trim().is_empty() {
+            return Err("content cannot be empty");
+        }
+        // Validation: title must not be empty
+        if self.title.trim().is_empty() {
+            return Err("title cannot be empty");
+        }
+        Ok(DocumentChunk {
+            id: self.id,
+            url: self.url,
+            title: self.title,
+            content: self.content,
+            metadata: self.metadata,
+            timestamp: self.timestamp,
+            embeddings: self.embeddings,
+            correlation_id: self.correlation_id,
+            _state: PhantomData,
+})
+    }
+}
+
+/// Methods available for any DocumentChunk state
+impl<S> DocumentChunk<S> {
+    /// Check if this chunk has embeddings
+    #[must_use]
+    pub fn has_embeddings(&self) -> bool {
+        self.embeddings.is_some()
+    }
+
     /// Get the text length (character count)
     #[must_use]
     pub fn text_length(&self) -> usize {
         self.content.len()
     }
+}
 
-    /// Check if this chunk has embeddings
-    #[must_use]
-    pub fn has_embeddings(&self) -> bool {
-        self.embeddings.is_some()
+/// Methods for Validated DocumentChunk
+impl DocumentChunk<Validated> {
+    /// Export this Validated DocumentChunk
+    ///
+    /// This method is only available for Validated state.
+    /// Ensures content has passed validation before export.
+    pub fn export(&self) -> &Self
+    where
+        Self: Send + Sync + 'static,
+    {
+        // Already validated, just return reference
+        self
     }
 }
 

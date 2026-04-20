@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::entities::{DocumentChunk, ExportFormat};
+use crate::domain::entities::{DocumentChunkValidated, DocumentChunkUnvalidated, ExportFormat};
 
 /// Errors that can occur during export operations
 #[derive(Error, Debug)]
@@ -143,21 +143,21 @@ impl Default for ExporterConfig {
 /// }
 ///
 /// impl Exporter for JsonlExporter {
-///     fn export(&self, document: DocumentChunk) -> ExportResult<()> { ... }
-///     fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> { ... }
+///     fn export(&self, document: DocumentChunk<Validated>) -> ExportResult<()> { ... }
+///     fn export_batch(&self, documents: &[DocumentChunk<Validated>]) -> ExportResult<()> { ... }
 /// }
 /// ```
 pub trait Exporter: Send + Sync + 'static {
-    /// Export a single document chunk
+    /// Export a single document chunk (must be Validated state)
     ///
     /// # Arguments
-    /// * `document` - The document chunk to export
+    /// * `document` - The document chunk in Validated state to export
     ///
     /// # Errors
     /// Returns ExporterError if export fails
-    fn export(&self, document: DocumentChunk) -> ExportResult<()>;
+    fn export(&self, document: DocumentChunkValidated) -> ExportResult<()>;
 
-    /// Export multiple documents in batch
+    /// Export multiple documents in batch (must be Validated state)
     ///
     /// This method is optimized for bulk operations and may:
     /// - Batch I/O operations for better performance
@@ -165,11 +165,11 @@ pub trait Exporter: Send + Sync + 'static {
     /// - Maintain transaction semantics
     ///
     /// # Arguments
-    /// * `documents` - Slice of document chunks to export
+    /// * `documents` - Slice of document chunks in Validated state to export
     ///
     /// # Errors
     /// Returns ExporterError if any document fails to export
-    fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()>;
+    fn export_batch(&self, documents: &[DocumentChunkValidated]) -> ExportResult<()>;
 
     /// Get the configuration for this exporter
     fn config(&self) -> &ExporterConfig;
@@ -185,10 +185,11 @@ pub trait ExporterExt: Exporter {
     /// Export a single document, converting from ScrapedContent
     ///
     /// Convenience method that handles the conversion from ScrapedContent
-    /// to DocumentChunk internally.
+    /// to DocumentChunk and validates it internally.
     fn export_scraped(&self, scraped: &crate::domain::ScrapedContent) -> ExportResult<()> {
-        let chunk = DocumentChunk::from_scraped_content(scraped);
-        self.export(chunk)
+        let chunk = DocumentChunkUnvalidated::from_scraped_content(scraped);
+        let validated = chunk.validate().map_err(|e| ExporterError::InvalidConfig(e.to_string()))?;
+        self.export(validated)
     }
 
     /// Export multiple scraped contents in batch
@@ -196,10 +197,13 @@ pub trait ExporterExt: Exporter {
         &self,
         scraped_contents: &[crate::domain::ScrapedContent],
     ) -> ExportResult<()> {
-        let chunks: Vec<DocumentChunk> = scraped_contents
+        let chunks: Vec<DocumentChunkValidated> = scraped_contents
             .iter()
-            .map(DocumentChunk::from_scraped_content)
-            .collect();
+            .map(|s| {
+                let chunk = DocumentChunkUnvalidated::from_scraped_content(s);
+                chunk.validate().map_err(|e| ExporterError::InvalidConfig(e.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.export_batch(&chunks)
     }
 

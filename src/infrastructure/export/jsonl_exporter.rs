@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use fs2::FileExt;
 
-use crate::domain::entities::DocumentChunk;
+use crate::domain::entities::DocumentChunkValidated;
 use crate::domain::exporter::{ExportResult, ExporterConfig, ExporterError};
 
 /// JSONL Exporter - writes one JSON object per line
@@ -80,13 +80,13 @@ impl JsonlExporter {
     }
 
     /// Serialize a single document to JSON line
-    fn serialize_line(&self, doc: &DocumentChunk) -> ExportResult<String> {
+    fn serialize_line(&self, doc: &DocumentChunkValidated) -> ExportResult<String> {
         serde_json::to_string(doc).map_err(ExporterError::Serialization)
     }
 }
 
 impl crate::domain::exporter::Exporter for JsonlExporter {
-    fn export(&self, document: DocumentChunk) -> ExportResult<()> {
+    fn export(&self, document: DocumentChunkValidated) -> ExportResult<()> {
         let line = self.serialize_line(&document)?;
         let mut writer = self.writer()?;
         writer.write_all(line.as_bytes())?;
@@ -96,7 +96,7 @@ impl crate::domain::exporter::Exporter for JsonlExporter {
         Ok(())
     }
 
-    fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> {
+    fn export_batch(&self, documents: &[DocumentChunkValidated]) -> ExportResult<()> {
         let count = documents.len();
         let mut writer = self.writer()?;
 

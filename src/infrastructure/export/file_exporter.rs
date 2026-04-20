@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::config::OutputFormat;
-use crate::domain::entities::{DocumentChunk, ScrapedContent};
+use crate::domain::entities::DocumentChunkValidated;
 use crate::domain::exporter::{ExportResult, Exporter, ExporterConfig, ExporterError};
 
 /// File-based exporter implementing the Exporter trait
@@ -42,7 +42,7 @@ impl FileExporter {
 
     /// Export a single document as Markdown
     #[allow(dead_code)]
-    fn save_md(&self, doc: &DocumentChunk) -> ExportResult<()> {
+    fn save_md(&self, doc: &DocumentChunkValidated) -> ExportResult<()> {
         let path = self.output_path(doc, "md");
         
         // Build markdown content with YAML frontmatter
@@ -70,7 +70,7 @@ impl FileExporter {
 
     /// Export a single document as structured Text
     #[allow(dead_code)]
-    fn save_txt(&self, doc: &DocumentChunk) -> ExportResult<()> {
+    fn save_txt(&self, doc: &DocumentChunkValidated) -> ExportResult<()> {
         let path = self.output_path(doc, "txt");
         
         // Extract metadata as formatted string
@@ -109,7 +109,7 @@ impl FileExporter {
     }
 
     /// Export a single document as JSON
-    fn save_json(&self, doc: &DocumentChunk) -> ExportResult<()> {
+    fn save_json(&self, doc: &DocumentChunkValidated) -> ExportResult<()> {
         let path = self.output_path(doc, "json");
         
         let json = serde_json::to_string_pretty(doc)
@@ -125,7 +125,7 @@ impl FileExporter {
     }
 
     /// Generate output path for a document
-    fn output_path(&self, doc: &DocumentChunk, ext: &str) -> PathBuf {
+    fn output_path(&self, doc: &DocumentChunkValidated, ext: &str) -> PathBuf {
         let output_dir = &self.config.output_dir;
         
         // Extract domain from URL
@@ -153,7 +153,7 @@ impl FileExporter {
 }
 
 impl Exporter for FileExporter {
-    fn export(&self, document: DocumentChunk) -> ExportResult<()> {
+    fn export(&self, document: DocumentChunkValidated) -> ExportResult<()> {
         // Use config's format to determine export method
         let format = self.config.format;
         
@@ -190,7 +190,7 @@ impl Exporter for FileExporter {
         }
     }
 
-    fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> {
+    fn export_batch(&self, documents: &[DocumentChunkValidated]) -> ExportResult<()> {
         // Default: export one by one
         for doc in documents {
             self.export(doc.clone())?;
@@ -207,52 +207,15 @@ impl Exporter for FileExporter {
 // Conversion from ScrapedContent
 // ============================================================================
 
-impl From<ScrapedContent> for DocumentChunk {
-    fn from(scraped: ScrapedContent) -> Self {
-        let mut metadata = std::collections::HashMap::new();
-
-        if let Some(excerpt) = scraped.excerpt {
-            metadata.insert("excerpt".to_string(), excerpt);
-        }
-        if let Some(author) = scraped.author {
-            metadata.insert("author".to_string(), author);
-        }
-        if let Some(date) = scraped.date {
-            metadata.insert("date".to_string(), date);
-        }
-
-        if let Ok(url) = url::Url::parse(&scraped.url.to_string()) {
-            if let Some(host) = url.host_str() {
-                metadata.insert("domain".to_string(), host.to_string());
-            }
-        }
-
-        Self {
-            id: uuid::Uuid::new_v4(),
-            url: scraped.url.to_string(),
-            title: scraped.title,
-            content: scraped.content,
-            metadata,
-            timestamp: chrono::Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-        }
-    }
-}
-
-impl From<&ScrapedContent> for DocumentChunk {
-    fn from(scraped: &ScrapedContent) -> Self {
-        Self::from(scraped.clone())
-    }
-}
+// NOTE: From<ScrapedContent> for DocumentChunk<Draft> is implemented in entities.rs
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env::temp_dir;
 
-    fn make_test_doc() -> DocumentChunk {
-        DocumentChunk {
+    fn make_test_doc() -> DocumentChunkValidated {
+        let unvalidated = DocumentChunkUnvalidated {
             id: uuid::Uuid::new_v4(),
             url: "https://example.com/page".to_string(),
             title: "Test Page".to_string(),
@@ -263,7 +226,10 @@ mod tests {
             timestamp: chrono::Utc::now(),
             embeddings: None,
             correlation_id: None,
-        }
+            _state: std::marker::PhantomData,
+        };
+        // Validate before export
+        unvalidated.validate().unwrap()
     }
 
     #[test]
@@ -285,7 +251,7 @@ mod tests {
     #[test]
     fn test_conversion_from_scraped_content() {
         use crate::domain::{ScrapedContent, ValidUrl};
-        
+
         let url = ValidUrl::parse("https://example.com/test").unwrap();
         let scraped = ScrapedContent {
             title: "Test Title".to_string(),
@@ -297,9 +263,9 @@ mod tests {
             html: None,
             assets: vec![],
         };
-        
-        let chunk: DocumentChunk = scraped.into();
-        
+
+        let chunk: DocumentChunkUnvalidated = scraped.into();
+
         assert_eq!(chunk.title, "Test Title");
         assert_eq!(chunk.content, "Test Content");
         assert_eq!(chunk.url, "https://example.com/test");

@@ -122,7 +122,7 @@ pub fn process_results(
     state_store: Option<&StateStore>,
     resume_mode: bool,
 ) -> Result<Vec<String>, ExporterError> {
-    use crate::domain::entities::DocumentChunk;
+    use crate::domain::entities::DocumentChunkUnvalidated;
 
     info!("Processing {} results for export", results.len());
 
@@ -144,10 +144,11 @@ pub fn process_results(
     };
 
     for result in results {
-        let chunk = DocumentChunk::from_scraped_content(result);
+        let chunk = DocumentChunkUnvalidated::from_scraped_content(result);
+        let validated = chunk.validate().map_err(|e| ExporterError::InvalidConfig(e.to_string()))?;
 
         // Export the chunk
-        exporter.export(chunk)?;
+        exporter.export(validated)?;
 
         // Track URL
         let url_str = result.url.as_str().to_string();

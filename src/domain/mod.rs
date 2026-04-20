@@ -30,7 +30,10 @@ pub mod semantic_cleaner;
 // Re-exports for backward compatibility (crate::domain::X)
 pub use crawl_job::{ContentType, DiscoveredUrl};
 
-pub use entities::{DocumentChunk, DownloadedAsset, ExportFormat, ExportState, ScrapedContent};
+pub use entities::{
+    DocumentChunk, DocumentChunkExported, DocumentChunkUnvalidated, DocumentChunkValidated,
+    DownloadedAsset, Draft, Exported, ExportFormat, ExportState, ScrapedContent, Validated,
+};
 pub use error::CrawlError;
 pub use exporter::{ExportResult, Exporter, ExporterConfig, ExporterError};
 pub use js_renderer::{JsRenderError, JsRenderer};

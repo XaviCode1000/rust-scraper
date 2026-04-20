@@ -79,7 +79,7 @@ fn run_standard_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit
 /// AI semantic cleaning export path.
 #[cfg(feature = "ai")]
 async fn run_ai_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
-    use rust_scraper::domain::DocumentChunk;
+    use rust_scraper::domain::{DocumentChunkUnvalidated, DocumentChunkValidated};
     use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{
         ModelConfig, SemanticCleanerImpl,
     };

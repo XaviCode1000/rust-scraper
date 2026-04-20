@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use chrono::Utc;
 use fs2::FileExt;
 
-use crate::domain::entities::DocumentChunk;
+use crate::domain::entities::DocumentChunkValidated;
 use crate::domain::exporter::{ExportResult, Exporter, ExporterConfig, ExporterError};
 
 /// Computes cosine similarity between two vectors
@@ -174,7 +174,7 @@ impl VectorExporter {
     ///
     /// Validates embedding dimensions if present.
     /// Rejects NaN or Infinity values in embeddings — they produce invalid JSON.
-    fn serialize_document(&self, doc: &DocumentChunk) -> ExportResult<String> {
+    fn serialize_document(&self, doc: &DocumentChunkValidated) -> ExportResult<String> {
         // Validate embedding dimensions if present
         if let Some(ref embeddings) = doc.embeddings {
             let mut dim_guard = self.dimensions.lock().expect("lock poisoned");
@@ -220,7 +220,7 @@ impl VectorExporter {
 }
 
 impl Exporter for VectorExporter {
-    fn export(&self, document: DocumentChunk) -> ExportResult<()> {
+    fn export(&self, document: DocumentChunkValidated) -> ExportResult<()> {
         let (mut file, mut writer) = self.writer()?;
         let is_first_doc =
             !self.config.append || file.metadata().map(|m| m.len() == 0).unwrap_or(true);
@@ -242,7 +242,7 @@ impl Exporter for VectorExporter {
         Ok(())
     }
 
-    fn export_batch(&self, documents: &[DocumentChunk]) -> ExportResult<()> {
+    fn export_batch(&self, documents: &[DocumentChunkValidated]) -> ExportResult<()> {
         if documents.is_empty() {
             return Ok(());
         }
@@ -296,17 +296,21 @@ mod tests {
         )
     }
 
-    fn create_test_chunk() -> DocumentChunk {
-        DocumentChunk {
-            id: uuid::Uuid::new_v4(),
-            url: "https://example.com/test".to_string(),
+    fn create_test_chunk() -> DocumentChunkValidated {
+        use crate::domain::Draft;
+        // Create DocumentChunk via From<ScrapedContent> then validate
+        let scraped = crate::domain::ScrapedContent {
             title: "Test Document".to_string(),
             content: "Test content for vector export".to_string(),
-            metadata: Default::default(),
-            timestamp: Utc::now(),
-            embeddings: Some(vec![0.1, 0.2, 0.3, 0.4, 0.5]),
-            correlation_id: None,
-        }
+            url: crate::domain::ValidUrl::parse("https://example.com/test").unwrap(),
+            excerpt: None,
+            author: None,
+            date: None,
+            html: None,
+            assets: vec![],
+        };
+        let chunk = crate::domain::DocumentChunk::<Draft>::from(scraped);
+        chunk.validate().unwrap()
     }
 
     #[test]
