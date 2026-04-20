@@ -33,6 +33,10 @@ pub enum ExporterError {
     #[error("batch error: {0}")]
     BatchError(String),
 
+    /// Unsupported export format
+    #[error("unsupported format: {0}")]
+    UnsupportedFormat(String),
+
     /// State store operation failed
     #[error("state store error: {0}")]
     StateStore(#[from] crate::error::ScraperError),

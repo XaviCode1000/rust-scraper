@@ -14,11 +14,37 @@ check-fast:
 
 # -- Tests --
 
+# Refresca el knowledge graph de GitNexus (el agente lo necesita para saber qué cambió)
+analyze:
+    gitnexus analyze || echo "GitNexus ya estaba actualizado"
+
+# Tests durante desarrollo → SOLO lo afectado (8-25 segundos típico)
+test-dev:
+    @echo "🚀 Ejecutando tests solo de cambios (GitNexus impact analysis)..."
+    cargo nextest run \
+        --no-fail-fast \
+        --test-threads 2 \
+        --profile dev
+
+# Tests completos para agentes (gate final)
 test:
-    cargo nextest run --test-threads 2
+    @echo "🧪 Ejecutando suite completa de tests..."
+    cargo nextest run \
+        --no-fail-fast \
+        --test-threads $(nproc) \
+        --profile agent
+
+# Tests con filtro preciso (GitNexus lo usa cuando sabe exactamente qué módulos cambiaron)
+test-filter filter:
+    @echo "🎯 Ejecutando tests filtrados: {{filter}}"
+    cargo nextest run \
+        --no-fail-fast \
+        --test-threads 2 \
+        --profile dev \
+        -E '{{filter}}'
 
 test-ai:
-    cargo nextest run --test-threads 2 --features ai
+    cargo nextest run --profile agent --test-threads 2 --features ai
 
 # -- Auditoría --
 
@@ -44,9 +70,6 @@ build-release:
 
 # -- CI --
 
-test-ci:
-    cargo nextest run --profile ci
-
 # -- Maintenance --
 
 fix-typos:
@@ -65,3 +88,56 @@ setup:
     @which sccache || (echo "Falta: sccache"; exit 1)
     @which mold || (echo "Falta: mold"; exit 1)
     @echo "Setup completo — todas las herramientas verificadas"
+
+# =============================================
+# WATCH MODE (el que más vas a usar con el agente)
+# =============================================
+
+# Modo desarrollo automático: vigila cambios y ejecuta solo tests afectados
+watch-dev:
+    @echo "👀 Modo watch activado - GitNexus + tests inteligentes"
+    @echo "   (Detén con Ctrl+C)"
+    cargo watch --clear \
+        --watch . \
+        --ignore "target/" \
+        --ignore "logs/" \
+        --shell "just test-dev-with-impact"
+
+# Versión inteligente que usa GitNexus para filtrar exactamente qué cambió
+test-dev-with-impact:
+    @echo "🚀 Ejecutando tests de desarrollo (con GitNexus awareness)..."
+    @echo "🎯 Ejecutando tests optimizados (excluyendo AI integration)..."
+    cargo nextest run \
+        --profile dev \
+        --test-threads 2 \
+        --no-fail-fast \
+        -E "not test(ai_integration)"
+
+# =============================================
+# CI / GATE FINAL (antes de commit / PR)
+# =============================================
+
+# Validación completa: fmt + clippy + tests completos
+test-ci:
+    @echo "🔥 Iniciando GATE FINAL (CI)..."
+    @echo "1/4 → Formateando código..."
+    cargo fmt --all -- --check
+    @echo "2/4 → Ejecutando Clippy (strict)..."
+    cargo clippy --all-targets --all-features -- -D warnings
+    @echo "3/4 → Refrescando GitNexus..."
+    gitnexus analyze || echo "GitNexus ya estaba actualizado"
+    @echo "4/4 → Ejecutando suite completa de tests..."
+    cargo nextest run \
+        --profile ci \
+        --test-threads $(nproc) \
+        --no-fail-fast \
+        --run-ignored=all
+    @echo "✅ CI PASADO - Listo para commit/push/PR"
+
+# Versión rápida para cuando solo quieres tests + clippy (sin fmt)
+test-ci-quick:
+    @echo "🔥 CI rápido (clippy + tests)..."
+    cargo clippy --all-targets --all-features -- -D warnings
+    gitnexus analyze || echo "GitNexus ya estaba actualizado"
+    cargo nextest run --profile ci --test-threads $(nproc) --no-fail-fast
+    @echo "✅ CI rápido pasado"

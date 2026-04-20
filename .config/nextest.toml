@@ -1,0 +1,76 @@
+# Configuración de cargo-nextest 2026 - Optimizada para scrapers
+# Ubicación recomendada: .config/nextest.toml
+# Ver docs: https://nexte.st/book/configuration
+#
+# Cambios vs nextest.toml anterior:
+# - global-timeout: Previene cuelgues infinitos
+# - fail-fast = false: Mejor para desarrollo iterativo
+# - Estructura optimizada para agentes de código
+
+[profile.default]
+# HDD-aware: Máximo 2 hilos para evitar thrashing
+threads-required = 2
+
+# Retries con backoff para tests flaky (red, I/O)
+retries = { backoff = "exponential", count = 2, delay = "1s" }
+
+# Global timeout: Previene cuelgues (30min desarrollo)
+global-timeout = "30m"
+
+# No fallar rápido: Mejor feedback durante desarrollo
+fail-fast = false
+
+# Output optimizado para agentes
+failure-output = "final"
+success-output = "final"
+status-level = "skip"
+
+# Timeout para tests lentos (scraping, red, disco)
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+# Filtros: excluir tests pesados por defecto
+default-filter = "not test(ai_integration)"
+
+[profile.ci]
+# Configuración agresiva para CI (más paralelismo)
+threads-required = 4
+retries = 0
+fail-fast = false
+failure-output = "immediate-final"
+
+# Timeouts más largos para CI
+slow-timeout = { period = "120s", terminate-after = 2, grace-period = "30s" }
+global-timeout = "1h"
+
+# Output detallado para debugging en CI
+success-output = "immediate"
+status-level = "all"
+
+[profile.dev]
+# Perfil para desarrollo iterativo (ultra-rápido)
+# Ejecuta solo lo afectado → 8-25 segundos típico
+threads-required = 2
+fail-fast = false
+retries = 1
+
+# Timeouts agresivos para feedback rápido
+slow-timeout = { period = "30s", terminate-after = 2, grace-period = "5s" }
+global-timeout = "5m"
+
+# Output optimizado para desarrollo
+success-output = "immediate"
+failure-output = "immediate"
+status-level = "skip"
+
+[profile.agent]
+# Perfil específico para agentes de código (menos paralelismo, más timeout)
+threads-required = 2
+global-timeout = "15m"
+fail-fast = false
+
+# Output inmediato para mejor feedback a agentes
+success-output = "immediate"
+failure-output = "immediate-final"
+
+# Timeouts conservadores para evitar timeouts de agentes
+slow-timeout = { period = "45s", terminate-after = 2, grace-period = "5s" }

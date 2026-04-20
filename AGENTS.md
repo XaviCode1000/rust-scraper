@@ -53,6 +53,52 @@ bacon
 
 **⚠️ HDD timeout rules:** First `cargo check` takes ~4 min (cold compile, 300 crates). After that, `sccache` makes everything fast. **ALWAYS set explicit timeouts** for heavy commands. Prefer `cargo check` over `cargo build` during development. Never run `cargo build --release` unless explicitly asked.
 
+### 🚀 Estrategia GitNexus + Just (2026 - Anti-Timeout)
+
+**Para agentes de código: Usa esta estrategia OBLIGATORIA para evitar timeouts:**
+
+#### ✅ Secuencia recomendada (iteraciones de 10-30 segundos)
+```bash
+# 1. ANTES de cualquier cambio → refresca GitNexus
+just analyze
+
+# 2. DESPUÉS de cada edición → tests solo de lo afectado
+just test-dev
+
+# 3. Si GitNexus te da un filtro específico → usa filtro preciso
+just test-filter 'package(rust_scraper) + test(contains("scraper"))'
+
+# 4. Solo al FINAL (cuando yo diga "tarea terminada") → suite completa
+just test
+```
+
+#### 🎯 Comandos que el agente debe usar (PIPELINE COMPLETO 2026)
+| Comando | Uso | Tiempo | Cuándo usarlo |
+|---------|-----|--------|--------------|
+| `just analyze` | Refrescar GitNexus | < 8s | Al inicio de sesión |
+| `just watch-dev` | **Modo automático principal** | automático | **Durante TODO el desarrollo** |
+| `just test-dev-with-impact` | Tests inteligentes manuales | 8-25s | Si watch no está corriendo |
+| `just test-filter 'filtro'` | Filtro personalizado | 10-30s | Cuando GitNexus da filtro específico |
+| `just test` | Tests completos | 2-6 min | Alternativa ligera al final |
+| `just test-ci` | **GATE FINAL** (fmt + clippy + tests) | 2-7 min | **Solo cuando yo diga "tarea terminada"** |
+
+#### 🚨 Prompt definitivo para agentes (copia y pega)
+
+> **Estrategia anti-timeout OBLIGATORIA 2026 (GitNexus + Just):**
+> 1. Al inicio de la sesión: `just analyze`
+> 2. Inmediatamente después: `just watch-dev` (modo automático)
+> 3. El agente **nunca** ejecuta tests manualmente. Solo edita código y deja que watch-dev haga el resto.
+> 4. Solo cuando yo diga explícitamente **"tarea terminada"** o **"finalizar"**, entonces ejecuta `just test-ci`
+> 5. Si quieres verificar algo específico usa `just test-filter 'filtro'`
+
+#### ⚠️ NUNCA uses estos comandos (causan timeouts)
+```bash
+cargo nextest run                    # ❌ Suite completa innecesaria
+cargo nextest run 2>&1 \| tail -5    # ❌ Pipes bloquean output
+just test-ci                         # ❌ Solo para CI
+just test-dev                        # ❌ Usa watch-dev en su lugar
+```
+
 ---
 
 ## Code Style
