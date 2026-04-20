@@ -410,6 +410,23 @@ pub async fn scrape_single_url_for_tui(
         Err(e) => {
             warn!("⚠️  Readability failed for {}: {}", url, e);
             let fallback_content = fallback::extract_text(&html);
+
+            // Check if fallback produced poor content (likely extraction failure)
+            const MIN_FALLBACK_CONTENT: usize = 100;
+            if fallback_content.len() < MIN_FALLBACK_CONTENT {
+                let msg = format!(
+                    "contenido pobre del fallback: {} bytes (mín {} bytes). Readability: {}",
+                    fallback_content.len(),
+                    MIN_FALLBACK_CONTENT,
+                    e
+                );
+                warn!("⚠️  {}", msg);
+                return Err(ScraperError::ExtractionFailed {
+                    url: url.to_string(),
+                    reason: msg,
+                });
+            }
+
             let assets = download_assets_if_enabled(&html, url, config).await?;
 
             Ok(ScrapedContent {

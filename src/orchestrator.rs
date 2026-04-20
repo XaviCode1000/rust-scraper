@@ -105,6 +105,7 @@ pub async fn run(args: Args) -> CliExit {
         max_file_size: Some(args.max_file_size),
         download_timeout_secs: args.download_timeout,
         scraper_concurrency: args.concurrency.resolve(),
+        max_pages: Some(args.max_pages),
     };
 
     if scraper_config.download_images {

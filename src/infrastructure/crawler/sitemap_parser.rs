@@ -200,7 +200,7 @@ impl SitemapParser {
                 async move {
                     let client = wreq::Client::builder()
                         .emulation(wreq_util::Emulation::Chrome145)
-                        .timeout(std::time::Duration::from_secs(30))
+                        .timeout(std::time::Duration::from_secs(10))
                         .build()
                         .expect("BUG: failed to build HTTP client");
                     client.get(&url).send().await

@@ -117,12 +117,29 @@ pub async fn scrape_urls(
         },
     };
 
-    let total_urls = urls.len();
+    let _total_urls = urls.len();
 
-    let mut results = Vec::with_capacity(total_urls);
+    // Apply max_pages limit if configured
+    let urls_to_process = if let Some(max_pages) = scraper_config.max_pages {
+        let limited: Vec<_> = urls.iter().take(max_pages).cloned().collect();
+        if limited.len() < urls.len() {
+            tracing::info!(
+                "Limiting to {} pages (max_pages={}), skipping {} URLs",
+                limited.len(),
+                max_pages,
+                urls.len() - limited.len()
+            );
+        }
+        limited
+    } else {
+        urls.to_vec()
+    };
+
+    let processing_count = urls_to_process.len();
+    let mut results = Vec::with_capacity(processing_count);
     let mut failures: Vec<(String, String)> = Vec::new();
 
-    for url in urls {
+    for url in urls_to_process {
         let url_str = url.as_str();
         let _url_host = url.host_str().unwrap_or("unknown").to_string();
 
@@ -149,7 +166,7 @@ pub async fn scrape_urls(
             }
         }
 
-        match scrape_single_url_for_tui(http_client.client(), url, scraper_config).await {
+        match scrape_single_url_for_tui(http_client.client(), &url, scraper_config).await {
             Ok(content) => {
                 let chars = content.content.chars().count();
                 results.push(content);
@@ -194,7 +211,7 @@ pub async fn scrape_urls(
         if let Some(ref tx) = progress_tx {
             let _ = tx
                 .send(ScrapeProgress::Finished {
-                    total: total_urls,
+                    total: processing_count,
                     successful: total_successful,
                     failed: total_failed,
                 })

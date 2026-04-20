@@ -76,6 +76,8 @@ pub struct ScraperConfig {
     pub download_timeout_secs: u64,
     /// Maximum concurrent scrapers (default: 3 for HDD-aware on 4C CPU)
     pub scraper_concurrency: usize,
+    /// Maximum pages to scrape (None = unlimited)
+    pub max_pages: Option<usize>,
 }
 
 impl Default for ScraperConfig {
@@ -87,6 +89,7 @@ impl Default for ScraperConfig {
             max_file_size: Some(50 * 1024 * 1024), // 50MB default
             download_timeout_secs: 30,
             scraper_concurrency: 3, // HDD-aware: nproc - 1 for 4C CPU
+            max_pages: None,
         }
     }
 }
@@ -144,6 +147,13 @@ impl ScraperConfig {
     /// Check if any download is enabled.
     pub fn has_downloads(&self) -> bool {
         self.download_images || self.download_documents
+    }
+
+    /// Set maximum page limit.
+    #[must_use]
+    pub fn with_max_pages(mut self, pages: usize) -> Self {
+        self.max_pages = Some(pages);
+        self
     }
 }
 

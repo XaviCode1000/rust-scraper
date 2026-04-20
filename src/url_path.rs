@@ -16,6 +16,8 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+use crate::OutputFormat;
+
 /// Windows reserved device names (case-insensitive)
 /// https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
 ///
@@ -121,9 +123,27 @@ impl UrlPath {
     ///
     /// Checks Windows reserved names (CON, PRN, AUX, etc.) and appends `_safe` suffix
     /// to prevent crashes on Windows systems.
+    ///
+    /// Uses OutputFormat to determine file extension (default: .md for Markdown).
     pub fn to_safe_filename(&self) -> String {
+        self.to_safe_filename_with_format(None)
+    }
+
+    /// Generate filename with explicit output format.
+    ///
+    /// When format is provided, uses the appropriate extension:
+    /// - Markdown → .md
+    /// - Json → .json
+    /// - Text → .txt
+    pub fn to_safe_filename_with_format(&self, format: Option<OutputFormat>) -> String {
+        let extension = match format {
+            Some(OutputFormat::Json) => "json",
+            Some(OutputFormat::Text) => "txt",
+            Some(OutputFormat::Markdown) | None => "md",
+        };
+
         if self.is_root {
-            return "index.md".to_string();
+            return format!("index.{}", extension);
         }
         let path_trimmed = self.raw.trim_start_matches('/');
         // Convert /docs/api/v2/users/ → docs-api-v2-users
@@ -142,7 +162,7 @@ impl UrlPath {
             sanitized
         };
 
-        format!("{}.md", final_name)
+        format!("{}.{}", final_name, extension)
     }
 
     /// Get directory part (everything except last component)
@@ -228,8 +248,13 @@ impl OutputPath {
     /// Always uses unique filename mapping to avoid collisions:
     /// `/blog/post1/` → `blog-post1.md` (not `index.md`)
     pub fn to_full_path(&self) -> String {
+        self.to_full_path_with_format(None)
+    }
+
+    /// Full path with explicit output format.
+    pub fn to_full_path_with_format(&self, format: Option<OutputFormat>) -> String {
         let folder = self.to_folder_path();
-        let filename = self.path.to_safe_filename();
+        let filename = self.path.to_safe_filename_with_format(format);
         format!("{}{}", folder, filename)
     }
 

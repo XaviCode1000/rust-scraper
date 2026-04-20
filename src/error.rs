@@ -87,6 +87,15 @@ pub enum ScraperError {
     #[error("Error de exportación: {0}")]
     Export(String),
 
+    /// Content extraction failed (poor fallback content)
+    #[error("extracción falló para {url}: {reason}")]
+    ExtractionFailed {
+        /// URL that failed
+        url: String,
+        /// Reason for failure
+        reason: String,
+    },
+
     /// Batch export failed (partial success)
     #[error("Error de exportación en batch: {0}")]
     ExportBatch(String),
