@@ -157,11 +157,21 @@ fn transform_and_serialize<'a>(
                         let link_text = extract_text_from_events(&link_text_parts);
                         let normalized_text = link_text.to_lowercase().trim().replace(' ', "-");
 
+                        // Add space before wiki-link if result is not empty and doesn't already end with space
+                        let needs_space =
+                            !result.is_empty() && !result.ends_with(' ') && !result.ends_with('\n');
+
                         if slug == normalized_text {
+                            if needs_space {
+                                result.push(' ');
+                            }
                             result.push_str("[[");
                             result.push_str(&slug);
                             result.push_str("]]");
                         } else {
+                            if needs_space {
+                                result.push(' ');
+                            }
                             result.push_str("[[");
                             result.push_str(&slug);
                             result.push('|');
