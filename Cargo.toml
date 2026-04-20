@@ -64,7 +64,8 @@ anyhow = "1"
 
 # Logging estructurado
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
 
 # Utilities
 url = { version = "2", features = ["serde"] }
@@ -165,7 +166,7 @@ once_cell = "1"
 pulldown-cmark = "0.13"
 
 # UUID for temp file generation (production-ready streaming)
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 async-compression = { version = "0.4.41", features = ["tokio", "gzip", "deflate", "brotli", "zstd"] }
 
 # Language detection for Obsidian rich metadata

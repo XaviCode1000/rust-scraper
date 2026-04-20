@@ -25,11 +25,11 @@ use governor::{
     Quota, RateLimiter,
 };
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, span, warn, Level};
 use url::Url;
 
 use crate::domain::{
-    CrawlError, CrawlResult, CrawlerConfig, DiscoveredUrl, ScrapedContent, ValidUrl,
+    CorrelationId, CrawlError, CrawlResult, CrawlerConfig, DiscoveredUrl, ScrapedContent, ValidUrl,
 };
 
 use super::results_channel::{CrawlMessage, ResultsCollector};
@@ -138,6 +138,8 @@ pub struct CrawlState {
     pub pagination_enabled: bool,
     /// Last error (if any) for debugging
     pub last_error: Option<String>,
+    /// W3C TraceContext correlation ID for distributed tracing
+    pub correlation_id: Option<CorrelationId>,
 }
 
 impl CrawlState {
@@ -151,6 +153,7 @@ impl CrawlState {
             offset: 0,
             pagination_enabled: batch_size > 0,
             last_error: None,
+            correlation_id: Some(CorrelationId::new()),
         }
     }
 
@@ -170,6 +173,18 @@ impl CrawlState {
         self.processed_urls.clear();
         self.offset = 0;
         self.last_error = None;
+        // Generate new correlation ID for new crawl job
+        self.correlation_id = Some(CorrelationId::new());
+    }
+
+    /// Get correlation ID reference (clone-friendly)
+    pub fn correlation_id(&self) -> Option<&CorrelationId> {
+        self.correlation_id.as_ref()
+    }
+
+    /// Generate new correlation ID for this crawl job
+    pub fn generate_correlation_id(&mut self) {
+        self.correlation_id = Some(CorrelationId::new());
     }
 }
 
@@ -217,6 +232,9 @@ pub async fn discover_urls_for_tui(
     base_url: &str,
     config: &CrawlerConfig,
 ) -> anyhow::Result<Vec<Url>> {
+    let span = span!(Level::INFO, "discover_urls", base_url = base_url);
+    let _guard = span.enter();
+
     info!("Discovering URLs from {}", base_url);
 
     // If sitemap enabled, use sitemap (preferred)
@@ -330,6 +348,9 @@ pub async fn scrape_urls_for_tui(
 ) -> ScraperResult<Vec<ScrapedContent>> {
     use futures::stream::{self, StreamExt};
 
+    let span = span!(Level::INFO, "scrape_urls", count = urls.len());
+    let _guard = span.enter();
+
     info!("Scraping {} URLs", urls.len());
 
     let client = super::create_http_client()?;
@@ -366,6 +387,9 @@ pub async fn scrape_single_url_for_tui(
     url: &Url,
     config: &ScraperConfig,
 ) -> ScraperResult<ScrapedContent> {
+    let span = span!(Level::DEBUG, "scrape_single", url = %url);
+    let _guard = span.enter();
+
     debug!("Scraping: {}", url);
 
     // Fetch HTML
@@ -515,6 +539,15 @@ async fn download_assets_if_enabled(
 /// # }
 /// ```
 pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError> {
+    let span = span!(
+        Level::INFO,
+        "crawl_site",
+        seed_url = %config.seed_url,
+        max_depth = config.max_depth,
+        max_pages = config.max_pages
+    );
+    let _guard = span.enter();
+
     info!(
         "Starting crawl from {} with max_depth={} max_pages={}",
         config.seed_url, config.max_depth, config.max_pages
@@ -546,7 +579,8 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
 
     // Results collector - usa mpsc channel para lock-free collection
     // Capacidad basada en max_pages para evitar reallocs
-    let results_collector = ResultsCollector::new(config_clone.max_pages, Some(config_clone.max_pages));
+    let results_collector =
+        ResultsCollector::new(config_clone.max_pages, Some(config_clone.max_pages));
     // Sender clonado para los workers - puede ser compartido via Arc si es necesario
     let error_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
@@ -622,7 +656,10 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
                 match fetch_url(&url_str, &config_task).await {
                     Ok(response) => {
                         // Add to results via channel (sin lock)
-                        if let Err(e) = results_sender.send(CrawlMessage::success(discovered_url_task)).await {
+                        if let Err(e) = results_sender
+                            .send(CrawlMessage::success(discovered_url_task))
+                            .await
+                        {
                             debug!("Failed to send result: {}", e);
                         }
 
@@ -821,6 +858,9 @@ pub async fn crawl_with_sitemap(
     sitemap_url: Option<&str>,
     config: &CrawlerConfig,
 ) -> Result<Vec<DiscoveredUrl>, CrawlError> {
+    let span = span!(Level::INFO, "crawl_with_sitemap", base_url = base_url);
+    let _guard = span.enter();
+
     crawl_with_sitemap_internal(base_url, sitemap_url, config).await
 }
 

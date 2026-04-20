@@ -82,7 +82,11 @@ just test
 | `just test` | Tests completos | 2-6 min | Alternativa ligera al final |
 | `just test-ci` | **GATE FINAL** (fmt + clippy + tests) | 2-7 min | **Solo cuando yo diga "tarea terminada"** |
 
-#### 🚨 Prompt definitivo para agentes (copia y pega)
+### 🚨 Prompts para Agentes de Código (2026 Best Practices)
+
+**Principio clave**: Los agentes empiezan cada sesión sin estado. Un prompt claro mejora dramáticamente la calidad del output (+4 puntos porcentuales según estudio ETH Zurich 2025).
+
+#### 🎯 Prompt Definitivo para Agentes (Copia y Pega)
 
 > **Estrategia anti-timeout OBLIGATORIA 2026 (GitNexus + Just):**
 > 1. Al inicio de la sesión: `just analyze`
@@ -90,6 +94,46 @@ just test
 > 3. El agente **nunca** ejecuta tests manualmente. Solo edita código y deja que watch-dev haga el resto.
 > 4. Solo cuando yo diga explícitamente **"tarea terminada"** o **"finalizar"**, entonces ejecuta `just test-ci`
 > 5. Si quieres verificar algo específico usa `just test-filter 'filtro'`
+
+#### 📋 Prompts Especializados por Tipo de Tarea
+
+**Para debugging:**
+> Usa GitNexus para impact analysis antes de cualquier cambio. Ejecuta `gitnexus_impact({target: "function_name"})` y reporta riesgos HIGH/CRITICAL.
+
+**Para refactoring:**
+> Ejecuta `gitnexus_detect_changes()` antes de commits. Nunca renombres sin `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})`.
+
+**Para nuevas features:**
+> Sigue Clean Architecture: lógica de negocio en `domain/`, casos de uso en `application/`, adaptadores externos en `infrastructure/`.
+
+#### ⚙️ Configuración de Prompts por Herramienta
+
+```bash
+# Claude Code - symlink para compatibilidad
+ln -sf AGENTS.md CLAUDE.md
+
+# Cursor - reglas específicas
+echo "AGENTS.md contiene instrucciones completas" > .cursorrules
+
+# GitHub Copilot - workspace rules
+mkdir -p .github
+cp AGENTS.md .github/copilot-instructions.md
+```
+
+#### 📊 Efectividad de Prompts (Datos 2026)
+
+- **Archivos humanos**: +4 puntos de mejora vs sin contexto
+- **Archivos auto-generados**: -0.5% a -2% performance
+- **Tamaño óptimo**: ≤150 líneas (60K+ repos adoptaron estándar AAIF)
+- **Jerarquía**: AGENTS.md anidados por directorio tienen precedencia
+
+#### 🎨 Estructura de Prompt Efectiva
+
+1. **Contexto primero**: Stack, herramientas, convenciones
+2. **Comandos críticos**: just analyze, just watch-dev, just test-ci
+3. **Reglas claras**: Qué hacer automáticamente vs pedir permiso
+4. **Ejemplos concretos**: Referencias a archivos reales del repo
+5. **Límites definidos**: Zonas prohibidas, patrones no usar
 
 #### ⚠️ NUNCA uses estos comandos (causan timeouts)
 ```bash

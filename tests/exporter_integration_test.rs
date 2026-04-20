@@ -29,6 +29,7 @@ fn make_chunk(url: &str, title: &str, content: &str) -> DocumentChunk {
         metadata,
         timestamp: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
         embeddings: None,
+        correlation_id: None,
     }
 }
 

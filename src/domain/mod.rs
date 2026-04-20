@@ -37,7 +37,7 @@ pub use js_renderer::{JsRenderError, JsRenderer};
 pub use pattern_matching::matches_pattern;
 pub use result::CrawlResult;
 pub use site::{CrawlerConfig, CrawlerConfigBuilder};
-pub use value_objects::ValidUrl;
+pub use value_objects::{CorrelationId, ValidUrl};
 
 /// Compression types supported for sitemap parsing
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +61,6 @@ pub struct UrlBatch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationResult {
     Valid,
-    Invalid(String), // reason
+    Invalid(String),    // reason
     NeedsRedirect(Url), // new URL
 }

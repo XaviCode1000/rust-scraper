@@ -305,6 +305,7 @@ mod tests {
             metadata: Default::default(),
             timestamp: Utc::now(),
             embeddings: Some(vec![0.1, 0.2, 0.3, 0.4, 0.5]),
+            correlation_id: None,
         }
     }
 

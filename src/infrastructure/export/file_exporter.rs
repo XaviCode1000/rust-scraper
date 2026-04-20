@@ -41,6 +41,7 @@ impl FileExporter {
     }
 
     /// Export a single document as Markdown
+    #[allow(dead_code)]
     fn save_md(&self, doc: &DocumentChunk) -> ExportResult<()> {
         let path = self.output_path(doc, "md");
         
@@ -68,6 +69,7 @@ impl FileExporter {
     }
 
     /// Export a single document as structured Text
+    #[allow(dead_code)]
     fn save_txt(&self, doc: &DocumentChunk) -> ExportResult<()> {
         let path = self.output_path(doc, "txt");
         
@@ -133,13 +135,12 @@ impl FileExporter {
             .unwrap_or_else(|| "unknown".to_string());
         
         // Generate filename from URL path
+        #[allow(clippy::collapsible_str_replace)]
         let filename = doc.url
             .trim_start_matches("https://")
             .trim_start_matches("http://")
             .replace('/', "-")
-            .replace('?', "_")
-            .replace('&', "_")
-            .replace(':', "_");
+            .replace('?', "_").replace('&', "_").replace(':', "_");
         
         let filename = if filename.is_empty() || filename.ends_with('-') {
             format!("index.{}", ext)
@@ -234,6 +235,7 @@ impl From<ScrapedContent> for DocumentChunk {
             metadata,
             timestamp: chrono::Utc::now(),
             embeddings: None,
+            correlation_id: None,
         }
     }
 }
@@ -260,6 +262,7 @@ mod tests {
                 .collect(),
             timestamp: chrono::Utc::now(),
             embeddings: None,
+            correlation_id: None,
         }
     }
 
@@ -281,9 +284,9 @@ mod tests {
 
     #[test]
     fn test_conversion_from_scraped_content() {
-        use crate::domain::entities::{ScrapedContent, ValidUrl};
+        use crate::domain::{ScrapedContent, ValidUrl};
         
-        let url = ValidUrl::new_unchecked("https://example.com/test");
+        let url = ValidUrl::parse("https://example.com/test").unwrap();
         let scraped = ScrapedContent {
             title: "Test Title".to_string(),
             content: "Test Content".to_string(),

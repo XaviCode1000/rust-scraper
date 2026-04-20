@@ -28,6 +28,7 @@ fn make_chunk(title: &str) -> DocumentChunk {
         metadata: Default::default(),
         timestamp: Utc::now(),
         embeddings: None,
+        correlation_id: None,
     }
 }
 

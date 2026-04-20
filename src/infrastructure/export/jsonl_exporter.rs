@@ -138,6 +138,7 @@ mod tests {
             metadata: std::collections::HashMap::new(),
             timestamp: Utc::now(),
             embeddings: None,
+            correlation_id: None,
         }
     }
 

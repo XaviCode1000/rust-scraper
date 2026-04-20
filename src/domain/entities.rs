@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::ValidUrl;
+use crate::domain::{CorrelationId, ValidUrl};
 
 /// Represents a downloaded asset (image or document)
 ///
@@ -138,6 +138,10 @@ pub struct DocumentChunk {
     /// Populated by embedding pipeline after initial scrape
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embeddings: Option<Vec<f32>>,
+    /// W3C TraceContext correlation ID for distributed tracing
+    /// Optional - when present, enables request correlation across services
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 impl DocumentChunk {
@@ -147,6 +151,17 @@ impl DocumentChunk {
     /// to the RAG pipeline's input format.
     #[must_use]
     pub fn from_scraped_content(scraped: &ScrapedContent) -> Self {
+        Self::from_scraped_content_with_correlation(scraped, None)
+    }
+
+    /// Create a new DocumentChunk from ScrapedContent with correlation ID
+    ///
+    /// Includes W3C traceparent for distributed tracing.
+    #[must_use]
+    pub fn from_scraped_content_with_correlation(
+        scraped: &ScrapedContent,
+        correlation_id: Option<&CorrelationId>,
+    ) -> Self {
         let mut metadata = HashMap::new();
 
         // Extract optional fields into metadata HashMap
@@ -175,6 +190,7 @@ impl DocumentChunk {
             metadata,
             timestamp: Utc::now(),
             embeddings: None,
+            correlation_id: correlation_id.map(|c| c.to_traceparent()),
         }
     }
 

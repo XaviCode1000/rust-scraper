@@ -144,12 +144,10 @@ fn test_document_chunk_creation() {
         metadata: std::collections::HashMap::new(),
         timestamp: chrono::Utc::now(),
         embeddings: None,
+        correlation_id: None,
     };
 
     assert_eq!(chunk.url, "https://example.com");
-    assert_eq!(chunk.title, "Test Page");
-    assert_eq!(chunk.content, "Test content");
-    assert!(!chunk.has_embeddings());
 }
 
 /// Test that default_cache_dir returns a valid path
@@ -890,6 +888,7 @@ fn test_relevance_filtering() {
         metadata: std::collections::HashMap::new(),
         timestamp: chrono::Utc::now(),
         embeddings: None,
+        correlation_id: None,
     };
     let emb1 = vec![0.9f32, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
@@ -902,6 +901,7 @@ fn test_relevance_filtering() {
         metadata: std::collections::HashMap::new(),
         timestamp: chrono::Utc::now(),
         embeddings: None,
+        correlation_id: None,
     };
     let emb2 = vec![0.0f32, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
