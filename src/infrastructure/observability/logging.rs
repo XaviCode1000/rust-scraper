@@ -104,8 +104,14 @@ pub fn init_json_logging_dual(
         let file_appender =
             RollingFileAppender::new(Rotation::DAILY, dir, format!("{}.log", app_name));
 
+        // NON-BLOCKING: Worker thread handles file I/O, Tokio threads never block
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        
+        // Leak the guard to keep it alive for the duration of the program
+        Box::leak(Box::new(guard));
+
         let json_layer = fmt::layer()
-            .with_writer(file_appender)
+            .with_writer(non_blocking)
             .with_ansi(false)
             .with_target(true)
             .json();
