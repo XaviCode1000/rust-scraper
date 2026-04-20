@@ -25,7 +25,13 @@
 //! - XML parsing fails
 //! - No `<loc>` elements found
 
+use super::batch_processor::BatchProcessor;
+use super::compression_handler::CompressionHandler;
+use super::memory_manager::MemoryManager;
+use super::retry_policy::RetryPolicy;
 use super::sitemap_config::SitemapConfig;
+use super::url_validator::UrlValidator;
+#[allow(unused_imports)]
 use async_compression::tokio::bufread::GzipDecoder;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -127,7 +133,11 @@ pub fn resolve_url(base: &Url, input: &str) -> Option<Url> {
 /// Following mem-streaming-large-data: streaming parser, no buffer accumulation
 pub struct SitemapParser {
     config: SitemapConfig,
-    client: wreq::Client,
+    compression_handler: CompressionHandler,
+    url_validator: UrlValidator,
+    retry_policy: RetryPolicy,
+    memory_manager: MemoryManager,
+    batch_processor: BatchProcessor,
 }
 
 impl SitemapParser {
@@ -136,11 +146,11 @@ impl SitemapParser {
     pub fn new() -> Self {
         Self {
             config: SitemapConfig::default(),
-            client: wreq::Client::builder()
-                .emulation(wreq_util::Emulation::Chrome145)
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("BUG: failed to build HTTP client"),
+            compression_handler: CompressionHandler::new(),
+            url_validator: UrlValidator::new(),
+            retry_policy: RetryPolicy::new(),
+            memory_manager: MemoryManager::new(),
+            batch_processor: BatchProcessor::new(),
         }
     }
 
@@ -149,11 +159,11 @@ impl SitemapParser {
     pub fn with_config(config: SitemapConfig) -> Self {
         Self {
             config,
-            client: wreq::Client::builder()
-                .emulation(wreq_util::Emulation::Chrome145)
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("BUG: failed to build HTTP client"),
+            compression_handler: CompressionHandler::new(),
+            url_validator: UrlValidator::new(),
+            retry_policy: RetryPolicy::new(),
+            memory_manager: MemoryManager::new(),
+            batch_processor: BatchProcessor::new(),
         }
     }
 
@@ -183,11 +193,22 @@ impl SitemapParser {
 
         let base_url = Url::parse(url)?;
 
-        // Fetch sitemap content
-        let response = self.client.get(url).send().await.map_err(|e| {
-            tracing::warn!("http request failed for {}: {}", url, e);
-            SitemapError::HttpError(e.to_string())
-        })?;
+        // [3.6] RetryPolicy: wrap HTTP request with retry logic
+        let response = self.retry_policy
+            .execute_with_retry(|| {
+                let url = url.to_string();
+                async move {
+                    let client = wreq::Client::builder()
+                        .emulation(wreq_util::Emulation::Chrome145)
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .expect("BUG: failed to build HTTP client");
+                    client.get(&url).send().await
+                        .map_err(|e| std::io::Error::other(e.to_string()))
+                }
+            })
+            .await
+            .map_err(|e| SitemapError::HttpError(e.to_string()))?;
 
         // Validate content type
         let content_type = response
@@ -212,13 +233,6 @@ impl SitemapParser {
             return Err(SitemapError::InvalidContentType(content_type.to_string()));
         }
 
-        let is_gzip = url.ends_with(".gz")
-            || response
-                .headers()
-                .get("content-encoding")
-                .map(|v| v == "gzip")
-                .unwrap_or(false);
-
         // Stream response with size limit
         use futures::StreamExt;
         let mut stream = response.bytes_stream();
@@ -240,23 +254,45 @@ impl SitemapParser {
             raw_bytes.extend_from_slice(&chunk);
         }
 
-        // Parse based on compression
-        let urls = if is_gzip && self.config.gzip_enabled {
-            self.parse_gzip_sitemap(&raw_bytes, &base_url).await?
+        // [3.4] CompressionHandler integration: detect and decompress content
+        let decompressed = self.compression_handler
+            .detect_and_decompress(&raw_bytes, url)
+            .await
+            .map_err(|e| SitemapError::HttpError(e.to_string()))?;
+
+        // Parse using unified decompression handle
+        let urls = if decompressed.is_empty() {
+            return Err(SitemapError::NoUrlsFound);
         } else {
-            self.parse_xml_sitemap(&raw_bytes, &base_url).await?
+            self.parse_xml_sitemap(&decompressed, &base_url).await?
         };
 
         // Check if sitemap index (recursive)
         if self.is_sitemap_index(&urls) {
             tracing::debug!("Detected sitemap index, recursing (depth: {})", depth);
+            
+            // [3.7] MemoryManager: handle disk swapping for large index
+            self.memory_manager
+                .handle_disk_swapping(&urls)
+                .map_err(|e| SitemapError::HttpError(e.to_string()))?;
+            
             self.parse_sitemap_index(&urls, depth - 1).await
         } else {
-            Ok(urls)
+            // [3.7] MemoryManager: check memory limits before returning
+            self.memory_manager
+                .handle_disk_swapping(&urls)
+                .map_err(|e| SitemapError::HttpError(e.to_string()))?;
+
+            // [3.8] BatchProcessor: apply crawl budget optimization
+            let optimized_urls = self.batch_processor
+                .apply_crawl_budget(urls, &self.config);
+
+            Ok(optimized_urls)
         }
     }
 
     /// Parse gzip-compressed sitemap
+    #[allow(dead_code)]
     async fn parse_gzip_sitemap(&self, bytes: &[u8], base_url: &Url) -> Result<Vec<Url>> {
         use tokio::io::{AsyncReadExt, BufReader};
         let reader = BufReader::new(bytes);
@@ -296,14 +332,19 @@ impl SitemapParser {
                 Ok(Event::Text(ref e)) if in_loc => {
                     if let Ok(text) = e.unescape() {
                         if let Some(url) = resolve_url(base_url, &text) {
-                            if url.scheme() == "http" || url.scheme() == "https" {
-                                urls.insert(url);
-                            } else {
-                                tracing::debug!(
-                                    "Filtered URL with invalid scheme: {} ({})",
-                                    url,
-                                    url.scheme()
-                                );
+                            // [3.5] UrlValidator integration: filter invalid patterns
+                            let validation = self.url_validator.filter_invalid_patterns(&url);
+                            match validation {
+                                crate::domain::ValidationResult::Valid => {
+                                    urls.insert(url);
+                                }
+                                crate::domain::ValidationResult::Invalid(reason) => {
+                                    tracing::debug!("Filtered invalid URL: {} — {}", url, reason);
+                                }
+                                crate::domain::ValidationResult::NeedsRedirect(new_url) => {
+                                    // Follow redirect by replacing URL
+                                    urls.insert(new_url);
+                                }
                             }
                         }
                     }
@@ -361,6 +402,44 @@ impl SitemapParser {
     #[must_use]
     pub fn has_gzip(&self) -> bool {
         self.config.gzip_enabled
+    }
+
+    /// Check if a URL is valid for sitemap crawling
+    ///
+    /// Filters out known invalid URL patterns like:
+    /// - Node.js release URLs with invalid version numbers (e.g., v106.0 instead of v10.6.0)
+    #[allow(dead_code)]
+    fn is_valid_sitemap_url(url: &Url) -> bool {
+        let path = url.path();
+
+        // Filter Node.js release URLs with invalid version patterns
+        // Valid: v10.6.0, v0.12.18, v14.17.0
+        // Invalid: v106.0 (should be v10.6.0), v1311.0 (should be v13.11.0)
+        if path.contains("/blog/release/v") {
+            if let Some(version_part) = path.split("/blog/release/v").nth(1) {
+                // Extract version number (before any query or fragment)
+                let version = version_part.split(&['?', '#'][..]).next().unwrap_or(version_part);
+
+                // Check if version has invalid pattern (e.g., v106.0 instead of v10.6.0)
+                // Valid patterns: v0.x.x, v1.x.x, v2.x.x, ..., v9.x.x, v10.x.x, v11.x.x, ..., v99.x.x
+                // Invalid patterns: v100.x.x, v1000.x.x, etc. (major version > 99)
+                if let Some(major_str) = version.split('.').next() {
+                    if let Ok(major) = major_str.parse::<u32>() {
+                        // Filter out major versions > 99 (Node.js versions are typically < 100)
+                        if major > 99 {
+                            tracing::debug!(
+                                "Filtered Node.js release URL with invalid major version: {} (version: {})",
+                                url,
+                                version
+                            );
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        true
     }
 
     /// Get current max depth
