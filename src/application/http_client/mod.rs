@@ -5,13 +5,23 @@
 //! - Exponential backoff retry policy
 //! - Specific handling for 403 (rotate UA), 429 (backoff), 5xx (retry)
 //! - Cookie support
+//! - Configurable request and connection timeouts
+//! - Rate limiting (requests per minute)
+//! - URL validation
+//! - TLS fingerprint rotation (Chrome 131, 145, Firefox, etc.)
 //!
 //! # Examples
 //!
 //! ```no_run
 //! use rust_scraper::application::http_client::{HttpClient, HttpClientConfig};
+//! use wreq_util::Emulation;
 //!
-//! let config = HttpClientConfig::default();
+//! let config = HttpClientConfig {
+//!     timeout_secs: 60,
+//!     rate_limit_rpm: Some(30),
+//!     tls_emulation: Emulation::Chrome131,
+//!     ..Default::default()
+//! };
 //! let client = HttpClient::new(config).unwrap();
 //! // Use client for HTTP requests
 //! ```

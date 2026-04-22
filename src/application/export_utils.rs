@@ -3,6 +3,10 @@
 //! Provides helper functions for creating exporters and state stores
 //! based on CLI configuration.
 
+use crate::infrastructure::export::StateStore;
+use std::path::PathBuf;
+use tracing::info;
+
 /// Get domain from URL for StateStore
 ///
 /// # Arguments
@@ -60,10 +64,6 @@ pub fn create_state_store(state_dir: PathBuf, url: &str) -> anyhow::Result<State
         store.set_cache_dir(state_dir);
     }
 
-    info!(
-        "Initialized StateStore for domain: {} at {}",
-        domain,
-        store.cache_dir.display()
-    );
+    info!("Initialized StateStore for domain: {}", domain);
     Ok(store)
 }

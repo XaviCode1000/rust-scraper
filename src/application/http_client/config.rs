@@ -25,6 +25,14 @@ pub struct HttpClientConfig {
     pub backoff_max_ms: u64,
     /// Enable cookie jar
     pub enable_cookies: bool,
+    /// Request timeout in seconds
+    pub timeout_secs: u64,
+    /// Connection timeout in seconds
+    pub connect_timeout_secs: u64,
+    /// Rate limit: requests per minute (None for no limit)
+    pub rate_limit_rpm: Option<u32>,
+    /// TLS fingerprint emulation preset
+    pub tls_emulation: wreq_util::Emulation,
 }
 
 impl Default for HttpClientConfig {
@@ -38,6 +46,10 @@ impl Default for HttpClientConfig {
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
             enable_cookies: true,
+            timeout_secs: 30,
+            connect_timeout_secs: 10,
+            rate_limit_rpm: None,
+            tls_emulation: wreq_util::Emulation::Chrome145,
         }
     }
 }
@@ -61,6 +73,10 @@ mod tests {
         assert_eq!(config.backoff_base_ms, 1000);
         assert_eq!(config.backoff_max_ms, 10000);
         assert!(config.enable_cookies);
+        assert_eq!(config.timeout_secs, 30);
+        assert_eq!(config.connect_timeout_secs, 10);
+        assert_eq!(config.rate_limit_rpm, None);
+        assert_eq!(config.tls_emulation, wreq_util::Emulation::Chrome145);
     }
 
     #[test]
@@ -83,10 +99,18 @@ mod tests {
             backoff_base_ms: 500,
             backoff_max_ms: 5000,
             enable_cookies: false,
+            timeout_secs: 60,
+            connect_timeout_secs: 20,
+            rate_limit_rpm: Some(30),
+            tls_emulation: wreq_util::Emulation::Chrome131,
         };
 
         assert_eq!(config.accept_language, "es-ES");
         assert_eq!(config.max_retries, 5);
         assert!(!config.enable_cookies);
+        assert_eq!(config.timeout_secs, 60);
+        assert_eq!(config.connect_timeout_secs, 20);
+        assert_eq!(config.rate_limit_rpm, Some(30));
+        assert_eq!(config.tls_emulation, wreq_util::Emulation::Chrome131);
     }
 }

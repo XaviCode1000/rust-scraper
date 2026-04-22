@@ -1,428 +1,97 @@
-//! Configuration types for the scraper.
+//! Centralized configuration with validation
 //!
-//! Contains [`ScraperConfig`] for scraper behavior and [`ConcurrencyConfig`]
-//! for intelligent concurrency auto-detection.
+//! Provides a single entry point for all application configuration,
+//! with validation and feature gating.
 
-// ============================================================================
-// Output Format
-// ============================================================================
+use crate::application::http_client::HttpClientConfig;
+use crate::domain::site::CrawlerConfig;
+use crate::infrastructure::config::ScraperConfig;
+use crate::infrastructure::output::file_saver::ObsidianOptions;
 
-use clap::ValueEnum;
-
-/// Output format for scraped content.
+/// Central application configuration
 ///
-/// # Examples
-///
-/// ```
-/// use rust_scraper::OutputFormat;
-///
-/// let format = OutputFormat::Markdown;
-/// assert_eq!(format, OutputFormat::Markdown);
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum OutputFormat {
-    /// Markdown format with YAML frontmatter (recommended for RAG)
-    Markdown,
-    /// Structured JSON with metadata
-    Json,
-    /// Plain text without formatting
-    Text,
-}
-
-// ============================================================================
-// Scraper Config
-// ============================================================================
-
-/// Scraper configuration for download and output behavior.
-///
-/// # Examples
-///
-/// ```
-/// use rust_scraper::ScraperConfig;
-///
-/// // Default configuration
-/// let config = ScraperConfig::default();
-///
-/// // Custom configuration with builder pattern
-/// let config = ScraperConfig::default()
-///     .with_images()
-///     .with_documents()
-///     .with_output_dir("./output".into())
-///     .with_scraper_concurrency(5);
-///
-/// assert!(config.download_images);
-/// assert!(config.download_documents);
-/// assert_eq!(config.scraper_concurrency, 5);
-/// ```
-///
-/// # Concurrency Recommendations
-///
-/// | Storage | Concurrency | Reason |
-/// |---------|-------------|--------|
-/// | HDD | 3 (default) | Avoids disk thrashing on mechanical drives |
-/// | SSD | 5-8 | Faster random I/O |
-/// | NVMe | 10+ | Very high IOPS |
+/// Combines all configuration types into a single validated structure.
+/// Following Clean Architecture: configuration is infrastructure concern.
 #[derive(Debug, Clone)]
-pub struct ScraperConfig {
-    /// Enable image downloading (PNG, JPG, GIF, WEBP, SVG, BMP)
-    pub download_images: bool,
-    /// Enable document downloading (PDF, DOCX, XLSX, PPTX, etc.)
-    pub download_documents: bool,
-    /// Output directory for downloaded assets
-    pub output_dir: std::path::PathBuf,
-    /// Maximum file size in bytes (default: 50MB)
-    pub max_file_size: Option<u64>,
-    /// Timeout for individual asset downloads in seconds
-    pub download_timeout_secs: u64,
-    /// Maximum concurrent scrapers (default: 3 for HDD-aware on 4C CPU)
-    pub scraper_concurrency: usize,
-    /// Maximum pages to scrape (None = unlimited)
-    pub max_pages: Option<usize>,
+pub struct Config {
+    /// Scraping configuration
+    pub scraper: ScraperConfig,
+    /// Crawling configuration
+    pub crawler: CrawlerConfig,
+    /// HTTP client configuration
+    pub http: HttpClientConfig,
+    /// Obsidian integration options
+    pub obsidian: ObsidianOptions,
+    /// AI feature settings (feature-gated)
+    #[cfg(feature = "ai")]
+    pub ai: AiConfig,
 }
 
-impl Default for ScraperConfig {
-    fn default() -> Self {
-        Self {
-            download_images: false,
-            download_documents: false,
-            output_dir: std::path::PathBuf::from("output"),
-            max_file_size: Some(50 * 1024 * 1024), // 50MB default
-            download_timeout_secs: 30,
-            scraper_concurrency: 3, // HDD-aware: nproc - 1 for 4C CPU
-            max_pages: None,
-        }
-    }
+/// AI-specific configuration (feature-gated)
+#[cfg(feature = "ai")]
+#[derive(Debug, Clone)]
+pub struct AiConfig {
+    /// Relevance threshold for semantic filtering
+    pub threshold: f32,
+    /// Maximum tokens per chunk
+    pub max_tokens: usize,
+    /// Offline mode
+    pub offline: bool,
 }
 
-impl ScraperConfig {
-    /// Create a new config with default values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rust_scraper::ScraperConfig;
-    ///
-    /// let config = ScraperConfig::new();
-    /// assert!(!config.download_images);
-    /// ```
-    #[must_use]
+impl Config {
+    /// Create a new config with default values
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            scraper: ScraperConfig::default(),
+            crawler: CrawlerConfig::builder("https://example.com".parse().unwrap()).build(),
+            http: HttpClientConfig::default(),
+            obsidian: ObsidianOptions::default(),
+            #[cfg(feature = "ai")]
+            ai: AiConfig {
+                threshold: 0.3,
+                max_tokens: 512,
+                offline: false,
+            },
+        }
     }
 
-    /// Enable image downloading.
-    #[must_use]
-    pub fn with_images(mut self) -> Self {
-        self.download_images = true;
-        self
-    }
-
-    /// Enable document downloading.
-    #[must_use]
-    pub fn with_documents(mut self) -> Self {
-        self.download_documents = true;
-        self
-    }
-
-    /// Set custom output directory.
-    #[must_use]
-    pub fn with_output_dir(mut self, dir: std::path::PathBuf) -> Self {
-        self.output_dir = dir;
-        self
-    }
-
-    /// Set scraper concurrency limit.
+    /// Validate the configuration
     ///
-    /// # Recommendations
-    ///
-    /// - **HDD**: 3 (default) — avoids disk thrashing
-    /// - **SSD**: 5-8 — faster random I/O
-    /// - **NVMe**: 10+ — very high IOPS
-    #[must_use]
-    pub fn with_scraper_concurrency(mut self, concurrency: usize) -> Self {
-        self.scraper_concurrency = concurrency;
-        self
-    }
+    /// Returns an error if any configuration is invalid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate scraper config
+        if self.scraper.scraper_concurrency == 0 {
+            return Err(ConfigError::InvalidConcurrency);
+        }
 
-    /// Check if any download is enabled.
-    pub fn has_downloads(&self) -> bool {
-        self.download_images || self.download_documents
-    }
+        // Validate crawler config
+        if self.crawler.max_pages == 0 {
+            return Err(ConfigError::InvalidMaxPages);
+        }
 
-    /// Set maximum page limit.
-    #[must_use]
-    pub fn with_max_pages(mut self, pages: usize) -> Self {
-        self.max_pages = Some(pages);
-        self
+        // Validate HTTP config
+        if self.http.max_retries > 10 {
+            return Err(ConfigError::InvalidRetries);
+        }
+
+        Ok(())
     }
 }
 
-// ============================================================================
-// Concurrency Config
-// ============================================================================
-
-/// Concurrency configuration with smart auto-detection.
-///
-/// Provides intelligent defaults based on hardware capabilities:
-/// - **Auto-detection**: Uses `std::thread::available_parallelism()` to detect CPU cores
-/// - **HDD-aware**: Limits concurrency on systems with limited I/O
-/// - **Safe bounds**: Clamps values between 1 and 16
-///
-/// # Examples
-///
-/// ```
-/// use rust_scraper::ConcurrencyConfig;
-///
-/// // Auto-detect (default)
-/// let config = ConcurrencyConfig::default();
-///
-/// // Explicit value
-/// let config = ConcurrencyConfig::new(5);
-///
-/// // Get the resolved value
-/// let concurrency = config.resolve();
-/// println!("Using {} concurrent workers", concurrency);
-/// ```
-#[derive(Debug, Clone)]
-pub struct ConcurrencyConfig {
-    /// Explicit concurrency value (None = auto-detect)
-    value: Option<usize>,
-    /// Whether to use auto-detection
-    auto_detect: bool,
-}
-
-impl Default for ConcurrencyConfig {
+impl Default for Config {
     fn default() -> Self {
-        Self {
-            value: None,
-            auto_detect: true,
-        }
+        Self::new()
     }
 }
 
-impl std::fmt::Display for ConcurrencyConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.is_auto() {
-            write!(f, "auto")
-        } else if let Some(value) = self.value {
-            write!(f, "{}", value)
-        } else {
-            write!(f, "auto")
-        }
-    }
-}
-
-impl ConcurrencyConfig {
-    /// Create a new config with explicit value.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - Explicit concurrency value (will be clamped 1-16)
-    #[must_use]
-    pub fn new(value: usize) -> Self {
-        Self {
-            value: Some(value.clamp(1, 16)),
-            auto_detect: false,
-        }
-    }
-
-    /// Create auto-detecting config (default).
-    #[must_use]
-    pub fn auto() -> Self {
-        Self::default()
-    }
-
-    /// Resolve the actual concurrency value.
-    ///
-    /// Uses auto-detection based on CPU cores:
-    /// - 1-2 cores: 1 (avoid overwhelming system)
-    /// - 4 cores: 3 (HDD-aware default)
-    /// - 8+ cores: min(cores - 1, 8)
-    pub fn resolve(&self) -> usize {
-        if let Some(value) = self.value {
-            return value;
-        }
-
-        let cores = std::thread::available_parallelism()
-            .map(|p| p.get())
-            .unwrap_or(2);
-
-        let optimal = match cores {
-            1 | 2 => 1,
-            3 | 4 => 3,
-            5..=7 => 5,
-            _ => (cores - 1).min(8),
-        };
-
-        optimal.clamp(1, 16)
-    }
-
-    /// Check if this config uses auto-detection.
-    #[must_use]
-    pub fn is_auto(&self) -> bool {
-        self.auto_detect && self.value.is_none()
-    }
-
-    /// Get the raw value if explicitly set.
-    #[must_use]
-    pub fn get(&self) -> Option<usize> {
-        self.value
-    }
-}
-
-/// Custom value parser for clap (accepts "auto" or number).
-impl From<&str> for ConcurrencyConfig {
-    fn from(s: &str) -> Self {
-        let s = s.trim().to_lowercase();
-        if s == "auto" || s.is_empty() {
-            Self::default()
-        } else {
-            s.parse().map(ConcurrencyConfig::new).unwrap_or_else(|_| {
-                eprintln!("Warning: Invalid concurrency '{}', using auto-detect", s);
-                Self::default()
-            })
-        }
-    }
-}
-
-impl std::str::FromStr for ConcurrencyConfig {
-    type Err = std::num::ParseIntError;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let s = s.trim().to_lowercase();
-        if s == "auto" || s.is_empty() {
-            Ok(Self::default())
-        } else {
-            s.parse::<usize>().map(ConcurrencyConfig::new)
-        }
-    }
-}
-
-impl clap::builder::ValueParserFactory for ConcurrencyConfig {
-    type Parser = ConcurrencyValueParser;
-
-    fn value_parser() -> Self::Parser {
-        ConcurrencyValueParser
-    }
-}
-
-/// Custom value parser for clap concurrency arguments.
-#[derive(Debug, Clone)]
-pub struct ConcurrencyValueParser;
-
-impl clap::builder::TypedValueParser for ConcurrencyValueParser {
-    type Value = ConcurrencyConfig;
-
-    fn parse_ref(
-        &self,
-        _cmd: &clap::Command,
-        _arg: Option<&clap::Arg>,
-        value: &std::ffi::OsStr,
-    ) -> Result<Self::Value, clap::Error> {
-        let value = value
-            .to_str()
-            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-
-        let value = value.trim().to_lowercase();
-        if value.is_empty() || value == "auto" {
-            return Ok(ConcurrencyConfig::default());
-        }
-
-        value
-            .parse::<usize>()
-            .map(ConcurrencyConfig::new)
-            .map_err(|_| {
-                clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    format!(
-                        "'{}' is not a valid concurrency value (expected number or 'auto')",
-                        value
-                    ),
-                )
-            })
-    }
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_scraper_config_default() {
-        let config = ScraperConfig::default();
-        assert!(!config.download_images);
-        assert!(!config.download_documents);
-        assert!(!config.has_downloads());
-        assert_eq!(config.scraper_concurrency, 3);
-    }
-
-    #[test]
-    fn test_scraper_config_with_images() {
-        let config = ScraperConfig::default().with_images();
-        assert!(config.download_images);
-        assert!(config.has_downloads());
-    }
-
-    #[test]
-    fn test_scraper_config_with_documents() {
-        let config = ScraperConfig::default().with_documents();
-        assert!(config.download_documents);
-        assert!(config.has_downloads());
-    }
-
-    #[test]
-    fn test_scraper_config_with_concurrency() {
-        let config = ScraperConfig::default().with_scraper_concurrency(5);
-        assert_eq!(config.scraper_concurrency, 5);
-    }
-
-    #[test]
-    fn test_concurrency_config_new() {
-        let config = ConcurrencyConfig::new(5);
-        assert_eq!(config.resolve(), 5);
-    }
-
-    #[test]
-    fn test_concurrency_config_auto() {
-        let config = ConcurrencyConfig::auto();
-        let value = config.resolve();
-        assert!((1..=16).contains(&value));
-    }
-
-    #[test]
-    fn test_concurrency_config_clamp() {
-        let config = ConcurrencyConfig::new(100);
-        assert_eq!(config.resolve(), 16);
-    }
-
-    #[test]
-    fn test_concurrency_config_display() {
-        let auto = ConcurrencyConfig::auto();
-        assert_eq!(format!("{}", auto), "auto");
-
-        let explicit = ConcurrencyConfig::new(5);
-        assert_eq!(format!("{}", explicit), "5");
-    }
-
-    #[test]
-    fn test_concurrency_config_from_str() {
-        let config = ConcurrencyConfig::from("5");
-        assert_eq!(config.resolve(), 5);
-
-        let config = ConcurrencyConfig::from("auto");
-        assert!(config.is_auto());
-
-        let config = ConcurrencyConfig::from("");
-        assert!(config.is_auto());
-    }
-
-    #[test]
-    fn test_concurrency_config_from_str_invalid() {
-        let config = ConcurrencyConfig::from("not-a-number");
-        assert!(config.is_auto());
-    }
+/// Configuration validation errors
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("scraper concurrency must be > 0")]
+    InvalidConcurrency,
+    #[error("max pages must be > 0")]
+    InvalidMaxPages,
+    #[error("max retries must be <= 10")]
+    InvalidRetries,
 }

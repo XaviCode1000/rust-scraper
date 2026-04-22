@@ -98,11 +98,26 @@ impl std::process::Termination for CliExit {
     fn report(self) -> ExitCode {
         match self {
             CliExit::Success => ExitCode::from(0),
-            CliExit::UsageError(_) => ExitCode::from(64),
-            CliExit::NetworkError(_) => ExitCode::from(69),
-            CliExit::IoError(_) => ExitCode::from(74),
-            CliExit::ProtocolError(_) => ExitCode::from(76),
-            CliExit::ConfigError(_) => ExitCode::from(78),
+            CliExit::UsageError(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(64)
+            },
+            CliExit::NetworkError(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(69)
+            },
+            CliExit::IoError(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(74)
+            },
+            CliExit::ProtocolError(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(76)
+            },
+            CliExit::ConfigError(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(78)
+            },
             CliExit::PartialSuccess { .. } => ExitCode::from(69),
         }
     }

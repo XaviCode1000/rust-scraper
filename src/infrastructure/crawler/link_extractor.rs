@@ -12,6 +12,8 @@ use scraper::{Html, Selector};
 use tracing::debug;
 use url::Url;
 
+use crate::domain::LinkExtractor;
+
 /// Extract all links from HTML content
 ///
 /// Following **own-borrow-over-clone**: Accepts `&str` not `&String`.
@@ -363,5 +365,20 @@ mod tests {
         // Links contain the path portion; query params may be normalized
         assert!(links.iter().any(|l| l.contains("/search")));
         assert!(links.iter().any(|l| l.contains("/page")));
+    }
+}
+
+/// HTML link extractor implementation
+///
+/// Implements the domain LinkExtractor trait using scraper library.
+pub struct HtmlLinkExtractor;
+
+impl LinkExtractor for HtmlLinkExtractor {
+    fn extract_links(
+        &self,
+        html: &str,
+        base_url: &str,
+    ) -> Result<Vec<String>, crate::domain::CrawlError> {
+        extract_links(html, base_url)
     }
 }

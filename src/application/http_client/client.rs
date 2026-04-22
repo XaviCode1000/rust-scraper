@@ -6,9 +6,15 @@ use super::config::HttpClientConfig;
 use super::error::{HttpError, HttpResult};
 use super::waf::detect_waf_challenge;
 use crate::error::ScraperError;
-use crate::user_agent::UserAgentCache;
+use crate::infrastructure::user_agent::UserAgentCache;
+use governor::clock::DefaultClock;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter};
+use std::num::NonZeroU32;
 use std::time::Duration;
 use tracing::{debug, warn};
+use rand;
+use url::Url;
 use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::Client;
 use wreq_util::Emulation;
@@ -27,6 +33,14 @@ const CLIENT_HINTS_SEC_CH_UA_PLATFORM: &str = "\"Linux\"";
 /// - Status-specific retry logic
 /// - User-agent rotation on 403
 /// - Exponential backoff on 429 and 5xx
+/// - Request timeout configuration
+/// - Rate limiting
+/// - URL validation
+/// - TLS fingerprint rotation
+/// - Request timeout configuration
+/// - Rate limiting
+/// - URL validation
+/// - TLS fingerprint rotation
 pub struct HttpClient {
     /// Internal wreq client
     client: Client,
@@ -34,6 +48,8 @@ pub struct HttpClient {
     config: HttpClientConfig,
     /// Pool of user agents for rotation
     user_agents: Vec<String>,
+    /// Rate limiter for requests per minute
+    rate_limiter: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
 }
 
 impl HttpClient {
@@ -83,10 +99,10 @@ impl HttpClient {
         );
 
         let builder = Client::builder()
-            .emulation(Emulation::Chrome145)
+            .emulation(config.tls_emulation.clone())
             .default_headers(headers)
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(config.timeout_secs))
+            .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
             .pool_max_idle_per_host(pool_size)
             .pool_idle_timeout(Duration::from_secs(60))
             .gzip(true)
@@ -100,12 +116,27 @@ impl HttpClient {
 
         let user_agents = UserAgentCache::fallback_agents();
 
+        // Create rate limiter if configured
+        let rate_limiter = if let Some(rpm) = config.rate_limit_rpm {
+            if rpm == 0 {
+                return Err(ScraperError::Config("rate_limit_rpm must be greater than 0".into()));
+            }
+            let quota = Quota::per_minute(NonZeroU32::new(rpm).unwrap()); // Safe now since rpm > 0
+            Some(RateLimiter::direct(quota))
+        } else {
+            None
+        };
+
         debug!("HttpClient created with {} user agents", user_agents.len());
+        if let Some(rpm) = config.rate_limit_rpm {
+            debug!("Rate limiter configured: {} requests per minute", rpm);
+        }
 
         Ok(Self {
             client,
             config,
             user_agents,
+            rate_limiter,
         })
     }
 
@@ -128,8 +159,21 @@ impl HttpClient {
     ///
     /// # Errors
     ///
-    /// Returns `HttpError` for failed requests
+    /// Returns `HttpError` for failed requests or invalid URLs
     pub async fn get(&self, url: &str) -> HttpResult<String> {
+        // Validate URL first
+        let parsed_url = Url::parse(url).map_err(|e| HttpError::Request(format!("Invalid URL: {}", e)))?;
+
+        // Ensure URL has http or https scheme
+        if !matches!(parsed_url.scheme(), "http" | "https") {
+            return Err(HttpError::Request("URL must use http or https scheme".into()));
+        }
+
+        // Apply rate limiting if configured
+        if let Some(ref limiter) = self.rate_limiter {
+            limiter.until_ready().await;
+        }
+
         let mut ua_index = 0;
         let max_attempts = self.config.max_retries;
 
@@ -146,14 +190,19 @@ impl HttpClient {
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".into()
                 });
 
-            let request = self
+            let mut request = self
                 .client
                 .get(url)
                 .header("Accept-Language", &self.config.accept_language)
                 .header("Accept", &self.config.accept)
-                .header("Referer", &self.config.referer)
-                .header("Cache-Control", &self.config.cache_control)
                 .header("User-Agent", ua.clone());
+
+            // Use minimal headers for WAF bypass attempts (ua_index >= 4)
+            if ua_index < 4 {
+                request = request
+                    .header("Referer", &self.config.referer)
+                    .header("Cache-Control", &self.config.cache_control);
+            }
 
             let response = request.send().await.map_err(|e| {
                 if e.is_timeout() {
@@ -176,13 +225,34 @@ impl HttpClient {
 
                     if let Some(provider) = detect_waf_challenge(&body) {
                         warn!(
-                            "WAF challenge detected from {} ({}), rotating UA",
+                            "WAF challenge detected from {} ({}), attempting fallback strategies",
                             url, provider
                         );
-                        if ua_index == 0 {
+
+                        // Fallback strategy 1: Rotate user agent (up to 3 attempts)
+                        if ua_index < 3 {
                             ua_index += 1;
+                            // Add small delay to avoid rapid retries
+                            tokio::time::sleep(Duration::from_millis(500)).await;
                             continue;
                         }
+
+                        // Fallback strategy 2: Try with minimal headers (remove referer/cache-control)
+                        if ua_index == 3 {
+                            ua_index += 1;
+                            warn!("Trying minimal headers for WAF bypass");
+                            continue; // Will use different headers below
+                        }
+
+                        // Fallback strategy 3: Add random delay (1-3 seconds)
+                        if ua_index == 4 {
+                            ua_index += 1;
+                            let delay_ms = 1000 + (rand::random::<u64>() % 2000);
+                            warn!("Adding random delay {}ms for WAF bypass", delay_ms);
+                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            continue;
+                        }
+
                         return Err(HttpError::WafChallenge(provider.to_string()));
                     }
 
@@ -383,6 +453,38 @@ mod tests {
         let result = client.get("not-a-valid-url").await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_url_validation_invalid_scheme() {
+        let config = HttpClientConfig::default();
+        let client = HttpClient::new(config).unwrap();
+
+        let result = client.get("ftp://example.com").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HttpError::Request(_)));
+    }
+
+    #[test]
+    fn test_http_client_with_custom_tls_emulation() {
+        let config = HttpClientConfig {
+            tls_emulation: wreq_util::Emulation::Chrome131,
+            ..Default::default()
+        };
+        let result = HttpClient::new(config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_http_client_with_rate_limiting() {
+        let config = HttpClientConfig {
+            rate_limit_rpm: Some(60),
+            ..Default::default()
+        };
+        let result = HttpClient::new(config);
+        assert!(result.is_ok());
+    }
+
+
 
     #[tokio::test]
     #[ignore = "requires network - run with cargo test --ignored"]

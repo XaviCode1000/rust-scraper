@@ -8,6 +8,7 @@ pub mod completions;
 pub mod config;
 pub mod error;
 pub mod export_flow;
+pub mod orchestrator;
 pub mod preflight;
 pub mod scrape_flow;
 pub mod summary;

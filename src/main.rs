@@ -20,7 +20,7 @@
 //!
 //! **Golden Rule:** Application layer NEVER imports ratatui/crossterm/indicatif.
 
-mod orchestrator;
+use rust_scraper::cli::orchestrator;
 
 use std::env;
 use std::io::{self, IsTerminal};
@@ -126,6 +126,12 @@ fn prompt_for_url() -> Result<String, CliExit> {
 
 #[tokio::main]
 async fn main() -> CliExit {
+    // tokio-console: usa 'cargo install tokio-console' y corre en otra terminal
+    // El runtime con tokio[unstable] ya expone el endpoint automaticamente
+    __main().await
+}
+
+async fn __main() -> CliExit {
     // =========================================================================
     // 1. Parse CLI arguments
     // =========================================================================

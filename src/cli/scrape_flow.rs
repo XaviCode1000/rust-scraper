@@ -10,7 +10,7 @@ use crate::{HttpClient, HttpClientConfig};
 use crate::application::scrape_single_url_for_tui;
 use crate::domain::ScrapedContent;
 use crate::adapters::tui::{ScrapeProgress, ScrapeStatus, ScrapeError};
-use crate::export_factory;
+use crate::application::export_factory;
 use crate::infrastructure::export::state_store::StateStore;
 
 /// Apply resume mode filtering.
@@ -22,7 +22,7 @@ pub async fn apply_resume_mode(
     Vec<Url>,
     Option<StateStore>,
 ) {
-    let state_store = if args.resume {
+    let state_store: Option<StateStore> = if args.resume {
         info!("Resume mode enabled - tracking processed URLs");
         let state_dir = args.state_dir.clone().unwrap_or_else(|| {
             let cache_base = std::env::var("XDG_CACHE_HOME")

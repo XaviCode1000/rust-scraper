@@ -11,6 +11,7 @@
 //!
 //! Following Clean Architecture: infrastructure depends on domain, not vice versa.
 
+pub mod config;
 pub mod converter;
 pub mod crawler;
 pub mod export;
@@ -19,6 +20,7 @@ pub mod observability;
 pub mod obsidian;
 pub mod output;
 pub mod scraper;
+pub mod user_agent;
 
 #[cfg(feature = "ai")]
 pub mod ai;

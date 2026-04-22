@@ -1,116 +1,193 @@
-//! Export flow logic extracted from orchestrator.
+//! Export flow — handles result export (standard and AI-cleaned) and file saving.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[allow(unused_imports)]
 use tracing::{info, warn};
 
-use crate::{Args, ObsidianOptions};
+use crate::cli::error::CliExit;
 use crate::domain::ScrapedContent;
 use crate::infrastructure::export::state_store::StateStore;
+use crate::infrastructure::output::file_saver::ObsidianOptions;
+use crate::{application::export_factory, infrastructure::output::file_saver::save_results, ExportFormat, OutputFormat};
 
-use crate::CliExit;
-use crate::cli::preflight;
-use crate::export_flow::{self, ExportConfig};
+// ============================================================================
+// Export Results (RAG pipeline)
+// ============================================================================
 
-/// Run the export flow (AI or standard).
-pub async fn run_export_flow(
-    results: &[ScrapedContent],
-    args: &Args,
-    vault_path: &Option<PathBuf>,
-    state_store: Option<&StateStore>,
-) -> Result<Vec<String>, CliExit> {
-    let ok = preflight::icon("✅", "OK");
-    info!("Exporting results (format: {:?})...", args.export_format);
+/// Configuration for the export flow.
+#[allow(dead_code)]
+pub struct ExportConfig<'a> {
+    pub results: &'a [ScrapedContent],
+    pub output_dir: PathBuf,
+    pub format: OutputFormat,
+    pub export_format: ExportFormat,
+    pub clean_ai: bool,
+    pub quick_save: bool,
+    pub vault_path: Option<&'a PathBuf>,
+    pub obsidian_options: ObsidianOptions,
+    pub state_store: Option<&'a StateStore>,
+    pub resume: bool,
+    /// AI settings (only used when clean_ai is true and feature is enabled)
+    pub ai_threshold: f32,
+    pub ai_max_tokens: usize,
+    pub ai_offline: bool,
+}
 
-    let output_dir = determine_output_dir(args, vault_path);
-    let obsidian_options = build_obsidian_options(args, vault_path);
+/// Run the export flow: AI-cleaned or standard export.
+///
+/// Returns the list of processed URLs on success.
+#[cfg(feature = "ai")]
+pub async fn run_export(config: ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
+    if config.clean_ai {
+        run_ai_export(&config).await
+    } else {
+        run_standard_export(&config)
+    }
+}
 
-    let export_config = build_export_config(
-        results,
-        args,
-        output_dir,
-        vault_path,
-        obsidian_options,
-        state_store,
-    );
+/// Run the export flow (non-AI build).
+#[cfg(not(feature = "ai"))]
+pub async fn run_export(config: ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
+    if config.clean_ai {
+        warn!("--clean-ai requires the 'ai' feature. Recompile with --features ai");
+        return Err(CliExit::UsageError(
+            "AI semantic cleaning requires --features ai. Recompile with: cargo run --features ai"
+                .into(),
+        ));
+    }
+    run_standard_export(&config)
+}
 
-    let processed_urls: Vec<String> = match export_flow::run_export(export_config).await {
-        Ok(urls) => urls,
-        Err(exit) => return Err(exit),
+/// Standard export path (backward compatible).
+fn run_standard_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
+    match export_factory::process_results(
+        config.results,
+        config.output_dir.clone(),
+        config.export_format,
+        "export",
+        config.state_store,
+        config.resume,
+    ) {
+        Ok(urls) => Ok(urls),
+        Err(e) => {
+            warn!("Failed to export results: {}", e);
+            Err(CliExit::IoError(e.to_string()))
+        },
+    }
+}
+
+/// AI semantic cleaning export path.
+#[cfg(feature = "ai")]
+async fn run_ai_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
+    use rust_scraper::domain::{DocumentChunkUnvalidated, DocumentChunkValidated};
+    use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{
+        ModelConfig, SemanticCleanerImpl,
+    };
+    use rust_scraper::SemanticCleaner;
+    use std::sync::Arc;
+
+    info!("Initializing AI semantic cleaner...");
+    let ai_config = ModelConfig::default()
+        .with_relevance_threshold(config.ai_threshold)
+        .with_max_tokens(config.ai_max_tokens)
+        .with_offline_mode(config.ai_offline);
+    let cleaner = match SemanticCleanerImpl::new(ai_config).await {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to initialize semantic cleaner: {}", e);
+            return Err(CliExit::IoError(format!(
+                "Failed to initialize AI semantic cleaner: {}. Ensure ONNX model is available.",
+                e
+            )));
+        },
     };
 
     info!(
-        "{} Export completed: {} URLs processed",
-        ok,
-        processed_urls.len()
+        "Starting AI cleaning for {} pages concurrently...",
+        config.results.len()
     );
 
-    Ok(processed_urls)
-}
+    let cleaner = Arc::new(cleaner);
 
-/// Build ExportConfig from args, handling feature-gated AI fields.
-pub fn build_export_config<'a>(
-    results: &'a [ScrapedContent],
-    args: &'a Args,
-    output_dir: PathBuf,
-    vault_path: &'a Option<PathBuf>,
-    obsidian_options: ObsidianOptions,
-    state_store: Option<&'a StateStore>,
-) -> ExportConfig<'a> {
-    ExportConfig {
-        results,
-        output_dir,
-        format: args.format,
-        export_format: args.export_format,
-        clean_ai: args.clean_ai,
-        quick_save: args.quick_save,
-        vault_path: vault_path.as_ref(),
-        obsidian_options,
-        state_store,
-        resume: args.resume,
-        #[cfg(feature = "ai")]
-        ai_threshold: args.threshold,
-        #[cfg(feature = "ai")]
-        ai_max_tokens: args.max_tokens,
-        #[cfg(feature = "ai")]
-        ai_offline: args.offline,
-        #[cfg(not(feature = "ai"))]
-        ai_threshold: 0.3,
-        #[cfg(not(feature = "ai"))]
-        ai_max_tokens: 512,
-        #[cfg(not(feature = "ai"))]
-        ai_offline: false,
-    }
-}
-
-/// Determine output directory (vault _inbox for quick-save mode).
-pub fn determine_output_dir(args: &Args, vault_path: &Option<PathBuf>) -> PathBuf {
-    if args.quick_save {
-        if let Some(ref vault) = vault_path {
-            let inbox_path = vault.join("_inbox");
-            if let Err(e) = std::fs::create_dir_all(&inbox_path) {
-                warn!("Failed to create vault _inbox directory: {}", e);
-                args.output.clone()
-            } else {
-                info!("Quick-save: using vault inbox {}", inbox_path.display());
-                inbox_path
+    let cleaning_tasks: Vec<_> = config
+        .results
+        .iter()
+        .map(|result| {
+            let html_content = result
+                .html
+                .clone()
+                .unwrap_or_else(|| result.content.clone());
+            let url = result.url.clone();
+            let cleaner = Arc::clone(&cleaner);
+            async move {
+                let chunks_result = cleaner.clean(&html_content).await;
+                (url, chunks_result, result.clone())
             }
-        } else {
-            warn!("Quick-save mode but no vault detected, using output directory");
-            args.output.clone()
+        })
+        .collect();
+
+    let cleaning_results = futures::future::join_all(cleaning_tasks).await;
+
+    let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> =
+        Vec::with_capacity(config.results.len() * 2);
+    for (url, chunks_result, result) in cleaning_results {
+        match chunks_result {
+            Ok(chunks) => {
+                if chunks.is_empty() {
+                    warn!("AI cleaner produced 0 chunks for: {}", url);
+                    cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
+                } else {
+                    cleaned_chunks.extend(chunks);
+                }
+            },
+            Err(e) => {
+                warn!(
+                    "Failed to clean content for {}: {}. Using fallback.",
+                    url, e
+                );
+                cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
+            },
         }
-    } else {
-        args.output.clone()
+    }
+
+    info!(
+        "AI cleaning complete: {} chunks from {} pages",
+        cleaned_chunks.len(),
+        config.results.len()
+    );
+
+    match export_factory::process_results_with_chunks(
+        &cleaned_chunks,
+        config.output_dir.clone(),
+        config.export_format,
+        "export",
+        config.state_store,
+        config.resume,
+    ) {
+        Ok(urls) => Ok(urls),
+        Err(e) => {
+            warn!("Failed to export cleaned results: {}", e);
+            Err(CliExit::IoError(e.to_string()))
+        },
     }
 }
 
-/// Build ObsidianOptions from CLI args.
-pub fn build_obsidian_options(args: &Args, vault_path: &Option<PathBuf>) -> ObsidianOptions {
-    ObsidianOptions {
-        wiki_links: args.obsidian_wiki_links,
-        tags: args.obsidian_tags.clone().unwrap_or_default(),
-        relative_assets: args.obsidian_relative_assets,
-        rich_metadata: args.obsidian_rich_metadata,
-        quick_save: args.quick_save,
-        vault_path: vault_path.clone(),
+// ============================================================================
+// Save Individual Files (Markdown/Text/JSON)
+// ============================================================================
+
+/// Save individual output files with Obsidian support.
+///
+/// This is non-fatal — a failure here doesn't abort the pipeline since
+/// RAG export (JSONL) already succeeded.
+pub fn save_files(
+    results: &[ScrapedContent],
+    output_dir: &Path,
+    format: &OutputFormat,
+    obsidian_options: &ObsidianOptions,
+) {
+    if let Err(e) = save_results(results, output_dir, format, obsidian_options) {
+        warn!("Failed to save individual files: {}", e);
+        // Continue — file save is non-fatal, RAG export succeeded
     }
 }

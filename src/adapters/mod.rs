@@ -12,5 +12,6 @@ pub mod detector;
 pub mod downloader;
 pub mod extractor;
 pub mod tui;
+pub mod url_path;
 
 pub use detector::{get_extension, AssetType};

@@ -375,13 +375,17 @@ mod tests {
     fn test_serialize_document_with_embeddings() {
         let config = create_test_config();
         let exporter = VectorExporter::new(config);
-        let doc = create_test_chunk();
-
+        
+        // Create document and manually add embeddings
+        let mut doc = create_test_chunk();
+        doc.embeddings = Some(vec![0.1, 0.2, 0.3, 0.4]); // Add embeddings
+        
         let result = exporter.serialize_document(&doc);
         assert!(result.is_ok());
 
         let json_str = result.unwrap();
-        assert!(json_str.contains("embeddings"));
+        // embeddings field present because we added it
+        assert!(json_str.contains("embeddings"), "expected embeddings field when embeddings is Some");
         assert!(json_str.contains("Test Document"));
     }
 
@@ -391,13 +395,14 @@ mod tests {
         let exporter = VectorExporter::new(config);
 
         // First document sets dimensions
-        let doc1 = create_test_chunk();
+        let mut doc1 = create_test_chunk();
+        doc1.embeddings = Some(vec![0.1, 0.2, 0.3, 0.4]); // 4 dimensions
         let _ = exporter.serialize_document(&doc1);
 
         // Second document with different dimensions - should warn and serialize without embeddings
         let mut doc2 = create_test_chunk();
         doc2.embeddings = Some(vec![0.1, 0.2]); // Only 2 dimensions
-
+        
         let result = exporter.serialize_document(&doc2);
         assert!(
             result.is_ok(),
@@ -409,7 +414,7 @@ mod tests {
         // Should serialize without embeddings (not an error)
         assert!(
             !json_str.contains("\"embeddings\""),
-            "embeddings should be null/absent in output"
+            "embeddings should be null/absent in output when dimension mismatch"
         );
     }
 
@@ -578,8 +583,12 @@ mod tests {
         let batch_json: serde_json::Value = serde_json::from_str(&batch_content).unwrap();
 
         // Both should have 2 documents
-        assert_eq!(individual_json["documents"].as_array().unwrap().len(), 2);
-        assert_eq!(batch_json["documents"].as_array().unwrap().len(), 2);
+        let individual_docs = individual_json["documents"].as_array().unwrap();
+        let batch_docs = batch_json["documents"].as_array().unwrap();
+        assert!(!individual_docs.is_empty());
+        assert!(!batch_docs.is_empty());
+        assert_eq!(individual_docs.len(), 2);
+        assert_eq!(batch_docs.len(), 2);
 
         // Both should have the same metadata structure
         assert!(individual_json.get("format_version").is_some());
@@ -608,7 +617,9 @@ mod tests {
         let output_path = temp_dir.join("test_export.json");
         let initial_content = std::fs::read_to_string(&output_path).unwrap();
         let initial_json: serde_json::Value = serde_json::from_str(&initial_content).unwrap();
-        assert_eq!(initial_json["documents"].as_array().unwrap().len(), 1);
+        let docs = initial_json["documents"].as_array().unwrap();
+        assert!(!docs.is_empty());
+        assert_eq!(docs.len(), 1);
 
         // Second write with append
         let mut config2 = create_test_config_with_dir(temp_dir.clone());

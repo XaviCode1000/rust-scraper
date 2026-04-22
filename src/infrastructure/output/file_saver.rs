@@ -7,12 +7,12 @@
 //! - Obsidian-compatible output (wiki-links, relative assets, tags)
 //! - Rich metadata (word count, reading time, language)
 
+use crate::adapters::url_path::OutputPath;
 use crate::domain::ScrapedContent;
 use crate::error::Result;
 use crate::infrastructure::converter::{html_to_markdown, obsidian, syntax_highlight};
 use crate::infrastructure::obsidian::ObsidianRichMetadata;
 use crate::infrastructure::output::frontmatter;
-use crate::url_path::OutputPath;
 use crate::OutputFormat;
 use std::path::Path;
 use tracing::warn;
@@ -96,7 +96,7 @@ fn save_as_markdown(
     use std::fs;
 
     for item in results {
-        let output_path = match OutputPath::from_url(item.url.as_str()) {
+        let output_path: OutputPath = match OutputPath::from_url(item.url.as_str()) {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to parse URL {}: {}, using fallback", item.url, e);
@@ -177,7 +177,7 @@ fn save_as_text(
     use std::fs;
 
     for item in results {
-        let output_path = match OutputPath::from_url(item.url.as_str()) {
+        let output_path: OutputPath = match OutputPath::from_url(item.url.as_str()) {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to parse URL {}: {}, using fallback", item.url, e);
@@ -195,11 +195,7 @@ fn save_as_text(
                      CONTENT:\n\
                      {}\n\
                      ========================================",
-                    item.title,
-                    item.url,
-                    author,
-                    date,
-                    item.content
+                    item.title, item.url, author, date, item.content
                 );
                 fs::write(&fallback_path, &content)?;
                 continue;
@@ -229,11 +225,7 @@ fn save_as_text(
              CONTENT:\n\
              {}\n\
              ========================================",
-            item.title,
-            item.url,
-            author,
-            date,
-            item.content
+            item.title, item.url, author, date, item.content
         );
         fs::write(&full_path, &content)?;
         tracing::info!("💾 Saved: {}", full_path.display());

@@ -48,6 +48,7 @@
 // ============================================================================
 
 pub mod config;
+pub mod di;
 pub mod error;
 
 pub mod domain;
@@ -57,13 +58,9 @@ pub use domain::semantic_cleaner::SemanticCleaner;
 pub mod adapters;
 pub mod application;
 pub mod cli;
-pub mod export_factory;
-pub mod export_flow;
+
 pub mod extractor;
 pub mod infrastructure;
-pub mod url_path;
-pub mod url_validation;
-pub mod user_agent;
 
 // ============================================================================
 // Re-exports
@@ -97,11 +94,11 @@ pub use infrastructure::{
 };
 
 // Adapters
-pub use url_path::{Domain, OutputPath, UrlPath};
-pub use user_agent::{get_random_user_agent_from_pool, UserAgentCache};
+pub use adapters::url_path::{Domain, OutputPath, UrlPath};
+pub use infrastructure::user_agent::{get_random_user_agent_from_pool, UserAgentCache};
 
 // Export factory
-pub use export_factory::{create_exporter, domain_from_url, process_results};
+pub use application::export_factory::{create_exporter, domain_from_url, process_results};
 
 // CLI
 pub use cli::{
@@ -112,7 +109,7 @@ pub use cli::{
 };
 
 // Config types
-pub use config::{ConcurrencyConfig, OutputFormat, ScraperConfig};
+pub use infrastructure::config::{ConcurrencyConfig, OutputFormat, ScraperConfig};
 
 // Error and result types
 pub use clap::{Parser, ValueEnum};
@@ -122,7 +119,7 @@ pub use error::{Result, ScraperError};
 pub use infrastructure::output::file_saver::{save_results, ObsidianOptions};
 
 // URL validation
-pub use url_validation::validate_and_parse_url;
+pub use domain::url_validation::validate_and_parse_url;
 
 // ============================================================================
 // Build metadata

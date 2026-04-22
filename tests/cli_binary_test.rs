@@ -29,12 +29,13 @@ fn test_no_url_shows_error() {
 /// Test that an invalid URL shows an error
 #[test]
 fn test_invalid_url_shows_error() {
+    // CLI validates URL and returns error message
     cmd()
         .arg("--url")
         .arg("not-a-url")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("URL inv\u{00e1}lida"));
+        .failure() // CLI returns exit code 64
+        .stderr(predicate::str::contains("Invalid URL"));
 }
 
 // ============================================================================

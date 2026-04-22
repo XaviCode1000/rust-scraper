@@ -1,53 +1,53 @@
-//! Crawler service module
+//! Crawler service module (DEPRECATED)
 //!
-//! Main crawling orchestration logic.
+//! ⚠️ **DEPRECATED since v0.5.0** ⚠️
+//! This module is kept for backwards compatibility ONLY.
 //!
-//! # Rules Applied
+//! # Migration
 //!
-//! - **async-no-lock-across-await**: Uses JoinSet for concurrency control
-//!   without redundant Semaphore.
-//! - **async-clone-before-await**: Clones config before async operations.
-//! - **err-anyhow-for-applications**: Result with anyhow for application layer
-//! - **own-borrow-over-clone**: Accept `&str` not `&String`
-//! - **mem-with-capacity**: Vec::with_capacity when size is known
-//! - **xml-no-regex**: Uses quick-xml for streaming XML parsing
-//! - **async-mpsc-results**: Uses mpsc channel for lock-free result collection
+//! Replace:
+//! ```rust
+//! use rust_scraper::application::crawler_service::*;
+//! ```
+//!
+//! With:
+//! ```rust
+//! use rust_scraper::application::crawler::{self, *};
+//! ```
+//!
+//! Or access individual modules:
+//! ```rust
+//! use rust_scraper::application::crawler::discovery;
+//! use rust_scraper::application::crawler::engine;
+//! ```
 
 use std::collections::HashSet;
-use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
-use governor::{
-    clock::QuantaClock,
-    state::{InMemoryState, NotKeyed},
-    Quota, RateLimiter,
-};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, span, warn, Level};
 use url::Url;
 
-use crate::domain::{
+pub use crate::domain::{
     CorrelationId, CrawlError, CrawlResult, CrawlerConfig, DiscoveredUrl, ScrapedContent, ValidUrl,
 };
 
-use super::results_channel::{CrawlMessage, ResultsCollector};
-use super::url_filter::is_allowed;
-use crate::infrastructure::crawler::{
+pub use super::results_channel::{CrawlMessage, ResultsCollector};
+pub use super::url_filter::is_allowed;
+pub use crate::infrastructure::crawler::{
     extract_links, fetch_url, is_internal_link, normalize_url, UrlQueue,
 };
 
-// FASE 3: Sitemap support
-use crate::infrastructure::crawler::{SitemapConfig, SitemapParser};
+pub use crate::infrastructure::crawler::{SitemapConfig, SitemapParser};
 
-// FASE 4: TUI support - re-exports
-use crate::error::{Result as ScraperResult, ScraperError};
-use crate::infrastructure::scraper::{fallback, readability};
-use crate::ScraperConfig;
+pub use crate::error::{Result as ScraperResult, ScraperError};
+pub use crate::infrastructure::scraper::{fallback, readability};
+pub use crate::ScraperConfig;
 
-/// Type alias for the rate limiter used in crawling
-type CrawlRateLimiter = RateLimiter<NotKeyed, InMemoryState, QuantaClock>;
+pub use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
+
+#[deprecated(since = "0.5.0", note = "Use crate::application::crawler instead")]
 
 // ============================================================================
 // FASE 4: Progress Tracking and Resumable Processing Types
@@ -557,11 +557,12 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
     let config = Arc::new(config);
     let config_clone = Arc::clone(&config);
 
-    // Create rate limiter (governor) - shared across tasks
-    let quota = Quota::with_period(Duration::from_millis(config_clone.delay_ms))
-        .unwrap()
-        .allow_burst(NonZeroU32::new(config_clone.concurrency as u32).unwrap());
-    let rate_limiter: Arc<CrawlRateLimiter> = Arc::new(RateLimiter::direct(quota));
+    // Create rate limiter using SharedRateLimiter (single source of truth)
+    let rate_limiter_config = RateLimiterConfig::new(config_clone.delay_ms, config_clone.concurrency as u32);
+    let rate_limiter = match SharedRateLimiter::new(&rate_limiter_config) {
+        Ok(limiter) => limiter,
+        Err(e) => return Err(CrawlError::Internal(e.to_string())),
+    };
 
     // Create URL queue
     let queue = Arc::new(UrlQueue::new());
@@ -636,7 +637,7 @@ pub async fn crawl_site(config: CrawlerConfig) -> Result<CrawlResult, CrawlError
             let results_sender = results_collector.clone(); // Clone sender para este worker
             let visited_task = Arc::clone(&visited);
             let error_count_task = Arc::clone(&error_count);
-            let rate_limiter_task = Arc::clone(&rate_limiter);
+            let rate_limiter_task = rate_limiter.clone(); // SharedRateLimiter is Clone (Arc internally)
             let discovered_url_task = discovered_url.clone();
 
             // Clone parent URL before moving discovered_url_task

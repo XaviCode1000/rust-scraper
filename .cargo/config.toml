@@ -1,5 +1,12 @@
 # Cargo configuration for local development
 #
-# Build optimizations (sccache, mold, sparse registry) are configured
-# globally in ~/.cargo/config.toml — they are machine-level, not project-level.
-# CI uses Swatinem/rust-cache@v2.
+# Build optimizations: configured globally in ~/.cargo/config.toml
+
+[alias]
+# Quick test with console enabled
+# Usage: cargo console -- --url https://example.com
+console = "run --features console"
+
+# Build with tokio_unstable (for tokio-console)
+# Usage: RUSTFLAGS="--cfg tokio_unstable" cargo debug
+debug = "build --features console"

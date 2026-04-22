@@ -113,6 +113,10 @@ async fn test_custom_config() {
         backoff_base_ms: 500,
         backoff_max_ms: 5000,
         enable_cookies: true,
+        timeout_secs: 60,
+        connect_timeout_secs: 30,
+        rate_limit_rpm: Some(10),
+        tls_emulation: wreq_util::Emulation::Chrome131,
     };
 
     let client = HttpClient::new(config).unwrap();
