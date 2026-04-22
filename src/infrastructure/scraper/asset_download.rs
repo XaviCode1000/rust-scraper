@@ -115,7 +115,6 @@ async fn download_single_asset(
     output_dir: &Path,
 ) -> Result<DownloadedAsset> {
     use sha2::{Digest, Sha256};
-    use std::fs;
     use wreq::Client;
     use wreq_util::Emulation;
 
@@ -151,13 +150,18 @@ async fn download_single_asset(
         "documents"
     };
     let local_path = output_dir.join(subdir).join(&filename);
+    let bytes = bytes.to_vec();
 
-    // Create directory and write file
-    if let Some(parent) = local_path.parent() {
-        fs::create_dir_all(parent).map_err(crate::error::ScraperError::Io)?;
-    }
-
-    fs::write(&local_path, &bytes).map_err(crate::error::ScraperError::Io)?;
+    // Create directory and write file via spawn_blocking
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = local_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&local_path, &bytes)?;
+        Ok::<(), std::io::Error>(())
+    })
+    .await
+    .map_err(|e| crate::error::ScraperError::Io(e.to_string()))??;
 
     tracing::info!("Downloaded: {} -> {:?}", url, local_path);
 

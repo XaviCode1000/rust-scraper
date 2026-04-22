@@ -70,10 +70,19 @@ impl ModelCache {
         Ok(())
     }
 
-    /// Check if a model file exists in cache
-    #[must_use]
-    pub fn is_model_cached(&self, model_file: &str) -> bool {
-        self.config.cache_dir.join(model_file).exists()
+    /// Check if a model file exists in cache (async for consistency)
+    pub async fn is_model_cached(&self, model_file: &str) -> Result<bool, SemanticError> {
+        let cache_dir = self.config.cache_dir.clone();
+        let model_file = model_file.to_string();
+
+        tokio::task::spawn_blocking(move || cache_dir.join(model_file).exists())
+            .await
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to check model existence: {}",
+                    e
+                )))
+            })
     }
 
     /// Validate model file integrity using SHA256
@@ -84,7 +93,17 @@ impl ModelCache {
     ) -> Result<(), SemanticError> {
         let model_path = self.config.cache_dir.join(model_file);
 
-        if !model_path.exists() {
+        // Check existence via spawn_blocking
+        let exists = tokio::task::spawn_blocking(move || model_path.exists())
+            .await
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to check model existence: {}",
+                    e
+                )))
+            })?;
+
+        if !exists {
             return Err(SemanticError::ModelLoad(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("Model file not found: {:?}", model_path),
@@ -142,7 +161,18 @@ impl ModelCache {
         };
 
         let model_path = self.config.cache_dir.join(model_file);
-        if !model_path.exists() {
+
+        // Check existence via spawn_blocking
+        let exists = tokio::task::spawn_blocking(move || model_path.exists())
+            .await
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to check model existence: {}",
+                    e
+                )))
+            })?;
+
+        if !exists {
             return Ok(true);
         }
 
@@ -168,7 +198,19 @@ impl ModelCache {
 
     /// Clear the entire cache
     pub async fn clear(&self) -> Result<(), SemanticError> {
-        if !self.config.cache_dir.exists() {
+        let cache_dir = self.config.cache_dir.clone();
+
+        // Check existence via spawn_blocking
+        let exists = tokio::task::spawn_blocking(move || cache_dir.exists())
+            .await
+            .map_err(|e| {
+                SemanticError::ModelLoad(std::io::Error::other(format!(
+                    "Failed to check cache directory: {}",
+                    e
+                )))
+            })?;
+
+        if !exists {
             return Ok(());
         }
 
@@ -246,12 +288,12 @@ mod tests {
         let config = CacheConfig::new().with_cache_dir(cache_dir.clone());
         let cache = ModelCache::new(config);
 
-        assert!(!cache.is_model_cached("model.onnx"));
+        assert!(!cache.is_model_cached("model.onnx").await.unwrap());
 
         fs::create_dir_all(&cache_dir).await.unwrap();
         File::create(cache_dir.join("model.onnx")).await.unwrap();
 
-        assert!(cache.is_model_cached("model.onnx"));
+        assert!(cache.is_model_cached("model.onnx").await.unwrap());
     }
 
     #[tokio::test]

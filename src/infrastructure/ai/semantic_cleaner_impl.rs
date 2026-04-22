@@ -278,7 +278,7 @@ impl SemanticCleanerImpl {
 
         // Check if model is cached (verify local file exists)
         // Since the model is manually downloaded, we just verify it exists
-        if cache.is_model_cached(&config.model_file) {
+        if cache.is_model_cached(&config.model_file).await? {
             debug!("Model found in cache");
         } else if config.offline_mode {
             return Err(SemanticError::OfflineMode {

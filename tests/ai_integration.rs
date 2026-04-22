@@ -172,7 +172,7 @@ async fn test_model_cache_is_cached() {
     let cache = ModelCache::new(config);
 
     // Should return false for non-existent file
-    assert!(!cache.is_model_cached("model.onnx"));
+    assert!(!cache.is_model_cached("model.onnx").await?);
 
     // Create a dummy file
     tokio::fs::create_dir_all(&cache_dir).await.unwrap();
@@ -181,7 +181,7 @@ async fn test_model_cache_is_cached() {
         .unwrap();
 
     // Should return true now
-    assert!(cache.is_model_cached("model.onnx"));
+    assert!(cache.is_model_cached("model.onnx").await?);
 }
 
 /// Test that ModelCache can get model path

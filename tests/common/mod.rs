@@ -14,6 +14,114 @@
 
 use std::path::Path;
 
+/// TestHttpServer - RAII wrapper for wiremock MockServer
+///
+/// Provides deterministic HTTP mocking for integration tests.
+/// Each test gets its own isolated server instance.
+///
+/// # Usage
+///
+/// ```ignore
+/// #[tokio::test]
+/// async fn test_http_client() {
+///     let server = TestHttpServer::new().await;
+///     let base_url = server.uri();
+///
+///     // Register a mock response
+///     server.mock_response(
+///         wiremock::matchers::method("GET"),
+///         "/api/test",
+///         200,
+///         r#"{"status":"ok"}"#
+///     ).await;
+///
+///     // Use base_url in your client
+///     let client = HttpClient::new(&base_url);
+///     let response = client.get("test").await;
+///     assert!(response.is_ok());
+/// }
+/// ```
+pub struct TestHttpServer {
+    server: wiremock::MockServer,
+    base_url: String,
+}
+
+impl TestHttpServer {
+    /// Create a new mock server on a random available port.
+    ///
+    /// Each call gets a completely isolated server.
+    pub async fn new() -> Self {
+        let server = wiremock::MockServer::start().await;
+        let base_url = server.uri();
+        Self { server, base_url }
+    }
+
+    /// Get the base URL of the mock server.
+    pub fn uri(&self) -> String {
+        self.base_url.clone()
+    }
+
+    /// Register a mock response for a method and path.
+    ///
+    /// Example:
+    /// ```ignore
+    /// server.mock_response(
+    ///     wiremock::matchers::method(wiremock::Method::GET),
+    ///     "/api/data",
+    ///     200,
+    ///     r#"{"key":"value"}"#
+    /// ).await;
+    /// ```
+    pub async fn mock_response<M>(
+        &mut self,
+        matcher: M,
+        path: &str,
+        status: u16,
+        body: &str,
+    ) where
+        M: wiremock::matcher::Matcher<wiremock::Request> + Clone + Send + Sync + 'static,
+    {
+        let response = wiremock::ResponseTemplate::new(status)
+            .set_body_string(body);
+
+        wiremock::Mock::given(matcher)
+            .and(wiremock::matchers::path(path))
+            .respond_with(response)
+            .mount(&self.server)
+            .await;
+    }
+
+    /// Register a mock that returns 429 Rate Limited.
+    pub async fn mock_rate_limit(&mut self, path: &str) {
+        self.mock_response(
+            wiremock::matchers::method(wiremock::Method::GET),
+            path,
+            429,
+            r#"{"error":"Too Many Requests"}"#
+        ).await;
+    }
+
+    /// Register a mock that returns 500 Server Error.
+    pub async fn mock_server_error(&mut self, path: &str) {
+        self.mock_response(
+            wiremock::matchers::method(wiremock::Method::GET),
+            path,
+            500,
+            r#"{"error":"Internal Server Error"}"#
+        ).await;
+    }
+
+    /// Register a mock that returns 404 Not Found.
+    pub async fn mock_not_found(&mut self, path: &str) {
+        self.mock_response(
+            wiremock::matchers::method(wiremock::Method::GET),
+            path,
+            404,
+            r#"{"error":"Not Found"}"#
+        ).await;
+    }
+}
+
 /// Load an HTML fixture from the tests/fixtures/ directory.
 ///
 /// # Panics
