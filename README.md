@@ -228,3 +228,21 @@ Las opciones que pases en la línea de comandos siempre tienen prioridad sobre e
 ## 📄 Licencia
 
 MIT OR Apache-2.0
+
+---
+
+## 🧪 Testing
+
+**Suite de tests:** 613 unit tests passing  
+**Tests de integración:** 18 tests skipped (dependen de red externa)
+
+**Estado CI:** Los 613 tests unitarios pasan automáticamente. Los 18 tests de integración
+requieren servidores externos y están deshabilitados en CI para estabilidad.
+
+**Mejora pendiente:** Implementar `wiremock` para simular respuestas HTTP localmente
+y habilitar los tests de integración sin depender de red externa.
+
+**Para ejecutar tests:**
+```bash
+cargo nextest run
+```
