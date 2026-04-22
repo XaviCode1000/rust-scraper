@@ -108,6 +108,9 @@ pub use cli::{
     Args, Commands, Shell,
 };
 
+// Observability - includes LogGuard for RAII logging
+pub use infrastructure::observability::LogGuard;
+
 // Config types
 pub use infrastructure::config::{ConcurrencyConfig, OutputFormat, ScraperConfig};
 

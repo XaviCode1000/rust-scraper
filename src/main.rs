@@ -31,7 +31,7 @@ use inquire::Text;
 use rust_scraper::adapters::tui::{restore_terminal, setup_terminal, ConfigFormState};
 use rust_scraper::cli::config::ConfigDefaults;
 use rust_scraper::cli::error::CliExit;
-use rust_scraper::{init_logging_dual, is_no_color, Args, Commands};
+use rust_scraper::{init_logging_dual, is_no_color, Args, Commands, LogGuard};
 use rust_scraper::cli::preflight;
 
 /// Check if running in CI environment.
@@ -227,7 +227,7 @@ async fn __main() -> CliExit {
         1 => "debug",
         _ => "trace",
     };
-    init_logging_dual(log_level, args.quiet, no_color);
+    let _guard = init_logging_dual(log_level, args.quiet, no_color);
 
     // =========================================================================
     // 8. Delegate to orchestrator

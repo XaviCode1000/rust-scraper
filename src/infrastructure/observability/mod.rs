@@ -61,6 +61,6 @@ pub fn init_console() {
     // No-op - console not enabled
 }
 
-pub use logging::{init_json_logging, init_json_logging_dual, init_otel_tracing, LogFormat};
+pub use logging::{init_json_logging, init_json_logging_dual, init_otel_tracing, LogFormat, LogGuard};
 pub use async_logging::{AsyncLogWriter, WriterConfig, init_async_logging};
 pub use metrics::MetricsCollector;

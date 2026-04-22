@@ -8,7 +8,30 @@
 use std::path::Path;
 
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+
+/// Guard for JSON logging - ensures flush on drop (RAII)
+///
+/// Dropping this guard ensures all pending log writes are flushed
+/// to the file before the application exits.
+pub struct LogGuard {
+    _guard: Option<WorkerGuard>,
+}
+
+impl LogGuard {
+    /// Create a no-op guard (when not logging to file)
+    fn no_op() -> Self {
+        Self { _guard: None }
+    }
+}
+
+impl Drop for LogGuard {
+    fn drop(&mut self) {
+        // WorkerGuard automatically flushes on drop
+        // If Some(_), logs are flushed. If None, no-op.
+    }
+}
 
 /// Log format enum for CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,12 +78,23 @@ impl std::fmt::Display for LogFormat {
 ///
 /// # Returns
 ///
-/// Ok(()) on success, or an error if log_dir cannot be created.
+/// `Ok(LogGuard)` on success - keep this guard alive until program exit.
+/// The guard ensures all logs are flushed when dropped.
+///
+/// # Example
+///
+/// ```rust
+/// fn main() {
+///     let _guard = init_json_logging("info", Some("/var/log"), "myapp").unwrap();
+///     // ... application runs ...
+///     // Logs are flushed when _guard is dropped at end of main
+/// }
+/// ```
 pub fn init_json_logging(
     level: &str,
     log_dir: Option<&Path>,
     app_name: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<LogGuard> {
     init_json_logging_dual(level, false, false, log_dir, app_name)
 }
 
@@ -79,7 +113,7 @@ pub fn init_json_logging_dual(
     no_color: bool,
     log_dir: Option<&Path>,
     app_name: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<LogGuard> {
     let filter = if quiet {
         EnvFilter::new("rust_scraper=warn,tokio=warn,reqwest=warn")
     } else {
@@ -107,8 +141,8 @@ pub fn init_json_logging_dual(
         // NON-BLOCKING: Worker thread handles file I/O, Tokio threads never block
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         
-        // Leak the guard to keep it alive for the duration of the program
-        Box::leak(Box::new(guard));
+        // RAII: Return guard to ensure flush on drop
+        let log_guard = LogGuard { _guard: Some(guard) };
 
         let json_layer = fmt::layer()
             .with_writer(non_blocking)
@@ -117,11 +151,12 @@ pub fn init_json_logging_dual(
             .json();
 
         subscriber.with(json_layer).init();
+        Ok(log_guard)
     } else {
         subscriber.init();
+        // No file logging - create a no-op guard
+        Ok(LogGuard::no_op())
     }
-
-    Ok(())
 }
 
 /// Initialize OpenTelemetry tracing (stub for future implementation).
