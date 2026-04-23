@@ -228,9 +228,15 @@ pub fn process_results_with_chunks(
     // Track URLs before batch export
     let processed_urls: Vec<String> = chunks.iter().map(|c| c.url.clone()).collect();
 
+    // Validate chunks before passing to export_batch
+    let validated_chunks: Vec<crate::domain::DocumentChunkValidated> = chunks
+        .iter()
+        .filter_map(|c| c.clone().validate().ok())
+        .collect();
+
     // Use export_batch to avoid per-chunk file open/close (which overwrites in VectorExporter)
-    if !chunks.is_empty() {
-        exporter.export_batch(chunks)?;
+    if !validated_chunks.is_empty() {
+        exporter.export_batch(&validated_chunks)?;
     }
 
     let mut export_state = if resume_mode {

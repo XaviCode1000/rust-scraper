@@ -347,7 +347,7 @@ This project is indexed by **rust_scraper**: 3963 symbols, 6951 relationships, 3
 
 ## SDD Workflow
 
-Este proyecto soporta Spec-Driven Development via skills en `~/.config/kilo/skills/`:
+Este proyecto soporta Spec-Driven Development via skills en `./.opencode/skills/`:
 
 | Skill | Propósito |
 |-------|-----------|
@@ -419,7 +419,7 @@ skill(name: "rust-skills")
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **rust_scraper** (3949 symbols, 8219 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **rust_scraper** (4069 symbols, 8515 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

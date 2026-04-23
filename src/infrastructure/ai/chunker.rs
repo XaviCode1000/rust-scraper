@@ -179,15 +179,12 @@ impl HtmlChunker {
                 continue; // Skip too-small chunks for now
             }
 
-            let chunk = DocumentChunk {
-                id: Uuid::new_v4(),
-                url: String::new(),   // To be filled by caller
-                title: String::new(), // To be filled by caller
-                content: trimmed.to_string(),
-                metadata: std::collections::HashMap::new(),
-                timestamp: chrono::Utc::now(),
-                embeddings: None,
-            };
+            let chunk = DocumentChunk::new(
+                Uuid::new_v4(),
+                String::new(),   // To be filled by caller
+                String::new(), // To be filled by caller
+                trimmed.to_string(),
+            );
 
             chunks.push(chunk);
         }
@@ -288,15 +285,12 @@ impl HtmlChunker {
             } else {
                 // Push current and start new
                 if current_content.len() >= self.min_chunk_size {
-                    merged.push(DocumentChunk {
-                        id: Uuid::new_v4(),
-                        url: current_url.clone(),
-                        title: current_title.clone(),
-                        content: current_content.clone(),
-                        metadata: std::collections::HashMap::new(),
-                        timestamp: chrono::Utc::now(),
-                        embeddings: None,
-                    });
+                    merged.push(DocumentChunk::new(
+                        Uuid::new_v4(),
+                        current_url.clone(),
+                        current_title.clone(),
+                        current_content.clone(),
+                    ));
                 }
                 current_content = chunk.content;
                 current_url = chunk.url;
@@ -306,15 +300,12 @@ impl HtmlChunker {
 
         // Don't forget the last chunk
         if !current_content.is_empty() && current_content.len() >= self.min_chunk_size {
-            merged.push(DocumentChunk {
-                id: Uuid::new_v4(),
-                url: current_url,
-                title: current_title,
-                content: current_content,
-                metadata: std::collections::HashMap::new(),
-                timestamp: chrono::Utc::now(),
-                embeddings: None,
-            });
+            merged.push(DocumentChunk::new(
+                Uuid::new_v4(),
+                current_url,
+                current_title,
+                current_content,
+            ));
         }
 
         merged
@@ -347,15 +338,12 @@ impl HtmlChunker {
                     if current.len() + sentence.len() > self.max_chunk_size {
                         // Push current and start new
                         if !current.is_empty() {
-                            result.push(DocumentChunk {
-                                id: Uuid::new_v4(),
-                                url: chunk.url.clone(),
-                                title: chunk.title.clone(),
-                                content: current.clone(),
-                                metadata: chunk.metadata.clone(),
-                                timestamp: chrono::Utc::now(),
-                                embeddings: None,
-                            });
+                            result.push(DocumentChunk::new(
+                                Uuid::new_v4(),
+                                chunk.url.clone(),
+                                chunk.title.clone(),
+                                current.clone(),
+                            ));
                             current.clear();
                         }
                     }
@@ -363,17 +351,16 @@ impl HtmlChunker {
                 }
 
                 // Don't forget the last part
-                if !current.is_empty() {
-                    result.push(DocumentChunk {
-                        id: Uuid::new_v4(),
-                        url: chunk.url.clone(),
-                        title: chunk.title.clone(),
-                        content: current,
-                        metadata: chunk.metadata.clone(),
-                        timestamp: chrono::Utc::now(),
-                        embeddings: None,
-                    });
-                }
+if !current.is_empty() {
+                            result.push(DocumentChunk::with_metadata(
+                                Uuid::new_v4(),
+                                chunk.url.clone(),
+                                chunk.title.clone(),
+                                current.clone(),
+                                chunk.metadata.clone(),
+                            ));
+                            current.clear();
+                        }
             }
         }
 

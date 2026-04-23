@@ -78,6 +78,54 @@ impl DocumentChunk<Draft> {
     }
 }
 
+/// Public constructor for DocumentChunk<Draft> in production code
+/// Required for modules that create DocumentChunk directly (e.g., chunker, relevance_scorer)
+impl DocumentChunk<Draft> {
+    #[allow(dead_code)]
+    pub fn new(
+        id: Uuid,
+        url: impl Into<String>,
+        title: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id,
+            url: url.into(),
+            title: title.into(),
+            content: content.into(),
+            metadata: HashMap::new(),
+            timestamp: Utc::now(),
+            embeddings: None,
+            correlation_id: None,
+            _state: PhantomData,
+        }
+    }
+}
+
+/// Constructor with metadata for chunks that need to preserve source metadata
+#[allow(dead_code)]
+impl DocumentChunk<Draft> {
+    pub fn with_metadata(
+        id: Uuid,
+        url: impl Into<String>,
+        title: impl Into<String>,
+        content: impl Into<String>,
+        metadata: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            id,
+            url: url.into(),
+            title: title.into(),
+            content: content.into(),
+            metadata,
+            timestamp: Utc::now(),
+            embeddings: None,
+            correlation_id: None,
+            _state: PhantomData,
+        }
+    }
+}
+
 /// Represents a downloaded asset (image or document)
 ///
 /// Contains metadata about the original URL and local storage location.

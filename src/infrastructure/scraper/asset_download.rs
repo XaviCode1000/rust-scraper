@@ -4,11 +4,11 @@
 //! Enabled with --features images or --features documents.
 
 use crate::domain::DownloadedAsset;
-use crate::error::Result;
+use crate::error::{Result, ScraperError};
 use crate::ScraperConfig;
 use futures::stream::{self, StreamExt};
 use scraper;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::warn;
 
 /// Concurrency limit for asset downloads
@@ -115,6 +115,7 @@ async fn download_single_asset(
     output_dir: &Path,
 ) -> Result<DownloadedAsset> {
     use sha2::{Digest, Sha256};
+    use std::io;
     use wreq::Client;
     use wreq_util::Emulation;
 
@@ -151,24 +152,28 @@ async fn download_single_asset(
     };
     let local_path = output_dir.join(subdir).join(&filename);
     let bytes = bytes.to_vec();
+    let bytes_len = bytes.len();
+    let url_str = url.to_string();
+    let asset_type_str = asset_type.to_string();
 
     // Create directory and write file via spawn_blocking
-    tokio::task::spawn_blocking(move || {
+    // Closure returns io::Result<PathBuf>
+    let final_path = tokio::task::spawn_blocking(move || -> std::io::Result<PathBuf> {
         if let Some(parent) = local_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&local_path, &bytes)?;
-        Ok::<(), std::io::Error>(())
+        Ok(local_path)
     })
     .await
-    .map_err(|e| crate::error::ScraperError::Io(e.to_string()))??;
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("spawn_blocking failed: {e}")))??;
 
-    tracing::info!("Downloaded: {} -> {:?}", url, local_path);
+    tracing::info!("Downloaded: {} -> {:?}", url_str, final_path);
 
     Ok(DownloadedAsset {
-        url: url.to_string(),
-        local_path: local_path.to_string_lossy().into_owned(),
-        asset_type: asset_type.to_string(),
-        size: bytes.len() as u64,
+        url: url_str,
+        local_path: final_path.to_string_lossy().into_owned(),
+        asset_type: asset_type_str,
+        size: bytes_len as u64,
     })
 }

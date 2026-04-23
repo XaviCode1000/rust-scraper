@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::cli::error::CliExit;
 use crate::cli::completions::generate_completions;
-use crate::cli::export_flow::{run_export, ExportConfig};
+use crate::cli::export_flow::{run_export, save_files, ExportConfig};
 use crate::cli::scrape_flow::scrape_urls;
 use crate::cli::url_discovery::discover_urls;
 use crate::Args;
@@ -68,7 +68,8 @@ pub async fn run(args: Args) -> CliExit {
     // Create scraper config
     let scraper_config = ScraperConfig::default()
         .with_output_dir(args.output.clone())
-        .with_scraper_concurrency(args.concurrency.resolve());
+        .with_scraper_concurrency(args.concurrency.resolve())
+        .with_max_pages(args.max_pages);
 
     // Scraping phase
 
@@ -87,7 +88,7 @@ pub async fn run(args: Args) -> CliExit {
 
     info!("Successfully scraped {} pages", results.len());
 
-    // Export phase
+    // Obsidian options
     let obsidian_options = ObsidianOptions {
         wiki_links: args.obsidian_wiki_links,
         relative_assets: args.obsidian_relative_assets,
@@ -97,21 +98,37 @@ pub async fn run(args: Args) -> CliExit {
         vault_path: args.vault.clone(),
     };
 
+    // Determine output directory for individual files
+    let output_dir = if args.quick_save && args.vault.is_some() {
+        let vault = args.vault.as_ref().unwrap();
+        let inbox = vault.join("_inbox");
+        if !inbox.exists() {
+            let _ = std::fs::create_dir_all(&inbox);
+        }
+        inbox
+    } else {
+        args.output.clone()
+    };
+
+    // Export phase
     let export_config = ExportConfig {
         results: &results,
-        output_dir: args.output.clone(),
+        output_dir: args.output.clone(), // RAG export still goes to output_dir
         format: args.format,
         export_format: args.export_format,
-        clean_ai: false, // TODO: Add AI feature flag
+        clean_ai: args.clean_ai,
         quick_save: args.quick_save,
         vault_path: args.vault.as_ref(),
-        obsidian_options,
+        obsidian_options: obsidian_options.clone(),
         state_store: None, // TODO: Add state store
-        resume: false, // TODO: Add resume
-        ai_threshold: 0.3, // TODO: Add AI settings
+        resume: args.resume,
+        ai_threshold: 0.3, // TODO: Add AI settings from args
         ai_max_tokens: 512,
         ai_offline: false,
     };
+
+    // Save individual files (Markdown, etc.)
+    save_files(&results, &output_dir, &args.format, &obsidian_options);
 
     match run_export(export_config).await {
         Ok(processed_urls) => {

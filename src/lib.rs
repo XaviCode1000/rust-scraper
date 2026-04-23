@@ -54,6 +54,8 @@ pub mod error;
 pub mod domain;
 #[cfg(feature = "ai")]
 pub use domain::semantic_cleaner::SemanticCleaner;
+#[cfg(feature = "ai")]
+pub use domain::DocumentChunk;
 
 pub mod adapters;
 pub mod application;

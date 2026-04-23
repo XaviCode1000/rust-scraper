@@ -92,9 +92,11 @@ impl ModelCache {
         expected_sha256: Option<&str>,
     ) -> Result<(), SemanticError> {
         let model_path = self.config.cache_dir.join(model_file);
+        let model_path_for_check = model_path.clone();
+        let model_path_for_open = model_path.clone();
 
         // Check existence via spawn_blocking
-        let exists = tokio::task::spawn_blocking(move || model_path.exists())
+        let exists = tokio::task::spawn_blocking(move || model_path_for_check.exists())
             .await
             .map_err(|e| {
                 SemanticError::ModelLoad(std::io::Error::other(format!(
@@ -115,7 +117,7 @@ impl ModelCache {
             .or_else(|| self.config.expected_sha256.clone())
             .unwrap_or_else(|| DEFAULT_MODEL_SHA256.to_string());
 
-        let file = File::open(&model_path).await.map_err(|e| {
+        let file = File::open(&model_path_for_open).await.map_err(|e| {
             SemanticError::ModelLoad(std::io::Error::other(format!(
                 "Failed to open model file: {}",
                 e
@@ -161,9 +163,11 @@ impl ModelCache {
         };
 
         let model_path = self.config.cache_dir.join(model_file);
+        let model_path_for_check = model_path.clone();
+        let model_path_for_meta = model_path.clone();
 
         // Check existence via spawn_blocking
-        let exists = tokio::task::spawn_blocking(move || model_path.exists())
+        let exists = tokio::task::spawn_blocking(move || model_path_for_check.exists())
             .await
             .map_err(|e| {
                 SemanticError::ModelLoad(std::io::Error::other(format!(
@@ -176,7 +180,7 @@ impl ModelCache {
             return Ok(true);
         }
 
-        let metadata = fs::metadata(&model_path).await.map_err(|e| {
+        let metadata = fs::metadata(&model_path_for_meta).await.map_err(|e| {
             SemanticError::ModelLoad(std::io::Error::other(format!(
                 "Failed to read model metadata: {}",
                 e

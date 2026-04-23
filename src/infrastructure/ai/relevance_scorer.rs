@@ -340,15 +340,13 @@ mod tests {
     use uuid::Uuid;
 
     fn create_test_chunk(content: &str) -> (DocumentChunk, Vec<f32>) {
-        let chunk = DocumentChunk {
-            id: Uuid::new_v4(),
-            url: "https://example.com".to_string(),
-            title: "Test".to_string(),
-            content: content.to_string(),
-            metadata: HashMap::new(),
-            timestamp: Utc::now(),
-            embeddings: None,
-        };
+        // Use test_new() constructor - requires DocumentChunk<Draft>
+        let chunk = DocumentChunk::test_new(
+            Uuid::new_v4(),
+            "https://example.com",
+            "Test",
+            content,
+        );
 
         // Create a simple embedding (normalized)
         let embedding = [0.5f32; 8];

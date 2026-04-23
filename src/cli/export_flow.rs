@@ -79,11 +79,11 @@ fn run_standard_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit
 /// AI semantic cleaning export path.
 #[cfg(feature = "ai")]
 async fn run_ai_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit> {
-    use rust_scraper::domain::{DocumentChunkUnvalidated, DocumentChunkValidated};
-    use rust_scraper::infrastructure::ai::semantic_cleaner_impl::{
+    use crate::domain::DocumentChunk;
+    use crate::infrastructure::ai::semantic_cleaner_impl::{
         ModelConfig, SemanticCleanerImpl,
     };
-    use rust_scraper::SemanticCleaner;
+    use crate::SemanticCleaner;
     use std::sync::Arc;
 
     info!("Initializing AI semantic cleaner...");
@@ -128,7 +128,7 @@ async fn run_ai_export(config: &ExportConfig<'_>) -> Result<Vec<String>, CliExit
 
     let cleaning_results = futures::future::join_all(cleaning_tasks).await;
 
-    let mut cleaned_chunks: Vec<rust_scraper::domain::DocumentChunk> =
+    let mut cleaned_chunks: Vec<DocumentChunk> =
         Vec::with_capacity(config.results.len() * 2);
     for (url, chunks_result, result) in cleaning_results {
         match chunks_result {
