@@ -3,10 +3,16 @@
 //!
 //! Defense is layered:
 //!
-//! 1. **Entry validation** — the MCP entry-point validator
-//!    (`validate_url_no_ssrf`) resolves hostnames and checks every resolved
-//!    address with [`is_forbidden_ip`] before any request leaves. This stays
-//!    as fast-fail typed UX.
+//! 1. **Entry validation** — [`reject_forbidden_literal_url`] parses the
+//!    request URL's host as an IP literal in ALL encodings (dotted decimal,
+//!    hex `0x…`, bare decimal, abbreviated `127.1`, IPv6 incl. mapped forms)
+//!    and rejects forbidden targets with a typed error BEFORE any socket
+//!    opens. This is the ONE shared choke point: the CLI request path
+//!    (`FetchRouter::fetch`, the robots fetcher, the scrape seed gate) and
+//!    the MCP entry validator (`validate_url_no_ssrf`) all call it, so neither
+//!    side can drift. Hostnames return `Ok` — they are covered by the async
+//!    DNS entry check (MCP) and layer 2 below. This stays as fast-fail typed
+//!    UX.
 //! 2. **Connect-time enforcement** — the validating DNS resolver (defined in
 //!    the infrastructure `ssrf` module, real GAI I/O stays there) is installed
 //!    via `wreq::ClientBuilder::dns_resolver` through the [`SsrfGuard`] port on
@@ -58,6 +64,22 @@ pub(crate) const DISABLE_REDIRECT_GUARD_ENV: &str = "WEBFANG_DISABLE_SSRF_REDIRE
 /// through the production clients must set `WEBFANG_DISABLE_SSRF_RESOLVER=1`
 /// before clients are built. Production never sets it.
 pub(crate) const DISABLE_VALIDATING_RESOLVER_ENV: &str = "WEBFANG_DISABLE_SSRF_RESOLVER";
+
+/// Test-only escape hatch for the entry literal-IP guard
+/// ([`reject_forbidden_literal_url`], F-06 + F-32, #1217).
+///
+/// Same rationale as the sibling hatches: wiremock binds 127.0.0.1, which the
+/// entry guard rejects, so any harness driving requests at forbidden literals
+/// through the production request path must set
+/// `WEBFANG_DISABLE_SSRF_ENTRY_GUARD=1`. Only the exact value `"1"` disarms
+/// the guard — any other value (including `"0"`, `"true"`, `"yes"`) keeps
+/// validation active, mirroring [`DISABLE_VALIDATING_RESOLVER_ENV`].
+/// Production never sets it.
+///
+/// `pub` (not `pub(crate)`) so the CLI behavioral harness — an external test
+/// target — can reference the single source of truth instead of duplicating
+/// the variable name as a string.
+pub const DISABLE_ENTRY_GUARD_ENV: &str = "WEBFANG_DISABLE_SSRF_ENTRY_GUARD";
 
 /// Returns `true` if `ip` falls within a forbidden range.
 ///
@@ -202,20 +224,172 @@ pub fn is_ipv6_teredo(v6: &Ipv6Addr) -> bool {
 
 /// Returns `true` if `host` is a literal IP address within a forbidden range.
 ///
-/// Accepts bare IPv4 literals, bare IPv6 literals, and the bracketed form
+/// Accepts bare IPv4 literals in ALL encodings (dotted decimal, hex `0x…`,
+/// bare decimal, octal `0…`, abbreviated `a.b` / `a.b.c` forms — see
+/// [`parse_ip_literal`]), bare IPv6 literals, and the bracketed form
 /// produced by `http::Uri::host()` (e.g. `[::1]`). Hostnames return `false` —
 /// synchronous redirect callbacks cannot resolve DNS; hostnames are validated
 /// at entry by the async SSRF guard. Zone-id IPv6 literals (`[fe80::1%25eth0]`)
 /// fail to parse as plain IPs and are treated as non-literals.
 #[must_use]
 pub fn is_forbidden_literal_host(host: &str) -> bool {
+    parse_ip_literal(host).is_some_and(|ip| is_forbidden_ip(&ip))
+}
+
+/// Parses `host` as an IP literal in every encoding the URL/HTTP stacks
+/// accept, returning `None` for hostnames.
+///
+/// Beyond the standard [`IpAddr`] syntax (dotted-decimal IPv4, all IPv6
+/// forms), this covers the legacy `inet_aton` / WHATWG-URL IPv4 encodings
+/// that the `url` crate normalizes (and that `getaddrinfo` resolves when a
+/// raw `http::Uri` host reaches the socket layer):
+///
+/// - hexadecimal parts (`0x7f000001`, `0x7f.0x0.0x0.0x1`),
+/// - octal parts (`017700000001`, `0177.0.0.1`),
+/// - a bare 32-bit decimal (`2130706433`),
+/// - abbreviated 2- and 3-part forms (`127.1`, `127.0.1`).
+///
+/// A single trailing dot (FQDN root, `127.0.0.1.`) is stripped before
+/// parsing. Strings containing `:` that fail strict IPv6 parsing (e.g. zone
+/// ids) return `None` — they are never fed to the IPv4 parser.
+#[must_use]
+pub fn parse_ip_literal(host: &str) -> Option<IpAddr> {
     let literal = host
         .strip_prefix('[')
         .and_then(|h| h.strip_suffix(']'))
         .unwrap_or(host);
-    literal
-        .parse::<IpAddr>()
-        .is_ok_and(|ip| is_forbidden_ip(&ip))
+    if let Ok(ip) = literal.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    if literal.contains(':') {
+        return None;
+    }
+    parse_ipv4_all_forms(literal).map(IpAddr::V4)
+}
+
+/// Parses the legacy `inet_aton` / WHATWG-URL IPv4 encodings: 1–4 dot-separated
+/// parts, each hex (`0x…`), octal (leading `0`), or decimal, with the last part
+/// filling every remaining byte (`127.1` → `127.0.0.1`, `2130706433` →
+/// `127.0.0.1`). Returns `None` unless the whole string is a valid encoding —
+/// partial garbage (`0xZZZ`, `08`, `1.2.3.4.5`, empty parts) never parses, so a
+/// forged host can at worst fall through to the hostname path, where the
+/// connect-time resolver fails it closed.
+fn parse_ipv4_all_forms(text: &str) -> Option<Ipv4Addr> {
+    let text = text.strip_suffix('.').unwrap_or(text);
+    if text.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = text.split('.').collect();
+    if parts.len() > 4 || parts.iter().any(|part| part.is_empty()) {
+        return None;
+    }
+    let mut numbers = Vec::with_capacity(parts.len());
+    for part in &parts {
+        numbers.push(parse_ipv4_number(part)?);
+    }
+    let last_index = numbers.len() - 1;
+    for (index, number) in numbers.iter().enumerate() {
+        // Every leading part fills exactly one octet; the last part fills the
+        // remaining bytes (`256^(5 - len)`), mirroring the WHATWG IPv4 parser.
+        let ceiling = if index == last_index {
+            256_u64.pow((5 - numbers.len()) as u32)
+        } else {
+            256
+        };
+        if *number >= ceiling {
+            return None;
+        }
+    }
+    let mut value: u64 = numbers[last_index];
+    for (index, number) in numbers[..last_index].iter().enumerate() {
+        value += number << (8 * (3 - index));
+    }
+    Some(Ipv4Addr::from(value as u32))
+}
+
+/// Parses one dot-separated IPv4 part with radix detection: `0x…`/`0X…` hex,
+/// leading-`0` octal, otherwise decimal. Strict — the whole part must be valid
+/// digits for its radix (`+1`, whitespace, empty hex/octal bodies reject).
+fn parse_ipv4_number(part: &str) -> Option<u64> {
+    let (radix, digits) =
+        if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X")) {
+            (16_u32, hex)
+        } else if part.len() > 1 && part.starts_with('0') {
+            (8_u32, part)
+        } else {
+            (10_u32, part)
+        };
+    if digits.is_empty() {
+        return None;
+    }
+    let all_valid = match radix {
+        16 => digits.chars().all(|c| c.is_ascii_hexdigit()),
+        8 => digits.chars().all(|c| matches!(c, '0'..='7')),
+        _ => digits.chars().all(|c| c.is_ascii_digit()),
+    };
+    if !all_valid {
+        return None;
+    }
+    u64::from_str_radix(digits, radix).ok()
+}
+
+/// Rejection of a request URL whose host is a forbidden IP literal (F-06 +
+/// F-32, #1217). Carries the offending host and parsed address for typed UX.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForbiddenLiteral {
+    /// Host as it appeared in the request URL.
+    pub host: String,
+    /// Parsed forbidden address the host denotes.
+    pub ip: IpAddr,
+}
+
+impl std::fmt::Display for ForbiddenLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Spanish user-facing copy; the `SSRF detectado` prefix is the contract
+        // the MCP probe suite asserts (`ssrf_probe_test.rs`).
+        write!(
+            f,
+            "SSRF detectado: la IP {} del host '{}' está prohibida \
+             (acceso a red interna/cloud metadata bloqueado)",
+            self.ip, self.host
+        )
+    }
+}
+
+impl std::error::Error for ForbiddenLiteral {}
+
+/// Shared literal-IP entry guard (F-06 + F-32, #1217): the ONE choke point for
+/// CLI and MCP.
+///
+/// Returns `Err` when `url`'s host parses (via [`parse_ip_literal`]) to an
+/// address [`is_forbidden_ip`] rejects — before any socket opens. Hostnames
+/// return `Ok`: they need async DNS, which stays with the MCP entry validator
+/// and the connect-time validating resolver.
+///
+/// The [`DISABLE_ENTRY_GUARD_ENV`] escape hatch (exact `"1"` only) is read on
+/// every call so test harnesses driving wiremock (127.0.0.1) through the
+/// production request path can disarm this layer without touching the others.
+/// Production never sets it.
+#[tracing::instrument(skip(url), fields(host = %url.host_str().unwrap_or("")))]
+pub fn reject_forbidden_literal_url(url: &url::Url) -> Result<(), ForbiddenLiteral> {
+    if std::env::var(DISABLE_ENTRY_GUARD_ENV).as_deref() == Ok("1") {
+        return Ok(());
+    }
+    let host = url.host_str().unwrap_or("");
+    match parse_ip_literal(host) {
+        Some(ip) if is_forbidden_ip(&ip) => {
+            tracing::warn!(
+                host = %host,
+                ip = %ip,
+                "SSRF literal-IP target rejected at entry (no socket opened)"
+            );
+            Err(ForbiddenLiteral {
+                host: host.to_owned(),
+                ip,
+            })
+        },
+        _ => Ok(()),
+    }
 }
 
 /// Redirect policy for all scrape clients: the default 10-hop limit with an
@@ -435,6 +609,175 @@ mod tests {
         assert!(!is_forbidden_literal_host("[2606:4700::1111]"));
         assert!(!is_forbidden_literal_host("example.com"));
         assert!(!is_forbidden_literal_host("127.0.0.1.nip.io"));
+    }
+
+    // F-06 + F-32 (#1217): the entry guard must decode every IP-literal
+    // encoding the URL/HTTP stacks accept — dotted, hex, octal, bare decimal,
+    // abbreviated — not just what `str::parse::<IpAddr>` handles.
+    #[test]
+    fn ip_literal_parser_covers_all_encodings() {
+        // (host spelling, expected canonical address)
+        let cases = [
+            ("127.0.0.1", "127.0.0.1"),
+            ("0x7f000001", "127.0.0.1"),
+            ("0X7F000001", "127.0.0.1"),
+            ("2130706433", "127.0.0.1"),
+            ("127.1", "127.0.0.1"),
+            ("127.0.1", "127.0.0.1"),
+            ("0x7f.0x0.0x0.0x1", "127.0.0.1"),
+            ("017700000001", "127.0.0.1"),
+            ("0177.0.0.1", "127.0.0.1"),
+            ("10.0.0.1", "10.0.0.1"),
+            ("0xa000001", "10.0.0.1"),
+            ("169.254.169.254", "169.254.169.254"),
+            ("0xa9fea9fe", "169.254.169.254"),
+            ("2852039166", "169.254.169.254"),
+            ("192.168.0.1", "192.168.0.1"),
+            ("3232235521", "192.168.0.1"),
+            ("8.8.8.8", "8.8.8.8"),
+            ("0x8080808", "8.8.8.8"),
+            ("134744072", "8.8.8.8"),
+            ("0.0.0.0", "0.0.0.0"),
+            ("0x0", "0.0.0.0"),
+            ("127.0.0.1.", "127.0.0.1"),
+            ("::1", "::1"),
+            ("[::1]", "::1"),
+            ("::ffff:127.0.0.1", "::ffff:127.0.0.1"),
+            ("[::ffff:127.0.0.1]", "::ffff:127.0.0.1"),
+            ("2606:4700::1111", "2606:4700::1111"),
+        ];
+        for (host, expected) in cases {
+            let want: IpAddr = expected.parse().expect("test literals always parse");
+            assert_eq!(parse_ip_literal(host), Some(want), "host {host}");
+        }
+    }
+
+    #[test]
+    fn ip_literal_parser_rejects_non_literals() {
+        for host in [
+            "example.com",
+            "127.0.0.1.nip.io",
+            "",
+            "1.2.3.4.5",
+            "0xZZZ",
+            "0x",
+            "08",
+            ".1.2.3",
+            "127.0.0.1..",
+            "+1.2.3.4",
+            " 127.0.0.1",
+            "0x7f000001 ",
+            "fe80::1%eth0",
+            "[fe80::1%25eth0]",
+            "1234:::",
+        ] {
+            assert_eq!(parse_ip_literal(host), None, "host {host:?}");
+        }
+    }
+
+    #[test]
+    fn forbidden_literal_host_covers_encoded_forms() {
+        for host in [
+            "127.0.0.1",
+            "0x7f000001",
+            "0X7F000001",
+            "2130706433",
+            "127.1",
+            "127.0.1",
+            "017700000001",
+            "0177.0.0.1",
+            "0x7f.0x0.0x0.0x1",
+            "127.0.0.1.",
+            "169.254.169.254",
+            "0xa9fea9fe",
+            "2852039166",
+            "10.0.0.1",
+            "0xa000001",
+            "192.168.1.1",
+            "0.0.0.0",
+            "0x0",
+            "255.255.255.255",
+            "100.64.0.1",
+            "240.0.0.1",
+            "::1",
+            "[::1]",
+            "::ffff:127.0.0.1",
+            "[::ffff:127.0.0.1]",
+            "::ffff:0.0.0.0",
+        ] {
+            assert!(is_forbidden_literal_host(host), "forbidden literal {host}");
+        }
+        for host in [
+            "8.8.8.8",
+            "0x8080808",
+            "134744072",
+            "1.1.1.1",
+            "93.184.216.34",
+            "example.com",
+            "127.0.0.1.nip.io",
+            "2606:4700::1111",
+            "[2606:4700::1111]",
+        ] {
+            assert!(!is_forbidden_literal_host(host), "allowed host {host}");
+        }
+    }
+
+    #[test]
+    fn reject_url_blocks_forbidden_literals_all_forms() {
+        let _guard = webfang_test_utils::EnvGuard::clean(&[DISABLE_ENTRY_GUARD_ENV]);
+        for raw in [
+            "http://127.0.0.1/",
+            "http://0x7f000001:18888/article",
+            "http://2130706433:18888/article",
+            "http://127.1:18888/article",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/",
+            "http://[::ffff:127.0.0.1]/",
+        ] {
+            let url: url::Url = raw.parse().expect("test URLs always parse");
+            let err = reject_forbidden_literal_url(&url)
+                .expect_err("forbidden literal must be rejected at entry");
+            assert!(
+                err.to_string().contains("SSRF detectado"),
+                "rejection of {raw} must carry the SSRF contract text, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn reject_url_allows_hostnames_and_public_ips() {
+        let _guard = webfang_test_utils::EnvGuard::clean(&[DISABLE_ENTRY_GUARD_ENV]);
+        for raw in [
+            "https://example.com/",
+            "http://8.8.8.8/",
+            "http://93.184.216.34/",
+            "http://[2606:4700::1111]/",
+        ] {
+            let url: url::Url = raw.parse().expect("test URLs always parse");
+            assert!(
+                reject_forbidden_literal_url(&url).is_ok(),
+                "non-literal {raw} must pass the entry guard"
+            );
+        }
+    }
+
+    #[test]
+    fn entry_guard_hatch_requires_exact_value_one() {
+        let url: url::Url = "http://127.0.0.1/".parse().expect("test URL parses");
+        {
+            let _guard = webfang_test_utils::EnvGuard::with(&[(DISABLE_ENTRY_GUARD_ENV, "0")]);
+            assert!(
+                reject_forbidden_literal_url(&url).is_err(),
+                "WEBFANG_DISABLE_SSRF_ENTRY_GUARD=0 must keep validation active"
+            );
+        }
+        {
+            let _guard = webfang_test_utils::EnvGuard::with(&[(DISABLE_ENTRY_GUARD_ENV, "1")]);
+            assert!(
+                reject_forbidden_literal_url(&url).is_ok(),
+                "exact \"1\" disarms the entry guard for wiremock harnesses"
+            );
+        }
     }
 
     // Registry semantics (new in sub-slice 3.C). The registry is process-global

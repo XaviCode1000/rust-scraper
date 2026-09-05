@@ -170,6 +170,14 @@ pub(crate) fn build_fetch_router(
 
 impl Downloader for FetchRouter {
     fn fetch<'a>(&'a self, url: &'a Url) -> BoxFuture<'a, Result<FetchedPage, DownloadError>> {
+        // SSRF entry guard (F-06 + F-32, #1217): reject literal-IP targets
+        // BEFORE any downloader layer opens a socket. One shared choke-point
+        // check for every strategy arm (Static / Hybrid / Full) and every
+        // caller (CLI seeds, crawl-engine-discovered URLs): `InvalidUrl` is
+        // `PermanentFatal`, so no retry or L2/L3 escalation re-dials.
+        if let Err(rejection) = crate::domain::ssrf_guard::reject_forbidden_literal_url(url) {
+            return Box::pin(async move { Err(DownloadError::InvalidUrl(rejection.to_string())) });
+        }
         match self {
             Self::Static(dl) => dl.fetch(url),
             Self::Hybrid(dl) => dl.fetch(url),
