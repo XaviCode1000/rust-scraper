@@ -19,7 +19,7 @@
 #![deny(clippy::await_holding_lock)]
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -298,7 +298,18 @@ impl Engine {
         }
 
         let scoped = cp_path.file_for_seed(self.config.seed_url.as_str());
-        match self.checkpoint_store.load(&scoped) {
+        self.load_checkpoint_state(&scoped);
+
+        self.checkpoint_path = Some(scoped);
+        self.checkpoint_interval = interval;
+        self
+    }
+
+    /// Load the scoped checkpoint into `checkpoint_state`, starting fresh when
+    /// absent or corrupt (F-01 scoping keeps concurrent sites disjoint).
+    #[instrument(skip(self), fields(path = %path.display()))]
+    fn load_checkpoint_state(&mut self, path: &Path) {
+        match self.checkpoint_store.load(path) {
             Some(cp) => {
                 info!(
                     "Resuming from checkpoint: {} visited, {} pages",
@@ -312,10 +323,6 @@ impl Engine {
                 self.checkpoint_state = Some(CrawlCheckpoint::new());
             },
         }
-
-        self.checkpoint_path = Some(scoped);
-        self.checkpoint_interval = interval;
-        self
     }
 
     /// Delete the checkpoint file after a fully-completed crawl (F-01).
