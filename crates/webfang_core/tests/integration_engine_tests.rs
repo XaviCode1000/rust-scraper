@@ -11,7 +11,8 @@ use webfang_core::application::crawler::engine::EngineOptions;
 use webfang_core::domain::JsStrategy;
 use webfang_core::infrastructure::downloader::fetch_router::DefaultDownloaderFactory;
 use webfang_core::{
-    crawl_site_with_options, BincodeCheckpoint, CheckpointStore, CrawlCheckpoint, CrawlerConfig,
+    crawl_site_with_options, BincodeCheckpoint, CheckpointPath, CheckpointStore, CrawlCheckpoint,
+    CrawlerConfig,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -28,7 +29,7 @@ fn test_config(base_url: &str) -> CrawlerConfig {
         .build()
 }
 
-/// Test 1: Engine with checkpoint enabled creates a checkpoint file.
+/// Test 1: a fully-completed engine crawl leaves no checkpoint residue (F-01).
 #[tokio::test]
 async fn test_engine_with_checkpoint_enabled() {
     let server = MockServer::start().await;
@@ -66,12 +67,17 @@ async fn test_engine_with_checkpoint_enabled() {
         "should crawl at least 1 page"
     );
 
-    // Checkpoint file should exist after crawl
-    let checkpoint_file = checkpoint_dir.join("crawl_checkpoint.json");
+    // F-01 (b): the single-page crawl completes fully, so its checkpoint
+    // is cleaned up — no stale state may leak into the next identical run.
+    let scoped =
+        CheckpointPath::new(&checkpoint_dir).file_for_seed(&format!("{}/index.html", server.uri()));
+    assert!(scoped
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with("crawl_checkpoint_")));
     assert!(
-        checkpoint_file.exists(),
-        "checkpoint file should be created at {}",
-        checkpoint_file.display()
+        !scoped.exists(),
+        "completed crawl must delete its scoped checkpoint at {}",
+        scoped.display()
     );
 }
 
@@ -114,7 +120,7 @@ async fn test_engine_resume_from_checkpoint() {
     let seed_url = format!("{}/index.html", server.uri());
     let page2_url = format!("{}/page2.html", server.uri());
     let mut visited = std::collections::HashSet::new();
-    visited.insert(seed_url);
+    visited.insert(seed_url.clone());
     let state = CrawlCheckpoint {
         visited,
         queued: vec![page2_url],
@@ -124,7 +130,9 @@ async fn test_engine_resume_from_checkpoint() {
     };
 
     let store = BincodeCheckpoint::new();
-    let checkpoint_file = checkpoint_dir.join("crawl_checkpoint.json");
+    // F-01 (a): the engine scopes checkpoints per seed, so the pre-created
+    // state must live at the scoped path to be picked up for resume.
+    let checkpoint_file = CheckpointPath::new(&checkpoint_dir).file_for_seed(&seed_url);
     store.save(&state, &checkpoint_file).unwrap();
 
     // Now crawl with the same checkpoint dir — engine should resume
@@ -164,5 +172,12 @@ async fn test_engine_resume_from_checkpoint() {
     assert!(
         requested_paths.iter().all(|p| *p != "/index.html"),
         "visited seed must not be re-crawled on resume, got: {requested_paths:?}"
+    );
+    // F-01 (b): the resumed crawl drains its queue and completes, so the
+    // scoped checkpoint is cleaned up afterwards.
+    assert!(
+        !checkpoint_file.exists(),
+        "completed resume must delete its scoped checkpoint at {}",
+        checkpoint_file.display()
     );
 }

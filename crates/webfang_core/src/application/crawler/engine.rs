@@ -279,9 +279,13 @@ impl Engine {
 
     /// Enable checkpoint persistence with the given interval and base directory.
     ///
+    /// The checkpoint file is scoped per seed URL
+    /// (`crawl_checkpoint_<seed-hash>.json`, F-01) so concurrent `--resume`
+    /// runs for different sites sharing one base dir cannot collide.
     /// If the checkpoint directory cannot be created, checkpointing is disabled
     /// and an error is logged — the engine will NOT silently pretend to
     /// checkpoint while every save fails.
+    #[instrument(skip(self), fields(interval = interval, base_dir = %base_dir.display()))]
     pub fn with_checkpoint(mut self, interval: u64, base_dir: PathBuf) -> Self {
         let cp_path = CheckpointPath::new(&base_dir);
         if let Err(e) = cp_path.ensure_dir() {
@@ -293,7 +297,8 @@ impl Engine {
             return self;
         }
 
-        match self.checkpoint_store.load(&cp_path.file()) {
+        let scoped = cp_path.file_for_seed(self.config.seed_url.as_str());
+        match self.checkpoint_store.load(&scoped) {
             Some(cp) => {
                 info!(
                     "Resuming from checkpoint: {} visited, {} pages",
@@ -308,9 +313,35 @@ impl Engine {
             },
         }
 
-        self.checkpoint_path = Some(cp_path.file());
+        self.checkpoint_path = Some(scoped);
         self.checkpoint_interval = interval;
         self
+    }
+
+    /// Delete the checkpoint file after a fully-completed crawl (F-01).
+    ///
+    /// A finished crawl leaves no stale state behind: otherwise the next
+    /// identical `--resume` run would skip already-visited URLs instead of
+    /// reproducing the same output set. Best-effort — cleanup failure is
+    /// logged (English, internal) and never fails the crawl. Taking the path
+    /// also keeps a later [`shutdown`](Self::shutdown) from re-saving.
+    #[instrument(skip(self))]
+    fn delete_checkpoint(&mut self) {
+        if let Some(path) = self.checkpoint_path.take() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    debug!(path = %path.display(), "checkpoint removed after successful crawl");
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint cleanup failed"
+                    );
+                },
+            }
+        }
     }
 
     /// Enable the domain session pool for per-domain rate limiting.
@@ -668,8 +699,19 @@ impl Engine {
         // because a Sender clone inside the Arc<CrawlTaskCtx> is still alive.
         drop(task_ctx);
 
-        // Final checkpoint save
-        self.save_checkpoint().await;
+        // Final checkpoint: a fully-completed crawl (no shutdown, no pending
+        // work left, not truncated by max_pages) deletes its checkpoint
+        // (F-01) so the next identical run reproduces the same output set
+        // instead of resuming stale state. Interrupted or truncated runs
+        // keep the file for resume.
+        let completed_fully = !self.shutdown.load(std::sync::atomic::Ordering::SeqCst)
+            && !self.scheduler.has_pending_work()
+            && !self.collector.is_full(self.config.max_pages);
+        if completed_fully {
+            self.delete_checkpoint();
+        } else {
+            self.save_checkpoint().await;
+        }
 
         // Collect results via mpsc channel — now all Senders are dropped,
         // so the receiver worker will drain and terminate.

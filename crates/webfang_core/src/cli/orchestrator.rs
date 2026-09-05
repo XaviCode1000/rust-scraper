@@ -505,8 +505,9 @@ fn build_crawler_config_for_discovery(
 /// Resolve the persistence mode and warn about ignored CLI flags.
 ///
 /// The domain resolver is pure (#1045): it never logs. `--state-dir`
-/// without `--resume` is reported via `ResolverNotes` and warned about
-/// here, the one call site that knows about user flags.
+/// that had no effect (resolved `Disabled` while a state dir was passed)
+/// is reported via `ResolverNotes` and warned about here, the one call
+/// site that knows about user flags.
 fn resolve_persistence_mode(opts: &CrawlOptions) -> PersistenceMode {
     let default_state_dir = crate::cli::scrape_flow::resolve_default_state_dir();
     let (persistence_mode, resolver_notes) =

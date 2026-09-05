@@ -19,7 +19,8 @@ use webfang_core::application::crawler::engine::EngineOptions;
 use webfang_core::domain::JsStrategy;
 use webfang_core::infrastructure::downloader::fetch_router::DefaultDownloaderFactory;
 use webfang_core::{
-    crawl_site_with_options, BincodeCheckpoint, CheckpointStore, CrawlCheckpoint, CrawlerConfig,
+    crawl_site_with_options, BincodeCheckpoint, CheckpointPath, CheckpointStore, CrawlCheckpoint,
+    CrawlerConfig,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -362,10 +363,12 @@ async fn crawl_with_checkpoint(
     crawl_site_with_options(config, options).await
 }
 
-/// Verify the checkpoint file exists with a valid CRC32 prefix + JSON payload,
-/// that the store can load it, and that no `.tmp` file remains (atomicity).
-fn assert_checkpoint_valid(checkpoint_dir: &Path) {
-    let checkpoint_file = checkpoint_dir.join("crawl_checkpoint.json");
+/// Verify the scoped checkpoint file exists with a valid CRC32 prefix +
+/// JSON payload, that the store can load it, and that no `.tmp` file
+/// remains (atomicity). The file is scoped per seed (F-01), so the seed
+/// selects which `crawl_checkpoint_<hash>.json` to inspect.
+fn assert_checkpoint_valid(checkpoint_dir: &Path, seed: &Url) {
+    let checkpoint_file = CheckpointPath::new(checkpoint_dir).file_for_seed(seed.as_str());
     assert!(
         checkpoint_file.exists(),
         "checkpoint file should exist at {}",
@@ -399,7 +402,9 @@ fn assert_checkpoint_valid(checkpoint_dir: &Path) {
     );
 
     // --- Verify no leftover .tmp file (atomicity evidence) ---
-    let tmp_file = checkpoint_dir.join("crawl_checkpoint.json.tmp");
+    let mut tmp_os = checkpoint_file.as_os_str().to_owned();
+    tmp_os.push(".tmp");
+    let tmp_file = std::path::PathBuf::from(tmp_os);
     assert!(
         !tmp_file.exists(),
         "no .tmp file should remain after atomic save"
@@ -424,7 +429,7 @@ async fn waf_gauntlet_checkpoint_atomicity_and_resume() {
     );
 
     // --- Verify checkpoint file exists and has valid format ---
-    assert_checkpoint_valid(&checkpoint_dir);
+    assert_checkpoint_valid(&checkpoint_dir, &seed);
 
     // --- Phase 2: resume from checkpoint — engine should skip visited ---
     let result2 = crawl_with_checkpoint(seed, &checkpoint_dir, 10).await;
