@@ -138,6 +138,7 @@ fn transform_and_serialize<'a>(
     let mut result = String::new();
     let mut in_link = false;
     let mut link: Option<LinkState<'a>> = None;
+    let mut standalone_image: Option<StandaloneImage> = None;
     let mut depth = 0;
 
     for event in events {
@@ -169,20 +170,29 @@ fn transform_and_serialize<'a>(
             Event::Start(Tag::Image { dest_url, .. }) => {
                 if let Some(state) = link.as_mut() {
                     state.record_image(dest_url);
-                } else {
-                    push_event_text(&event, &mut result);
+                } else if standalone_image.is_none() {
+                    standalone_image = Some(StandaloneImage::new(dest_url.to_string()));
+                } else if let Some(image) = standalone_image.as_mut() {
+                    push_event_text(&event, &mut image.alt);
                 }
             },
             Event::Start(_) => {
                 if let Some(state) = link.as_mut() {
                     depth += 1;
                     state.text_parts.push(event);
+                } else if let Some(image) = standalone_image.as_mut() {
+                    push_event_text(&event, &mut image.alt);
                 } else {
                     push_event_text(&event, &mut result);
                 }
             },
             Event::End(TagEnd::Image) => {
-                if !in_link {
+                if in_link {
+                    // Image content inside a link is recorded via
+                    // `record_image`; nothing to emit here.
+                } else if let Some(image) = standalone_image.take() {
+                    image.emit(&mut result);
+                } else {
                     push_event_text(&event, &mut result);
                 }
             },
@@ -192,6 +202,8 @@ fn transform_and_serialize<'a>(
                         depth -= 1;
                     }
                     state.text_parts.push(event);
+                } else if let Some(image) = standalone_image.as_mut() {
+                    push_event_text(&event, &mut image.alt);
                 } else {
                     push_event_text(&event, &mut result);
                 }
@@ -199,6 +211,8 @@ fn transform_and_serialize<'a>(
             _ => {
                 if let Some(state) = link.as_mut() {
                     state.text_parts.push(event);
+                } else if let Some(image) = standalone_image.as_mut() {
+                    push_event_text(&event, &mut image.alt);
                 } else {
                     push_event_text(&event, &mut result);
                 }
@@ -212,6 +226,9 @@ fn transform_and_serialize<'a>(
                 push_event_text(&e, &mut result);
             }
         }
+    }
+    if let Some(image) = standalone_image.take() {
+        image.emit(&mut result);
     }
 
     result.trim_end().to_string()
@@ -240,6 +257,34 @@ impl<'a> LinkState<'a> {
         self.has_image = true;
         self.image_urls.push(dest_url.to_string());
         tracing::debug!("WIKILINK: detected image inside link, url={}", dest_url);
+    }
+}
+
+/// In-progress state for a standalone image (`![alt](url)`) outside any
+/// link. The alt text arrives as events between `Start(Image)` and
+/// `End(Image)` while the URL only exists on the start event, so both
+/// are buffered and emitted together as verbatim markdown (#1218).
+struct StandaloneImage {
+    url: String,
+    alt: String,
+}
+
+impl StandaloneImage {
+    fn new(url: String) -> Self {
+        Self {
+            url,
+            alt: String::new(),
+        }
+    }
+
+    /// Emit the buffered image as working markdown: `![alt](url)`.
+    fn emit(self, result: &mut String) {
+        tracing::debug!(url = %self.url, "WIKILINK: emitting standalone image");
+        result.push_str("![");
+        result.push_str(&self.alt);
+        result.push_str("](");
+        result.push_str(&self.url);
+        result.push(')');
     }
 }
 
@@ -795,5 +840,41 @@ mod tests {
         assert_eq!(humanize_last_segment("/page/JK-Rowling"), "JK Rowling");
         // A bare root carries no segment — the caller falls back to the slug.
         assert_eq!(humanize_last_segment("https://example.com/"), "");
+    }
+
+    // ========================================================================
+    // #1218 (F-04) — standalone image must keep its URL
+    // ========================================================================
+
+    /// A standalone image outside any link must survive wiki-link
+    /// conversion as working markdown: `![alt](url)`.
+    #[test]
+    fn test_standalone_image_keeps_url() {
+        let md = "![pic](https://x.com/a.png)";
+        let result = convert_wiki_links(md, "example.com");
+        assert!(
+            result.contains("https://x.com/a.png"),
+            "standalone image URL must survive, got: {result}"
+        );
+        assert!(
+            result.ends_with(')'),
+            "standalone image must keep valid markdown, got: {result}"
+        );
+    }
+
+    /// Mixed content (issue #1218 repro shape): a standalone image keeps
+    /// its URL verbatim while a same-domain link still converts.
+    #[test]
+    fn test_standalone_image_beside_converted_link() {
+        let md = "text ![a](https://x.com/a.png) more [About](https://example.com/about) end";
+        let result = convert_wiki_links(md, "example.com");
+        assert!(
+            result.contains("![a](https://x.com/a.png)"),
+            "standalone image must survive verbatim, got: {result}"
+        );
+        assert!(
+            result.contains("[[about]]"),
+            "same-domain link must still convert, got: {result}"
+        );
     }
 }
