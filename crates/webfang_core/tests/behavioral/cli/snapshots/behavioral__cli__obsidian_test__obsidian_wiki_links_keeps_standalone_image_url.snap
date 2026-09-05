@@ -1,0 +1,16 @@
+---
+source: crates/webfang_core/tests/behavioral/cli/obsidian_test.rs
+expression: redacted
+---
+---
+title: Image Page
+url: http://127.0.0.1:<PORT>/
+date: [DATE]
+excerpt: The expedition reached the northern observatory after a long climb through pine forests and granite ridges, carrying instruments for the winter survey.
+---
+
+The expedition reached the northern observatory after a long climb through pine forests and granite ridges, carrying instruments for the winter survey.
+
+![pic](http://127.0.0.1:<PORT>/assets/pic.png)
+
+The photograph above shows the valley at dawn. See [[other-page|this other page]] for the full survey report and additional maps of the surrounding peaks.
