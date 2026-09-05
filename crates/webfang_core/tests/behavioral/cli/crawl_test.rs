@@ -664,7 +664,7 @@ async fn max_depth_two_includes_deeper_links() {
         "expected >=1 request to /deep with max-depth 2, got {deep}"
     );
 
-// Seed `/`, `/page1`, `/page2`, `/deep`.
+    // Seed `/`, `/page1`, `/page2`, `/deep`.
     assert_eq!(
         md_files, 4,
         "expected 4 .md files (seed + page1 + page2 + deep), got {md_files}"

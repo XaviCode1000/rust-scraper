@@ -533,7 +533,14 @@ async fn prepare_phase(
     persistence_mode: &PersistenceMode,
 ) -> Result<PrepareResult, CliExit> {
     let urls_to_scrape = if opts.crawl.single_page {
-        plan_urls(true, false, opts.url.clone(), Vec::new())
+        // F-35 (#1216): single-page mode never runs discovery, so the seed
+        // pattern guard needs a patterns-only config — no TLS/sitemap
+        // projection involved, keeping `--h2-profile` semantics unchanged here.
+        let seed_guard = CrawlerConfig::builder(opts.url.clone())
+            .include_patterns(opts.crawl.include_patterns.clone())
+            .exclude_patterns(opts.crawl.exclude_patterns.clone())
+            .build();
+        plan_urls(true, false, opts.url.clone(), Vec::new(), &seed_guard)
     } else {
         // Honor `--h2-profile` for URL discovery (#312): an unknown profile is a
         // config error (exit 78), consistent with the scrape and batch phases.
@@ -581,7 +588,9 @@ async fn prepare_phase(
             // which applies `crawl_site_with_options` when the mode enables
             // checkpointing and falls back to `crawl_site` otherwise — single
             // call site, no orchestrator-level branching (slice 5c followup).
-            match discover_urls_recursive(crawler_config, opts, persistence_mode).await {
+            // F-35 (#1216): clone — the planning boundary below reuses this
+            // same config for the seed pattern guard in `plan_urls`.
+            match discover_urls_recursive(crawler_config.clone(), opts, persistence_mode).await {
                 Err(e) => {
                     return Err(CliExit::NetworkError(format!("URL discovery failed: {e}")));
                 },
@@ -594,6 +603,7 @@ async fn prepare_phase(
             opts.crawl.use_sitemap,
             opts.url.clone(),
             discovered_urls,
+            &crawler_config,
         )
     };
 
@@ -1320,23 +1330,62 @@ fn batch_exit_code(
     }
 }
 
+/// Plan the final scrape list from discovery output.
+///
+/// F-35 (#1216): `--include-pattern` / `--exclude-pattern` apply to the seed
+/// URL itself, not just discovered pages. The CLI default path uses the crawl
+/// Engine only for discovery and then scrapes this planned list directly, so
+/// the Engine's own seed guard (`engine.rs`, #634) is bypassed here — the
+/// planning boundary must enforce the same
+/// [`crate::application::url_filter::is_allowed`] predicate. The Engine guard
+/// stays intact for direct Engine consumers (batch, MCP) and for discovery
+/// filtering: the predicate lives in exactly one function, enforced at both
+/// boundaries (defense in depth, not duplicated logic). Dropping the
+/// unconditional insert instead was rejected: the `single_page` path never
+/// runs the Engine, and `plan_urls` cannot assume every discovery backend
+/// returns the seed, so an explicit guard keeps this boundary total.
+#[instrument(
+    skip(seed_url, discovered_urls, crawler_config),
+    fields(seed_url = %seed_url)
+)]
 fn plan_urls(
     single_page: bool,
     use_sitemap: bool,
     seed_url: url::Url,
     discovered_urls: Vec<url::Url>,
+    crawler_config: &CrawlerConfig,
 ) -> Vec<url::Url> {
+    // Single source of truth for "may the seed be scraped" (F-35, #1216).
+    let seed_allowed =
+        crate::application::url_filter::is_allowed(seed_url.as_str(), crawler_config);
+    if !seed_allowed {
+        info!(
+            seed_url = %seed_url,
+            "Seed URL excluded by pattern filters — it will not be scraped"
+        );
+    }
     if single_page {
-        vec![seed_url]
+        if seed_allowed {
+            vec![seed_url]
+        } else {
+            Vec::new()
+        }
     } else if use_sitemap {
         // Sitemap is the source of truth — do not inject the seed URL.
+        // Discovery already applied the pattern filters.
         discovered_urls
     } else {
-        // DOM discovery: always include the seed URL so it gets crawled
-        // even when link extraction only returns child URLs.
+        // DOM discovery: re-inject the seed ONLY when the patterns allow it,
+        // so it gets crawled even when link extraction only returns children.
         let mut urls = discovered_urls;
-        if !urls.contains(&seed_url) {
-            urls.insert(0, seed_url);
+        if seed_allowed {
+            if !urls.contains(&seed_url) {
+                urls.insert(0, seed_url);
+            }
+        } else {
+            // Defensive: strip the seed if a discovery backend returned it
+            // despite the filters — an excluded seed must never be scraped.
+            urls.retain(|url| *url != seed_url);
         }
         urls
     }
@@ -1364,7 +1413,7 @@ mod tests {
     use super::{
         batch_exit_code, build_batch_crawler_config, build_crawler_config_for_discovery,
         build_elastic_ingestion, format_failure, parse_asset_h2_profile, plan_urls, report_phase,
-        resolve_export_dir, resolve_persistence_root,
+        resolve_export_dir, resolve_persistence_root, CrawlerConfig,
     };
     use crate::application::crawl_options::CrawlOptions;
     use crate::cli::error::CliExit;
@@ -1657,6 +1706,11 @@ mod tests {
 
     // ===== plan_urls tests =====
 
+    /// Permissive guard config (F-35, #1216): no patterns, every seed allowed.
+    fn permissive_guard(seed: &url::Url) -> CrawlerConfig {
+        CrawlerConfig::new(seed.clone())
+    }
+
     #[test]
     fn plan_urls_single_page_returns_seed_only() {
         let seed = url::Url::parse("https://example.com").unwrap();
@@ -1664,10 +1718,28 @@ mod tests {
             url::Url::parse("https://example.com/about").unwrap(),
             url::Url::parse("https://example.com/blog").unwrap(),
         ];
+        let guard = permissive_guard(&seed);
 
-        let result = plan_urls(true, false, seed.clone(), discovered);
+        let result = plan_urls(true, false, seed.clone(), discovered, &guard);
 
         assert_eq!(result, vec![seed]);
+    }
+
+    #[test]
+    fn plan_urls_single_page_excluded_seed_yields_empty() {
+        // F-35 (#1216): single-page mode never runs the Engine, so the
+        // patterns-only guard must still refuse an excluded seed.
+        let seed = url::Url::parse("https://example.com/article").unwrap();
+        let guard = CrawlerConfig::builder(seed.clone())
+            .exclude_pattern("/article")
+            .build();
+
+        let result = plan_urls(true, false, seed, Vec::new(), &guard);
+
+        assert!(
+            result.is_empty(),
+            "excluded single-page seed must yield zero URLs, got {result:?}"
+        );
     }
 
     #[test]
@@ -1679,9 +1751,10 @@ mod tests {
             url::Url::parse("https://example.com/c").unwrap(),
         ];
 
-        let result = plan_urls(false, false, seed.clone(), discovered.clone());
+        let guard = permissive_guard(&seed);
+        let result = plan_urls(false, false, seed.clone(), discovered.clone(), &guard);
 
-        // DOM mode: the seed is prepended when absent so it always gets scraped.
+        // DOM mode: an allowed seed is prepended when absent so it gets scraped.
         let mut expected = vec![seed];
         expected.extend(discovered);
         assert_eq!(result, expected);
@@ -1695,7 +1768,8 @@ mod tests {
             url::Url::parse("https://example.com/b").unwrap(),
         ];
 
-        let result = plan_urls(false, true, seed, discovered.clone());
+        let guard = permissive_guard(&seed);
+        let result = plan_urls(false, true, seed, discovered.clone(), &guard);
 
         // Sitemap mode: the sitemap is the source of truth — seed is NOT injected.
         assert_eq!(result, discovered);
@@ -1703,11 +1777,63 @@ mod tests {
 
     #[test]
     fn plan_urls_dom_mode_empty_discovered() {
-        let seed = url::Url::parse("https://example.com").unwrap();
-        let result = plan_urls(false, false, seed.clone(), Vec::new());
+        // F-35 (#1216, INVERTED): the old assertion pinned the bug — "the
+        // seed is always included in DOM mode". An excluded seed must NOT
+        // be re-injected; an excluded seed with empty discovery yields zero URLs.
+        let seed = url::Url::parse("https://example.com/article").unwrap();
+        let guard = CrawlerConfig::builder(seed.clone())
+            .exclude_pattern("/article")
+            .build();
 
-        // Even with no discovered URLs, the seed is always included in DOM mode.
+        let result = plan_urls(false, false, seed, Vec::new(), &guard);
+
+        assert!(
+            result.is_empty(),
+            "excluded seed must yield zero URLs, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn plan_urls_dom_mode_empty_discovered_allowed_seed_still_included() {
+        // Companion to the inversion above: an ALLOWED seed with empty
+        // discovery is still re-injected (e.g. a link-less article page).
+        let seed = url::Url::parse("https://example.com/article").unwrap();
+        let guard = permissive_guard(&seed);
+
+        let result = plan_urls(false, false, seed.clone(), Vec::new(), &guard);
+
         assert_eq!(result, vec![seed]);
+    }
+
+    #[test]
+    fn plan_urls_dom_mode_include_mismatch_drops_seed() {
+        // F-35 (#1216): a seed matching no include-pattern yields zero URLs.
+        let seed = url::Url::parse("https://example.com/article").unwrap();
+        let guard = CrawlerConfig::builder(seed.clone())
+            .include_pattern("/nothing-here/*")
+            .build();
+
+        let result = plan_urls(false, false, seed, Vec::new(), &guard);
+
+        assert!(
+            result.is_empty(),
+            "seed matching no include-pattern must yield zero URLs, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn plan_urls_dom_mode_excluded_seed_stripped_from_discovered() {
+        // F-35 (#1216): even if a discovery backend returned the excluded
+        // seed, the planning boundary strips it; allowed URLs pass through.
+        let seed = url::Url::parse("https://example.com/article").unwrap();
+        let child = url::Url::parse("https://example.com/other").unwrap();
+        let guard = CrawlerConfig::builder(seed.clone())
+            .exclude_pattern("/article")
+            .build();
+
+        let result = plan_urls(false, false, seed, vec![child.clone()], &guard);
+
+        assert_eq!(result, vec![child]);
     }
 
     #[test]
@@ -1716,8 +1842,9 @@ mod tests {
         let discovered: Vec<_> = (0..100)
             .map(|i| url::Url::parse(&format!("https://example.com/page{i}")).unwrap())
             .collect();
+        let guard = permissive_guard(&seed);
 
-        let result = plan_urls(true, false, seed.clone(), discovered);
+        let result = plan_urls(true, false, seed.clone(), discovered, &guard);
 
         assert_eq!(result, vec![seed]);
     }
@@ -1729,9 +1856,10 @@ mod tests {
             .map(|i| url::Url::parse(&format!("https://example.com/page{i}")).unwrap())
             .collect();
 
-        let result = plan_urls(false, false, seed.clone(), urls.clone());
+        let guard = permissive_guard(&seed);
+        let result = plan_urls(false, false, seed.clone(), urls.clone(), &guard);
 
-        // Discovered order is preserved; the seed is prepended when absent.
+        // Discovered order is preserved; an allowed seed is prepended when absent.
         let mut expected = vec![seed];
         expected.extend(urls);
         assert_eq!(result, expected);
