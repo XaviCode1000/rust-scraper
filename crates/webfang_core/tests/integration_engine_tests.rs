@@ -31,6 +31,12 @@ fn test_config(base_url: &str) -> CrawlerConfig {
 /// Test 1: Engine with checkpoint enabled creates a checkpoint file.
 #[tokio::test]
 async fn test_engine_with_checkpoint_enabled() {
+    // Entry-guard allowance (F-06 + F-32, #1217): the engine fetches a
+    // wiremock loopback literal through the production router.
+    let _guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -82,6 +88,12 @@ async fn test_engine_with_checkpoint_enabled() {
 /// pending URL instead of finishing with zero work.
 #[tokio::test]
 async fn test_engine_resume_from_checkpoint() {
+    // Entry-guard allowance (F-06 + F-32, #1217): the engine fetches a
+    // wiremock loopback literal through the production router.
+    let _guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
     let server = MockServer::start().await;
 
     // Seed page with a link to /page2.html

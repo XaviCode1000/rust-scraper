@@ -21,6 +21,13 @@ use webfang_core::domain::JsStrategy;
 /// emission hiding required shapes).
 #[test]
 fn full_pipeline_produces_report_and_engine_summaries() {
+    // Entry-guard allowance (F-06 + F-32, #1217): the Tier A corpus is
+    // served on a 127.0.0.1 ephemeral port and crawled through the
+    // production request path.
+    let _guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
     // Sync context on purpose: `run_all` owns its current-thread runtimes.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

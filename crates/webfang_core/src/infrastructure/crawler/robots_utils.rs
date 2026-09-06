@@ -389,6 +389,15 @@ impl RobotsFetcher {
     /// # }
     /// ```
     pub async fn is_allowed(&self, url: &str, domain: &str) -> bool {
+        // SSRF entry guard (F-06 + F-32, #1217): deny literal-IP targets BEFORE
+        // the robots.txt fetch opens a socket. Deny (not error): this port
+        // returns `bool` by design (fail-open unavailable-robots); the guard
+        // itself emits the WARN with host+ip so the denial stays traceable.
+        if let Ok(parsed) = Url::parse(url) {
+            if crate::domain::ssrf_guard::reject_forbidden_literal_url(&parsed).is_err() {
+                return false;
+            }
+        }
         let entry = self.resolve_entry(domain, url).await;
         match entry.as_ref() {
             RobotsCacheEntry::Rules(rules) => {
