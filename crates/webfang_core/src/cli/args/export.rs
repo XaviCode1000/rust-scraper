@@ -37,10 +37,10 @@ pub struct ExportArgs {
     pub output_vectors: Option<String>,
 
     // ========== Batch Processing ==========
-    /// Enable batch mode — read URLs from stdin (one per line)
+    /// Enable batch mode — scrape each URL from stdin (one per line), one page per URL, no crawling
     pub batch: bool,
 
-    /// Path to a file containing URLs to crawl (one per line)
+    /// Path to a file containing URLs to scrape (one per line), one page per URL, no crawling
     pub batch_file: Option<std::path::PathBuf>,
 
     /// Maximum concurrent URLs in batch mode (omit = auto from budget model)

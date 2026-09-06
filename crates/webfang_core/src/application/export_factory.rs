@@ -106,6 +106,11 @@ pub(crate) struct CommitSession<'a> {
     /// `checksum_sha256` values parsed from every valid line already in the
     /// output file. Membership proves "bytes flushed" without timing guesses.
     hash_index: HashSet<String>,
+    /// `(url, content_hash)` pairs already appended during THIS run (#1215).
+    /// The JSONL exporter is append-only — it cannot retract a line — so a
+    /// second identical item must skip its append, or the file holds duplicate
+    /// records that differ only in `timestamp_utc` (F-02).
+    driven: HashSet<(String, String)>,
 }
 
 impl<'a> CommitSession<'a> {
@@ -116,6 +121,7 @@ impl<'a> CommitSession<'a> {
             ctx,
             records,
             hash_index,
+            driven: HashSet::new(),
         }
     }
 
@@ -123,6 +129,15 @@ impl<'a> CommitSession<'a> {
         self.ctx
             .and_then(|c| c.cancel)
             .is_some_and(|t| t.is_cancelled())
+    }
+
+    /// Claim one `(url, content_hash)` append for this run. Returns `false`
+    /// when the pair was already appended — the caller must skip the export
+    /// append so the file stays idempotent on that key (#1215). Same URL with
+    /// different content (or vice versa) is a different pair and still exports.
+    fn claim_append(&mut self, url: &str, content_hash: &str) -> bool {
+        self.driven
+            .insert((url.to_string(), content_hash.to_string()))
     }
 
     /// The resume-gate decision for one item. With `resume = false` every
@@ -637,6 +652,13 @@ fn process_single_item(
     // Same digest the JsonlExporter stamps into the line; computed up
     // front so decide() can prove flush membership even with no record.
     let content_hash = format!("{:x}", Sha256::digest(result.content.as_bytes()));
+    // #1215: the exporter is append-only, so a second identical item in the
+    // same run would write a duplicate record (same url + hash, fresh
+    // timestamp). Claim the pair first; the loser skips without counting.
+    if !session.claim_append(&url_str, &content_hash) {
+        info!(url = %url_str, "duplicate (url, content_hash) already exported this run; skipping append");
+        return SingleItemOutcome::Skipped;
+    }
     match session.decide(&url_str, Some(content_hash.as_str())) {
         ItemDecision::AlreadyCommitted => {
             info!(url = %url_str, "resume gate: COMMITTED-proven; skipping");
@@ -849,11 +871,18 @@ pub fn process_results_with_chunks(
     // Only chunks that will actually drive this run reach export_batch:
     // COMMITTED-proven and PromoteFromFlushProof chunks must not re-append
     // (BUG F3-A: exporting before deciding duplicated them on resume).
+    // #1215: within-run duplicates (same url + same content hash) are also
+    // dropped here — export_batch is append-only, so a second identical
+    // chunk would write a duplicate record. First occurrence wins.
+    let mut driven_keys: HashSet<(String, String)> = HashSet::new();
     let validated_chunks: Vec<crate::domain::DocumentChunkValidated> = chunks
         .iter()
         .zip(&decisions)
-        .filter(|(_, d)| matches!(d, ItemDecision::DriveAndCommit))
-        .filter_map(|(c, _)| c.clone().validate().ok())
+        .zip(&content_hashes)
+        .filter(|((_, d), _)| matches!(d, ItemDecision::DriveAndCommit))
+        .filter_map(|((c, _), h)| c.clone().validate().ok().map(|v| (v, h.clone())))
+        .filter(|(v, h)| driven_keys.insert((v.url.clone(), h.clone())))
+        .map(|(v, _)| v)
         .collect();
 
     // Use export_batch to avoid per-chunk file open/close (which overwrites in VectorExporter)
@@ -1030,6 +1059,89 @@ mod tests {
         assert_eq!(processed.len(), 3);
         // URLs get normalized through ValidUrl — check that all 3 are present
         assert_eq!(processed.len(), 3);
+    }
+
+    #[test]
+    fn process_results_dedupes_identical_url_and_content_within_run() {
+        // #1215 (F-02): the exporter is append-only, so two identical items
+        // in one run must yield ONE jsonl line — never two records that
+        // differ only in `timestamp_utc`.
+        let temp_dir = TempDir::new().unwrap();
+        let first = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
+        let second = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
+
+        let processed = process_results(
+            &[first, second],
+            temp_dir.path().to_path_buf(),
+            ExportFormat::Jsonl,
+            "export",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            processed.len(),
+            1,
+            "the duplicate append must be skipped, not counted as processed"
+        );
+        let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
+        assert_eq!(
+            body.lines().filter(|l| !l.trim().is_empty()).count(),
+            1,
+            "one (url, content_hash) pair must produce exactly one line"
+        );
+    }
+
+    #[test]
+    fn process_results_keeps_same_url_with_different_content() {
+        // Same URL but a different body is a different (url, content_hash)
+        // identity — both records must survive the in-run dedupe.
+        let temp_dir = TempDir::new().unwrap();
+        let first = make_scraped_content("https://dup.test/a", "Dup", "first body text here");
+        let second = make_scraped_content("https://dup.test/a", "Dup", "second body text here");
+
+        let processed = process_results(
+            &[first, second],
+            temp_dir.path().to_path_buf(),
+            ExportFormat::Jsonl,
+            "export",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(processed.len(), 2);
+        let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
+        assert_eq!(
+            body.lines().filter(|l| !l.trim().is_empty()).count(),
+            2,
+            "distinct content hashes under one URL must both export"
+        );
+    }
+
+    #[test]
+    fn process_results_keeps_same_content_under_different_urls() {
+        // Mirrored content under distinct URLs is distinct records — the
+        // dedupe key is (url, content_hash), never content alone.
+        let temp_dir = TempDir::new().unwrap();
+        let first = make_scraped_content("https://mirror.test/a", "A", "shared body text here");
+        let second = make_scraped_content("https://mirror.test/b", "B", "shared body text here");
+
+        let processed = process_results(
+            &[first, second],
+            temp_dir.path().to_path_buf(),
+            ExportFormat::Jsonl,
+            "export",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(processed.len(), 2);
+        let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
+        assert_eq!(
+            body.lines().filter(|l| !l.trim().is_empty()).count(),
+            2,
+            "same content under different URLs must both export"
+        );
     }
 
     #[test]

@@ -251,8 +251,14 @@ impl BatchProcessor {
 
 /// Build the per-URL [`CrawlerConfig`] used by [`process_single_url`].
 ///
-/// Copies the crawl-relevant settings from the base config but uses the given
-/// URL as the seed.
+/// #1215 (F-38): batch SCRAPES each input URL — exactly one page per URL.
+/// The base config carries the CLI crawl budget (`max_depth`/`max_pages`),
+/// which must NOT expand batch seeds: feeding it through verbatim turned
+/// every seed into a BFS crawl and duplicated export records (F-02). Depth 0
+/// fetches the seed only (link extraction is skipped once
+/// `url_depth >= max_depth`); `max_pages 1` is the backstop so the seed
+/// itself can never be budget-starved. Every other knob (patterns, robots,
+/// TLS profile, timeouts, delay, budget overrides) still rides along.
 fn build_per_url_config(
     url: &str,
     base_config: &CrawlerConfig,
@@ -261,8 +267,8 @@ fn build_per_url_config(
         url::Url::parse(url).map_err(|e| CrawlError::InvalidUrl(format!("{url}: {e}")))?;
 
     Ok(CrawlerConfig::builder(parsed_url)
-        .max_depth(base_config.max_depth)
-        .max_pages(base_config.max_pages)
+        .max_depth(0)
+        .max_pages(1)
         .concurrency(base_config.concurrency)
         .delay_ms(base_config.delay_ms)
         .timeout_secs(base_config.timeout_secs)
@@ -279,8 +285,9 @@ fn build_per_url_config(
 
 /// Process a single URL by creating a CrawlerConfig and calling crawl_site
 ///
-/// Creates a new `CrawlerConfig` for the given URL, copying settings from
-/// the base config but using the specific URL as the seed.
+/// Creates a new seed-only `CrawlerConfig` for the given URL (#1215: one
+/// page per URL, never a BFS expansion) and captures the fetched body into
+/// the shared sink when one is attached.
 ///
 /// Returns `Err(CrawlError)` if the crawl result has any errors (e.g., timeouts),
 /// ensuring the batch processor correctly counts failed URLs.
@@ -735,6 +742,35 @@ mod tests {
     }
 
     #[test]
+    fn per_url_config_forces_seed_only_scrape() {
+        // #1215 (F-38): the batch path rebuilds a fresh CrawlerConfig for
+        // every URL, and the rebuild MUST pin seed-only scope no matter what
+        // crawl budget the base config carries — otherwise every seed is
+        // BFS-expanded and export records duplicate (F-02).
+        let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
+            .max_depth(2)
+            .max_pages(10)
+            .build();
+
+        let per_url =
+            build_per_url_config("https://example.org/seed", &base).expect("valid per-URL seed");
+
+        assert_eq!(
+            per_url.max_depth, 0,
+            "batch per-URL crawl must be seed-only (max_depth 0)"
+        );
+        assert_eq!(
+            per_url.max_pages, 1,
+            "batch per-URL crawl must fetch exactly one page (max_pages 1)"
+        );
+        assert_eq!(
+            per_url.seed_url.as_str(),
+            "https://example.org/seed",
+            "the batch URL becomes the seed"
+        );
+    }
+
+    #[test]
     fn per_url_config_rejects_invalid_url() {
         let base = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
         let err = build_per_url_config("not a url", &base);
@@ -785,14 +821,16 @@ mod tests {
         }
     }
 
-    /// Six-node diagnostic (bug R2-1): with `crawl = 1` staged as an operator
-    /// override on the batch base config, the Engine reached through
-    /// `BatchProcessor.process_single_url -> crawl_site` must fetch the six
-    /// nodes strictly one at a time — the explicit `--concurrency` wins over
-    /// both the configured value and the auto tier table.
+    /// Six-node diagnostic (bug R2-1, scope pinned by #1215): with `crawl = 1`
+    /// staged as an operator override on the batch base config, the Engine
+    /// reached through `BatchProcessor.process_single_url -> crawl_site`
+    /// must still honor the explicit `--concurrency` override — and, since
+    /// #1215, it scrapes the seed ONLY: the base config's `max_depth 1` /
+    /// `max_pages 10` must NOT expand into the 5 discovered leaves, even
+    /// though the same gauge topology would expose such an expansion.
     #[cfg(not(miri))] // wiremock + wreq use boring-sys2 FFI (unsupported by Miri)
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn batch_mode_enforces_concurrency_override_six_node_diagnostic() {
+    async fn batch_mode_scrapes_seed_only_with_concurrency_override() {
         use crate::domain::budget::{
             tiers::{BurstPermits, CrawlConcurrency},
             BudgetOverrides,
@@ -835,8 +873,8 @@ mod tests {
         assert_eq!(result.succeeded, 1, "the single batch URL must succeed");
         assert_eq!(
             gauge.total_requests.load(AtomicOrdering::SeqCst),
-            6,
-            "seed + 5 discovered leaves must all be crawled"
+            1,
+            "#1215: batch scrapes the seed only — the 5 discovered leaves must NOT be crawled"
         );
         assert_eq!(
             gauge.max_inflight.load(AtomicOrdering::SeqCst),
