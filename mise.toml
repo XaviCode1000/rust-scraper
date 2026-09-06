@@ -34,7 +34,10 @@ typos = "1.42.3"                       # spell checker (aqua shorthand, pinned f
 # "cargo:cargo-expand" = "latest"      # no aqua, no binstall — compiles
 # "cargo:cargo-watch" = "latest"       # no aqua, no binstall — compiles
 # "cargo:cargo-llvm-cov" = "latest"    # no aqua, no binstall — compiles
-# "cargo:cargo-mutants" = "latest"     # no aqua, no binstall — compiles
+# Pinned to 27.1.0 to match CI exactly (.github/workflows/mutants.yml:106,155).
+# Local verification of PR-diff mutations before push mirrors the CI job;
+# the weekly full-scope 16-shard job still runs on schedule from CI.
+"cargo:cargo-mutants" = "27.1.0"        # no aqua, no binstall — compiles from source (~5-10 min first time)
 
 [env]
 RUSTC_WRAPPER = "sccache"
