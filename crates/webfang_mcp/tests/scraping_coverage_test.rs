@@ -50,6 +50,18 @@ const SUFFICIENT_HTML: &str = r#"<!DOCTYPE html>
 </body>
 </html>"#;
 
+/// Lift both SSRF guards for a wiremock-loopback test (MCP entry validator
+/// + shared core literal-IP entry guard, F-06 + F-32, #1217).
+fn ssrf_guards_off() -> webfang_test_utils::EnvGuard {
+    webfang_test_utils::EnvGuard::with(&[
+        ("WEBFANG_MCP_DISABLE_SSRF", "1"),
+        (
+            webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        ),
+    ])
+}
+
 /// Initialize SSRF disable flag for tests (idempotent).
 fn init_ssrf_disabled() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -313,6 +325,7 @@ async fn test_scrape_url_http_error_is_honest_error() {
 /// existing Err→`CallToolResult::error` mapping (#694, #706).
 #[tokio::test]
 async fn test_scrape_url_js_shell_is_error_result() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     // Deterministic JS shell: app mount point + Next.js payload, well under
     // the 50-char content threshold once readability/fallback strips markup.
@@ -361,6 +374,7 @@ async fn test_scrape_url_js_shell_is_error_result() {
 /// order.
 #[tokio::test]
 async fn test_discover_urls_extracts_internal_and_external_links() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     let html = r#"<html><body>
 <a href="/page1">Page 1</a>
@@ -417,6 +431,7 @@ async fn test_discover_urls_extracts_internal_and_external_links() {
 /// `has_spa_markers: true`.
 #[tokio::test]
 async fn test_detect_spa_short_content_with_root_marker() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     let html = r#"<html><body><div id="root"></div></body></html>"#;
     Mock::given(method("GET"))
@@ -480,6 +495,7 @@ async fn test_detect_spa_short_content_with_root_marker() {
 /// A body with substantial text (> MIN_CONTENT_CHARS) is NOT an SPA.
 #[tokio::test]
 async fn test_detect_spa_sufficient_content_not_spa() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/"))
@@ -520,6 +536,7 @@ async fn test_detect_spa_sufficient_content_not_spa() {
 /// signal now PREDICTS the scrape's behavior instead of contradicting it.
 #[tokio::test]
 async fn test_detect_spa_predicts_scrape_verdict_on_js_shell() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     // Shell whose only text lives inside <noscript>: enough (200+ chars) to
     // clear MIN_CONTENT_CHARS on the old raw-htmd detector, near-zero once the
@@ -597,6 +614,7 @@ async fn test_detect_spa_predicts_scrape_verdict_on_js_shell() {
 /// `failed` array (issue #591).
 #[tokio::test]
 async fn test_scrape_batch_partial_results_on_failure() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/a"))
@@ -742,6 +760,7 @@ async fn test_crawl_site_max_depth_zero_single_page() {
 /// zero errors. The `urls` array is order-independent (JoinSet concurrency).
 #[tokio::test]
 async fn test_crawl_site_max_depth_one_follows_internal_links() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     let index_html = r#"<html><body>
 <a href="/page_a">A</a>
@@ -792,6 +811,7 @@ async fn test_crawl_site_max_depth_one_follows_internal_links() {
 /// authoritative gate for non-crawl discovery paths (sitemap, see below).
 #[tokio::test]
 async fn test_crawl_site_output_excludes_external_links() {
+    let _guard = ssrf_guards_off();
     let mock = MockServer::start().await;
     let index_html = r#"<html><body>
 <a href="/page_a">A</a>
