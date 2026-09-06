@@ -408,6 +408,12 @@ fn assert_checkpoint_valid(checkpoint_dir: &Path) {
 
 #[tokio::test]
 async fn waf_gauntlet_checkpoint_atomicity_and_resume() {
+    // Entry-guard allowance (F-06 + F-32, #1217): the engine crawls a
+    // wiremock loopback literal through the production fetch router.
+    let _guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
     let server = wiremock::MockServer::start().await;
     mount_checkpoint_site(&server).await;
 

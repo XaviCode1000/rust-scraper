@@ -73,7 +73,7 @@ pub(crate) const DISABLE_VALIDATING_RESOLVER_ENV: &str = "WEBFANG_DISABLE_SSRF_R
 /// through the production request path must set
 /// `WEBFANG_DISABLE_SSRF_ENTRY_GUARD=1`. Only the exact value `"1"` disarms
 /// the guard — any other value (including `"0"`, `"true"`, `"yes"`) keeps
-/// validation active, mirroring [`DISABLE_VALIDATING_RESOLVER_ENV`].
+/// validation active, mirroring `DISABLE_VALIDATING_RESOLVER_ENV`.
 /// Production never sets it.
 ///
 /// `pub` (not `pub(crate)`) so the CLI behavioral harness — an external test
