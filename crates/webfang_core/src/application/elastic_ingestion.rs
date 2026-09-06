@@ -291,6 +291,7 @@ impl<R: VectorRepository + Send + Sync> ElasticIngestion<R> {
         );
 
         let results = stream::iter(urls.iter().cloned())
+            // Panic contract (#1219): panics are caught, process survives (requires unwind, never panic = "abort").
             .map(|url| AssertUnwindSafe(async move { self.run(&url).await }).catch_unwind())
             .buffer_unordered(self.config.cpu_cores)
             .collect::<Vec<_>>()
