@@ -390,7 +390,33 @@ pub enum RecordStoreError {
 /// `infrastructure::export::record_store::RecordStore` implements it. Object
 /// safe: call sites hold `&dyn RecordStorePort`.
 pub trait RecordStorePort: Send + Sync {
+    /// Atomic read-modify-write: load, mutate, save — all under the store's
+    /// exclusive lock (#1230 / F-07).
+    ///
+    /// This is the ONLY port method that may be used to change persisted
+    /// state. The `load` + `save` pair below is not a transaction: two
+    /// `--resume` processes that each load before either saves will have the
+    /// last writer silently discard the other's records.
+    ///
+    /// `mutate` observes exactly the records durable at the instant the lock
+    /// is taken. Returning `Err` writes nothing and leaves the file
+    /// untouched.
+    ///
+    /// Unlike [`Self::load_or_init`] this never degrades to an empty view:
+    /// starting a transaction from a fabricated empty state is how unreadable
+    /// state silently becomes a whole-file overwrite (P8-3).
+    ///
+    /// # Errors
+    /// [`RecordStoreError`] from the load, from `mutate`, or from the save.
+    fn update(
+        &self,
+        mutate: &mut dyn FnMut(&mut DomainRecords) -> Result<(), RecordStoreError>,
+    ) -> Result<(), RecordStoreError>;
+
     /// Persist `records` atomically (temp file + rename(2), no fsync).
+    ///
+    /// Whole-file snapshot write. Prefer [`Self::update`] for any change
+    /// derived from previously persisted state.
     ///
     /// # Errors
     /// [`RecordStoreError`] on filesystem failure or serialization error.
