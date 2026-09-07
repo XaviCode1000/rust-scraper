@@ -1,4 +1,5 @@
 use clap::Parser;
+use webfang_core::domain::ValidUrl;
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};
 use webfang_core::cli::args::{AiArgs, Args, CrawlerArgs, ExportArgs, ObsidianArgs};
@@ -106,7 +107,7 @@ fn args_with_all_fields_set() -> Args {
         positional_url: None,
 
         crawler: CrawlerArgs {
-            url: Some("https://example.com/test".into()),
+            url: Some(ValidUrl::parse("https://example.com/test").unwrap()),
             selector: "article.main".into(),
             delay_ms: 500,
             max_pages: 25,
@@ -674,7 +675,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms: 0,
                 max_pages: 1,
@@ -781,7 +782,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms,
                 max_pages,
@@ -871,7 +872,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector,
                 delay_ms: 0,
                 max_pages: 1,
@@ -955,7 +956,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms: 0,
                 max_pages: 1,
@@ -1043,7 +1044,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms: 0,
                 max_pages: 1,
@@ -1123,7 +1124,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms: 0,
                 max_pages: 1,
@@ -1201,7 +1202,7 @@ proptest! {
             subcommand: None,
             positional_url: None,
             crawler: CrawlerArgs {
-                url: Some("https://example.com/prop".into()),
+                url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
                 selector: "body".into(),
                 delay_ms: 0,
                 max_pages: 1,

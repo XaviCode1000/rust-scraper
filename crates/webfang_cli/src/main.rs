@@ -96,12 +96,9 @@ async fn __main() -> CliExit {
     let config_path = resolve_config_path();
     let config_defaults = ConfigDefaults::load(&config_path);
 
-    // 5b. Validate URL before conversion (CrawlOptions::from panics on invalid URL)
-    if let Some(ref url_str) = args.crawler.url {
-        if url::Url::parse(url_str).is_err() {
-            return CliExit::UsageError(format!("Invalid URL: {url_str}"));
-        }
-    }
+    // 5b. Nothing to validate: `--url`/positional are parsed into hardened
+    // `ValidUrl` at the argv boundary (#1239), so an invalid or
+    // credential-bearing URL is a clap usage error before this point.
 
     // 6. Trace file (cloned before normalize borrows args)
     let trace_file = args.crawler.trace_file.clone();

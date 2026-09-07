@@ -108,7 +108,16 @@ fn build_arg(spec: &'static OptionSpec, headings: Headings) -> clap::Arg {
             });
             arg.value_parser(parser)
         },
-        ValueKind::Text => arg.value_parser(clap::value_parser!(String)),
+            // Text stays the generic String parser EXCEPT ids with a typed
+            // text binding (#1239: the seed URL parses into a hardened
+            // `ValidUrl` at the argv boundary — see `text_binding`).
+            ValueKind::Text => {
+                if let Some(parser) = text_binding(spec.id) {
+                    arg.value_parser(parser)
+                } else {
+                    arg.value_parser(clap::value_parser!(String))
+                }
+            },
         ValueKind::TextList => {
             // Comma-delimited list: parser stays `String` and the
             // `value_delimiter` (applied above from `spec.value_delimiter`)
@@ -165,6 +174,27 @@ fn hidden_placeholder_help(spec: &OptionSpec) -> &'static str {
     }
 }
 
+/// Typed text parser per spec id. Only ids that must NOT stay a plain
+/// `String` bind here (#1239: `url` hardens at the argv boundary via
+/// `parse_seed_url`; the Spanish error surfaces as a clap usage error,
+/// exit 64, never a panic).
+fn text_binding(id: &str) -> Option<ValueParser> {
+match id {
+"url" => Some(str_fn(super::args::crawler::parse_seed_url)),
+_ => None,
+}
+}
+
+/// Wrap a spec-bound `&str -> Result<T, String>` validator into a clap
+/// `ValueParser` (shared by `numeric_binding` and `text_binding`).
+fn str_fn<T, F>(f: F) -> ValueParser
+where
+T: Send + Sync + Clone + 'static,
+F: Fn(&str) -> Result<T, String> + Send + Sync + Clone + 'static,
+{
+ValueParser::from(f)
+}
+
 /// Typed enum parser per spec id: the concrete domain enums behind the
 /// `ValueKind::Enum` entries (`asset_naming` stays a plain `String` field).
 fn enum_binding(id: &str) -> Option<ValueParser> {
@@ -194,14 +224,6 @@ fn enum_binding(id: &str) -> Option<ValueParser> {
 /// and messages through the spec (single enforcement point); metadata-only
 /// entries bind clap's built-in integer parsers of the EXACT field width.
 fn numeric_binding(id: &str) -> Option<ValueParser> {
-    fn str_fn<T, F>(f: F) -> ValueParser
-    where
-        T: Send + Sync + Clone + 'static,
-        F: Fn(&str) -> Result<T, String> + Send + Sync + Clone + 'static,
-    {
-        ValueParser::from(f)
-    }
-
     match id {
         "cpu_cores" => Some(str_fn(super::args::export::parse_cpu_cores)),
         "batch_concurrency" => Some(str_fn(super::args::export::parse_batch_concurrency)),

@@ -6,8 +6,6 @@
 
 use std::path::PathBuf;
 
-use url::Url;
-
 use crate::domain::budget::BudgetOverrides;
 use crate::domain::config::{
     ConcurrencyConfig, ElasticOverrides, ExportFormat, OutputFormat, PipelineOutputFormat,
@@ -53,7 +51,12 @@ impl Default for AiConfig {
 #[derive(Debug, Clone)]
 pub struct CrawlOptions {
     /// Target URL to scrape.
-    pub url: Url,
+    ///
+    /// Hardened [`ValidUrl`] (#1239): parsed at the argv boundary by the CLI
+    /// (`parse_seed_url` value parser), so the #675-2 scheme allow-list and
+    /// the #675-5 credential strip are applied before the value can reach
+    /// `--trace-file` spans, logs, or exports.
+    pub url: crate::domain::ValidUrl,
     /// Verbosity level (-v, -vv, -vvv).
     pub verbosity: u8,
     /// Quiet mode — suppress info/debug output.
@@ -360,12 +363,12 @@ impl Default for ExportOptions {
 
 impl Default for CrawlOptions {
     fn default() -> Self {
-        // Use a safe default URL for the default impl.
-        // In practice, CrawlOptions is always built from Args where url is validated.
-        // The hardcoded URL is a compile-time constant that cannot fail to parse;
-        // `default` returns `Self`, so the error cannot be propagated.
+        // Compile-time constant, not user input: `default` returns `Self`, so a
+        // parse error cannot be propagated. User-provided URLs never take this
+        // path — they arrive already parsed as `ValidUrl` at the argv boundary.
         #[allow(clippy::expect_used)]
-        let url = Url::parse("https://example.com").expect("hardcoded default URL must parse");
+        let url = crate::domain::ValidUrl::parse("https://example.com")
+            .expect("hardcoded default URL must parse");
         Self {
             url,
             verbosity: 0,

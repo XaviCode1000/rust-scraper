@@ -12,6 +12,9 @@ pub use crawler::CrawlerArgs;
 pub use export::ExportArgs;
 pub use obsidian::ObsidianArgs;
 
+use crate::domain::ValidUrl;
+use clap::Parser;
+
 /// Test-only helpers shared by the per-group arg modules.
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -40,9 +43,7 @@ pub(crate) mod test_support {
         f()
     }
 }
-
-use clap::Parser;
-
+    
 /// CLI Arguments for the webfang binary.
 ///
 /// Parsed using `clap` with derive macros.
@@ -75,9 +76,11 @@ pub struct Args {
     #[command(subcommand)]
     pub subcommand: Option<Commands>,
 
-    /// URL to scrape (positional shorthand — equivalent to --url)
-    #[arg(value_name = "URL", conflicts_with = "url")]
-    pub positional_url: Option<String>,
+    /// URL to scrape (positional shorthand — equivalent to --url). Hardened
+    /// through the SAME argv-boundary parser as `--url` (#1239): the
+    /// shorthand cannot bypass the credential strip.
+    #[arg(value_name = "URL", conflicts_with = "url", value_parser = crate::cli::args::crawler::parse_seed_url)]
+    pub positional_url: Option<ValidUrl>,
 
     /// Crawler and discovery configuration.
     #[command(flatten)]
@@ -317,15 +320,21 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
 }
 
 /// Parse the CLI URL into a [`url::Url`] for the `From<Args> -> CrawlOptions`
-/// conversion.
+/// Take the already-hardened seed URL from the args.
 ///
-/// `From::from` returns `Self`, so a parse failure cannot be propagated;
-/// CLI validation guarantees the URL is valid before this point, so the
-/// `expect` documents a true invariant.
+/// #1239: parsing and hardening happen at the argv boundary
+/// ([`parse_seed_url`], wired as the clap value parser for both `--url` and
+/// the positional URL), so by the time `From<Args>` runs there is nothing
+/// left to parse — the value IS a [`ValidUrl`]. The static fallback only
+/// covers `From<Args>` callers that bypass clap in tests; it is a
+/// compile-time constant, not user input.
 #[allow(clippy::expect_used)]
-fn url_from_args(args: &Args) -> url::Url {
-    url::Url::parse(args.crawler.url.as_deref().unwrap_or("https://example.com"))
-        .expect("URL must be valid — CLI validation ensures this")
+fn url_from_args(args: &Args) -> ValidUrl {
+    match args.crawler.url.clone() {
+        Some(url) => url,
+        None => ValidUrl::parse("https://example.com")
+            .expect("hardcoded fallback URL must parse"),
+    }
 }
 
 #[cfg(feature = "ai")]
@@ -430,7 +439,7 @@ mod tests {
         clean_env();
         let args = Args::try_parse_from(["webfang", "https://example.com"]).expect("valid args");
         assert_eq!(
-            args.positional_url.as_deref(),
+            args.positional_url.as_ref().map(ValidUrl::as_str),
             Some("https://example.com"),
             "positional URL captured"
         );
@@ -441,7 +450,7 @@ mod tests {
         clean_env();
         let args = Args::try_parse_from(["webfang", "https://example.com", "--max-pages", "5"])
             .expect("valid args");
-        assert_eq!(args.positional_url.as_deref(), Some("https://example.com"));
+        assert_eq!(args.positional_url.as_ref().map(ValidUrl::as_str), Some("https://example.com"));
         assert_eq!(args.crawler.max_pages, 5);
     }
 

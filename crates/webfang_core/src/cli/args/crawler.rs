@@ -1,6 +1,7 @@
 use crate::domain::config::ConcurrencyConfig;
 use crate::domain::options_spec::crawler as crawler_specs;
 use crate::domain::JsStrategy;
+use crate::domain::ValidUrl;
 use scraper::Selector;
 
 /// Validate `--download-concurrency`: must be >= 1. A value of 0 would make
@@ -60,6 +61,18 @@ pub(crate) fn parse_selector(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
+/// Validate the seed URL (`--url` / positional URL) at the argv boundary
+/// (#1239). The value is parsed into a hardened [`ValidUrl`] — the #675-2
+/// http(s) scheme allow-list and the #675-5 credential strip apply HERE,
+/// before anything can reach `--trace-file` spans, logs, or exports.
+///
+/// Invalid input surfaces as a Spanish clap usage error (exit 64); valid input
+/// is stored already-sanitized, so downstream code can never observe
+/// credentials through `CrawlOptions::url`.
+pub(crate) fn parse_seed_url(s: &str) -> Result<ValidUrl, String> {
+    ValidUrl::parse(s).map_err(|e| format!("URL inválida «{s}»: {e}"))
+}
+
 pub(crate) fn parse_timeout_secs(s: &str) -> Result<u64, String> {
     crawler_specs::TIMEOUT_SECS
         .parse_uint(s)
@@ -97,8 +110,9 @@ pub(crate) fn parse_max_depth(s: &str) -> Result<u8, String> {
 #[derive(Debug, Default)]
 pub struct CrawlerArgs {
     // ========== Target ==========
-    /// URL to scrape (required unless using a subcommand)
-    pub url: Option<String>,
+    /// URL to scrape (required unless using a subcommand), parsed into a
+    /// hardened [`ValidUrl`] at the argv boundary by [`parse_seed_url`] (#1239).
+    pub url: Option<ValidUrl>,
 
     /// CSS selector for content extraction
     pub selector: String,
@@ -622,7 +636,7 @@ mod spec_parity_tests {
         // Short forms in isolation (`--url` may only appear once per parse).
         let shorts =
             parse_args(&["-u", "https://example.org", "-s", "main"]).expect("shorts must parse");
-        assert_eq!(shorts.crawler.url.as_deref(), Some("https://example.org"));
+        assert_eq!(shorts.crawler.url.as_ref().map(ValidUrl::as_str), Some("https://example.org"));
         assert_eq!(shorts.crawler.selector, "main");
     }
 
@@ -655,7 +669,7 @@ mod spec_parity_tests {
         .expect("representative crawler flags must parse");
 
         let c = &parsed.crawler;
-        assert_eq!(c.url.as_deref(), Some("https://example.com"));
+        assert_eq!(c.url.as_ref().map(ValidUrl::as_str), Some("https://example.com"));
         assert_eq!(c.selector, "article p");
         assert_eq!(c.delay_ms, 250);
         assert_eq!(c.max_pages, 5);
