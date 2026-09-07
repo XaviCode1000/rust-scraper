@@ -670,3 +670,62 @@ async fn max_depth_two_includes_deeper_links() {
         "expected 4 .md files (seed + page1 + page2 + deep), got {md_files}"
     );
 }
+
+/// F-35 (#1216): a seed matching no `--include-pattern` must produce zero
+/// output files in DOM mode. Pattern flags are the scope/compliance control
+/// and the seed is the most likely URL to be sensitive — an unmatched seed
+/// must not leak through the unconditional `plan_urls` seed insert.
+#[tokio::test]
+async fn seed_matching_no_include_pattern_yields_no_files() {
+    let t = BehavioralTest::new().await;
+    mock_article_page(&t.server, "/article", "Article").await;
+
+    let seed = format!("{}/article", t.server.uri());
+    let _output = cmd()
+        .arg("--url")
+        .arg(&seed)
+        .arg("--include-pattern")
+        .arg("/nothing-here/*")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--quiet")
+        .output()
+        .expect("run binary");
+
+    let md_files = t.find_files("md");
+    assert!(
+        md_files.is_empty(),
+        "expected zero .md files when the seed matches no include-pattern, got {}: {md_files:?}",
+        md_files.len()
+    );
+}
+
+/// F-35 (#1216): a seed matching an `--exclude-pattern` must produce zero
+/// output files in DOM mode — an explicitly excluded seed is never scraped,
+/// even though `plan_urls` unconditionally re-injected it before this fix.
+#[tokio::test]
+async fn seed_matching_exclude_pattern_yields_no_files() {
+    let t = BehavioralTest::new().await;
+    mock_article_page(&t.server, "/article", "Article").await;
+
+    let seed = format!("{}/article", t.server.uri());
+    let _output = cmd()
+        .arg("--url")
+        .arg(&seed)
+        .arg("--exclude-pattern")
+        .arg("/article")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--quiet")
+        .output()
+        .expect("run binary");
+
+    let md_files = t.find_files("md");
+    assert!(
+        md_files.is_empty(),
+        "expected zero .md files when the seed matches an exclude-pattern, got {}: {md_files:?}",
+        md_files.len()
+    );
+}
