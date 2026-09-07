@@ -146,19 +146,15 @@ async fn exported_markdown_never_leaks_url_credentials() {
 
 /// The same invariant for the `--trace-file` JSONL.
 ///
-/// IGNORED — this half of F-31 is NOT closed by #1233 and the leak is real.
-/// Every `url` field in the trace comes from `CrawlOptions.url`, a raw
-/// `url::Url` built straight from the command line by
-/// `cli::args::url_from_args`, and it reaches the JSONL through
-/// `#[instrument(fields(url = %opts.url))]` on `orchestrator::run` plus the
-/// per-request downloader spans. No `ValidUrl` is constructed anywhere on
-/// that path, so hardening the two construction doors cannot sanitise it.
-/// The fix is to run the CLI seed URL through `ValidUrl::parse` at the
-/// boundary — exactly what the MCP side already does via `McpUrl` (#1116) —
-/// but `cli/args/mod.rs` is outside #1233's edit surface. Flipping this
-/// attribute off is the regression test for that follow-up.
+/// Regression test for #1239 (F-31b): the raw CLI seed URL used to reach the
+/// trace through `#[instrument(fields(url = %opts.url))]` on `orchestrator::run`
+/// plus the per-request downloader spans, because `CrawlOptions.url` was a raw
+/// `url::Url` built straight from argv by `cli::args::url_from_args` and no
+/// `ValidUrl` was constructed anywhere on that path. The fix parses the seed
+/// URL into `ValidUrl` at the argv boundary (the same hardening the MCP side
+/// already applies via `McpUrl`, #1116), so every `url` field in the trace
+/// renders the credential-stripped URL.
 #[tokio::test]
-#[ignore = "F-31 residual (#1233): --trace-file still records the raw CLI seed URL; needs the credential strip at cli/args"]
 async fn trace_file_never_leaks_url_credentials() {
     let t = BehavioralTest::new().await;
     // The trace lives outside the export dir so the Markdown walk cannot see it.
