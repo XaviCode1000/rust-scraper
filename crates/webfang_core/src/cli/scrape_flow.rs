@@ -327,6 +327,14 @@ async fn scrape_one_url(
     observer: &dyn ProgressObserver,
     page_correlation: &CorrelationId,
 ) -> Result<Option<ScrapedContent>, crate::error::ScraperError> {
+    // SSRF entry guard (F-06 + F-32, #1217): reject literal-IP seeds with a
+    // typed Spanish error BEFORE robots.txt or page fetches open any
+    // socket. Same shared choke-point check the downloader and MCP use.
+    if let Err(rejection) = crate::domain::ssrf_guard::reject_forbidden_literal_url(url) {
+        return Err(crate::error::ScraperError::invalid_url(
+            rejection.to_string(),
+        ));
+    }
     let url_str = url.as_str();
     let _url_host = url.host_str().unwrap_or("unknown").to_string();
 
@@ -776,6 +784,12 @@ mod tests {
     #[cfg_attr(miri, ignore)] // btls/wreq FFI (BoringSSL TLS_method) not supported by Miri
     #[tokio::test]
     async fn robots_blocked_urls_are_counted_not_failed() {
+        // Entry-guard allowance (F-06 + F-32, #1217): the seed below is a
+        // wiremock loopback literal, which production now rejects at entry.
+        let _guard = webfang_test_utils::EnvGuard::with(&[(
+            crate::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )]);
         let server = wiremock::MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/robots.txt"))

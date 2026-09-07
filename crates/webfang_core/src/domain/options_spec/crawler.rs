@@ -157,7 +157,7 @@ pub const SINGLE_PAGE: OptionSpec = OptionSpec {
     default: Some(DefaultValue::Bool(false)),
     nullable: false,
     description_override: None,
-    help: "Scrape only the seed URL without discovery or crawling",
+    help: "Scrape only the seed URL without discovery or crawling (batch mode always scrapes one page per URL)",
     heading: Some("Behavior"),
     kind: ValueKind::Bool,
     visible_aliases: &[],

@@ -9,7 +9,7 @@ use tokio::net::lookup_host;
 // Pure IP deny-list logic lives in `webfang_core::domain::ssrf_guard` so the
 // synchronous `wreq` redirect policy can reuse it; MCP depends on core, never
 // the other way around (#703).
-use webfang_core::domain::ssrf_guard::is_forbidden_ip;
+use webfang_core::domain::ssrf_guard::{is_forbidden_ip, parse_ip_literal};
 
 /// Check if SSRF protection is enabled (based on environment variable).
 ///
@@ -50,6 +50,22 @@ pub async fn validate_url_no_ssrf(url: &url::Url) -> Result<(), McpError> {
     let host = url
         .host_str()
         .ok_or_else(|| McpError::invalid_params("URL sin host".to_string(), None))?;
+
+    // Shared literal-IP entry fast path (F-06 + F-32, #1217): the same
+    // choke-point check the CLI request path enforces, applied here before any
+    // DNS round-trip. Message and code are unchanged from the DNS path below
+    // so existing `-32602` / `SSRF detectado` probes keep passing; hostnames
+    // and public literals fall through to the resolving validator.
+    if let Some(ip) = parse_ip_literal(host) {
+        if is_forbidden_ip(&ip) {
+            return Err(McpError::invalid_params(
+                format!(
+                    "SSRF detectado: IP {ip} prohibida (acceso a red interna/cloud metadata bloqueado)"
+                ),
+                None,
+            ));
+        }
+    }
 
     let port = url
         .port()

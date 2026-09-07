@@ -1174,10 +1174,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn scrape_url_robots_disallowed_returns_error_and_zero_page_hits() {
-        // Lift the guard for this test only (wiremock binds 127.0.0.1);
-        // EnvGuard restores the original on drop, so the "1" cannot leak
-        // into sibling tests in a shared process (#1126).
-        let _guard = webfang_test_utils::EnvGuard::with(&[("WEBFANG_MCP_DISABLE_SSRF", "1")]);
+        // Lift both guards for this test only (wiremock binds 127.0.0.1):
+        // the MCP entry validator and the shared core literal-IP entry
+        // guard (F-06 + F-32, #1217). EnvGuard restores the originals on
+        // drop, so the "1"s cannot leak into siblings (#1126).
+        let _guard = webfang_test_utils::EnvGuard::with(&[
+            ("WEBFANG_MCP_DISABLE_SSRF", "1"),
+            (
+                webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+                "1",
+            ),
+        ]);
         let (handler, _tmp) = test_handler_with_robots().await;
         let server = MockServer::start().await;
         mount_robots_site(&server, "private/page").await;
@@ -1204,10 +1211,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn scrape_url_robots_allowed_still_scrapes_page() {
-        // Lift the guard for this test only (wiremock binds 127.0.0.1);
-        // EnvGuard restores the original on drop, so the "1" cannot leak
-        // into sibling tests in a shared process (#1126).
-        let _guard = webfang_test_utils::EnvGuard::with(&[("WEBFANG_MCP_DISABLE_SSRF", "1")]);
+        // Lift both guards for this test only (wiremock binds 127.0.0.1):
+        // the MCP entry validator and the shared core literal-IP entry
+        // guard (F-06 + F-32, #1217). EnvGuard restores the originals on
+        // drop, so the "1"s cannot leak into siblings (#1126).
+        let _guard = webfang_test_utils::EnvGuard::with(&[
+            ("WEBFANG_MCP_DISABLE_SSRF", "1"),
+            (
+                webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+                "1",
+            ),
+        ]);
         let (handler, _tmp) = test_handler_with_robots().await;
         let server = MockServer::start().await;
         mount_robots_site(&server, "public/page").await;
@@ -1240,10 +1254,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn discover_urls_robots_disallowed_returns_error_and_zero_page_hits() {
-        // Lift the guard for this test only (wiremock binds 127.0.0.1);
-        // EnvGuard restores the original on drop, so the "1" cannot leak
-        // into sibling tests in a shared process (#1126).
-        let _guard = webfang_test_utils::EnvGuard::with(&[("WEBFANG_MCP_DISABLE_SSRF", "1")]);
+        // Lift both guards for this test only (wiremock binds 127.0.0.1):
+        // the MCP entry validator and the shared core literal-IP entry
+        // guard (F-06 + F-32, #1217). EnvGuard restores the originals on
+        // drop, so the "1"s cannot leak into siblings (#1126).
+        let _guard = webfang_test_utils::EnvGuard::with(&[
+            ("WEBFANG_MCP_DISABLE_SSRF", "1"),
+            (
+                webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+                "1",
+            ),
+        ]);
         let (handler, _tmp) = test_handler_with_robots().await;
         let server = MockServer::start().await;
         mount_robots_site(&server, "private/list").await;
@@ -1269,10 +1290,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn detect_spa_robots_disallowed_returns_error_and_zero_page_hits() {
-        // Lift the guard for this test only (wiremock binds 127.0.0.1);
-        // EnvGuard restores the original on drop, so the "1" cannot leak
-        // into sibling tests in a shared process (#1126).
-        let _guard = webfang_test_utils::EnvGuard::with(&[("WEBFANG_MCP_DISABLE_SSRF", "1")]);
+        // Lift both guards for this test only (wiremock binds 127.0.0.1):
+        // the MCP entry validator and the shared core literal-IP entry
+        // guard (F-06 + F-32, #1217). EnvGuard restores the originals on
+        // drop, so the "1"s cannot leak into siblings (#1126).
+        let _guard = webfang_test_utils::EnvGuard::with(&[
+            ("WEBFANG_MCP_DISABLE_SSRF", "1"),
+            (
+                webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+                "1",
+            ),
+        ]);
         let (handler, _tmp) = test_handler_with_robots().await;
         let server = MockServer::start().await;
         mount_robots_site(&server, "private/app").await;

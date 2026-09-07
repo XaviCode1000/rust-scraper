@@ -9,11 +9,12 @@
 //! [`ssrf_guard()`](crate::domain::ssrf_guard::ssrf_guard) /
 //! [`SsrfGuard::secure_client`](crate::domain::ssrf_guard::SsrfGuard).
 //!
-//! 1. **Entry validation** — the MCP entry-point validator
-//!    (`validate_url_no_ssrf`) resolves hostnames and checks every resolved
-//!    address with
-//!    [`$1`]
-//!    before any request leaves. This stays as fast-fail typed UX.
+//! 1. **Entry validation** — the shared literal-IP guard
+//!    ([`reject_forbidden_literal_url`](crate::domain::ssrf_guard::reject_forbidden_literal_url))
+//!    rejects forbidden IP literals in every encoding before any request
+//!    leaves, on both the CLI request path and the MCP entry validator
+//!    (`validate_url_no_ssrf`, which additionally resolves hostnames). This
+//!    stays as fast-fail typed UX.
 //! 2. **Connect-time enforcement** — [`ValidatingResolver`] is installed via
 //!    `wreq::ClientBuilder::dns_resolver` on every scrape client and re-checks
 //!    every DNS answer against the shared deny list. Because redirects are

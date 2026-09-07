@@ -205,6 +205,12 @@ mod robots {
     #[cfg_attr(miri, ignore)] // real network stack via wreq — unsupported by Miri
     #[tokio::test]
     async fn scrape_disallowed_url_errors_before_page_fetch() {
+        // Entry-guard allowance (F-06 + F-32, #1217): the scrape checks a
+        // wiremock loopback literal through the production robots fetcher.
+        let _guard = webfang_test_utils::EnvGuard::with(&[(
+            webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )]);
         let server = MockServer::start().await;
         mount_site(&server, "private/page").await;
 
@@ -239,6 +245,12 @@ mod robots {
     #[cfg_attr(miri, ignore)] // real network stack via wreq — unsupported by Miri
     #[tokio::test]
     async fn scrape_allowed_url_succeeds_with_fetcher() {
+        // Entry-guard allowance (F-06 + F-32, #1217): the scrape checks a
+        // wiremock loopback literal through the production robots fetcher.
+        let _guard = webfang_test_utils::EnvGuard::with(&[(
+            webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )]);
         let server = MockServer::start().await;
         mount_site(&server, "public-page").await;
 
@@ -255,6 +267,12 @@ mod robots {
     #[cfg_attr(miri, ignore)] // real network stack via wreq — unsupported by Miri
     #[tokio::test]
     async fn ignore_robots_bypasses_the_gate() {
+        // Entry-guard allowance (F-06 + F-32, #1217): the scrape fetches a
+        // wiremock loopback literal through the production request path.
+        let _guard = webfang_test_utils::EnvGuard::with(&[(
+            webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )]);
         let server = MockServer::start().await;
         mount_site(&server, "private/page").await;
 
