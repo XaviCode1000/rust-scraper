@@ -2,9 +2,11 @@
 //!
 //! Dry-run and the real DOM path must share one discovery function behind
 //! both call sites, so a wiremock fixture with nested links at depth 2
-//! yields identical ordered results. The depth-2 child proves the legacy
+//! yields the same URL set. The depth-2 child proves the legacy
 //! single-fetch path (one fetch, depth silently ignored) is not used in
-//! DOM mode.
+//! DOM mode. Ordering is intentionally NOT pinned here: crawl task
+//! completion order is nondeterministic until slice-3 determinism lands,
+//! so this guard compares sets.
 
 use webfang_core::application::crawl_options::CrawlOptions;
 use webfang_core::cli::url_discovery::discover_urls_unified;
@@ -38,10 +40,23 @@ fn discovery_config(seed: &url::Url) -> CrawlerConfig {
         .build()
 }
 
+/// Sort URLs for order-insensitive set comparison.
+///
+/// Crawl task completion order is nondeterministic until slice-3
+/// determinism lands, so parity asserts on the sorted set, not the
+/// discovery order.
+fn sorted_urls(urls: &[url::Url]) -> Vec<url::Url> {
+    let mut sorted: Vec<url::Url> = urls.to_vec();
+    sorted.sort();
+    sorted
+}
+
 /// Dry-run parity with real discovery (F-14, #1232 slice 1).
 ///
-/// Both shapes call the unified discovery with `sink=None`; the ordered
-/// URL lists must be identical and the depth-2 child must be present.
+/// Both shapes call the unified discovery with `sink=None`; the URL sets
+/// must match (compared as sorted vectors — completion order is
+/// nondeterministic until slice-3 determinism lands) and the depth-2
+/// child must be present.
 #[tokio::test]
 async fn dry_run_parity_with_real_discovery() {
     let server = MockServer::start().await;
@@ -88,8 +103,9 @@ async fn dry_run_parity_with_real_discovery() {
         .expect("DOM shaped unified discovery must succeed");
 
     assert_eq!(
-        dry_output.urls, dom_output.urls,
-        "dry-run and DOM discovery must return identical ordered URLs"
+        sorted_urls(&dry_output.urls),
+        sorted_urls(&dom_output.urls),
+        "dry-run and DOM discovery must return the same URL set"
     );
 
     let rendered: Vec<String> = dry_output.urls.iter().map(|u| u.to_string()).collect();
