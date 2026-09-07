@@ -117,10 +117,10 @@ pub(crate) fn cmd() -> Command {
 /// (the default-accesor wrapper over `read_ai_model_id_with`)
 /// (#980 slice 5b), so a poisoned run exercises that fallback.
 ///
-/// Hermetic cache: since the PersistenceMode wiring made checkpointing
-/// default-on, every ordinary scrape loads and saves
-/// `<cache>/webfang/state/crawl_checkpoint.json` from the default cache.
-/// Parallel behavioral tests all run against `127.0.0.1` wiremock servers
+/// Hermetic cache: checkpointing is opt-in (F-01: default flags resolve to
+/// `Disabled`), but an explicit `--resume`/`--state-dir` run still loads
+/// and saves checkpoint state under the cache. Parallel behavioral tests
+/// all run against `127.0.0.1` wiremock servers
 /// with ephemeral ports, and the OS reuses recently freed ports within one
 /// test-binary run, so a visited URL recorded by one test
 /// (`http://127.0.0.1:<port>/page1`) can collide with a later test whose

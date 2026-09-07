@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{debug, info, instrument, warn};
 
 // ---------------------------------------------------------------------------
@@ -74,9 +75,27 @@ impl CheckpointPath {
     }
 
     /// Get the checkpoint file path.
+    ///
+    /// Legacy unscoped path (`crawl_checkpoint.json`) — kept for backward
+    /// compatibility (pre-F-01 checkpoints, existing tests). New crawls must
+    /// use [`file_for_seed`](Self::file_for_seed) so concurrent `--resume`
+    /// runs for different sites sharing one base dir cannot collide.
     #[must_use]
     pub fn file(&self) -> PathBuf {
         self.base_dir.join("crawl_checkpoint.json")
+    }
+
+    /// Scoped checkpoint file for one seed URL (F-01).
+    ///
+    /// The file name embeds a stable hash of the seed URL
+    /// (`crawl_checkpoint_<16-hex>.json`), so concurrent `--resume` runs for
+    /// different sites sharing one `--state-dir` read and write disjoint
+    /// files. Deterministic: the same seed always maps to the same name.
+    #[instrument(fields(base_dir = %self.base_dir.display()))]
+    #[must_use]
+    pub fn file_for_seed(&self, seed_url: &str) -> PathBuf {
+        self.base_dir
+            .join(format!("crawl_checkpoint_{}.json", seed_hash(seed_url)))
     }
 
     /// Ensure the base directory exists.
@@ -353,6 +372,17 @@ impl Default for BincodeCheckpoint {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Stable scope hash for one seed URL (F-01): first 8 bytes of SHA-256 over
+/// the seed, hex-encoded (16 chars). No IO, deterministic, collision-safe
+/// for checkpoint file scoping.
+#[must_use]
+pub fn seed_hash(seed_url: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(seed_url.as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
 /// Compute the `.tmp` path for atomic writes.
@@ -699,6 +729,41 @@ mod tests {
         let file = cp_path.file();
         assert!(file.to_string_lossy().contains("crawl_checkpoint.json"));
         assert!(file.starts_with(tmp.path()));
+    }
+
+    #[test]
+    fn test_seed_hash_is_stable_and_hex() {
+        let a = super::seed_hash("https://example.com/seed");
+        let b = super::seed_hash("https://example.com/seed");
+        assert_eq!(a, b, "same seed must map to the same scope");
+        assert_eq!(a.len(), 16, "8 bytes hex-encoded");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "scope hash must be hex, got {a}"
+        );
+    }
+
+    #[test]
+    fn test_file_for_seed_scopes_concurrent_sites() {
+        // F-01 (a): two seeds sharing one base dir must get disjoint files so
+        // concurrent --resume runs cannot collide.
+        let tmp = TempDir::new().unwrap();
+        let cp_path = CheckpointPath::new(tmp.path());
+        let fa = cp_path.file_for_seed("https://a.example/seed");
+        let fb = cp_path.file_for_seed("https://b.example/seed");
+        assert_ne!(fa, fb, "different seeds must scope to different files");
+        assert_eq!(fa, cp_path.file_for_seed("https://a.example/seed"));
+        for f in [&fa, &fb] {
+            assert!(f.starts_with(tmp.path()));
+            let name = f
+                .file_name()
+                .expect("scoped file has a name")
+                .to_string_lossy();
+            assert!(
+                name.starts_with("crawl_checkpoint_") && name.ends_with(".json"),
+                "unexpected scoped name {name}"
+            );
+        }
     }
 
     #[test]
