@@ -1,5 +1,6 @@
 //! Scraping flow logic extracted from orchestrator.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use url::Url;
 use crate::application::container;
 use crate::application::container::Container;
 use crate::application::crawl_options::CrawlOptions;
+use crate::application::crawler::content_sink::CapturedPage;
 use crate::application::export_factory;
 use crate::application::progress_observer::ProgressObserver;
 use crate::application::resume::filter_committed;
@@ -132,6 +134,11 @@ pub(crate) fn record_store_bridge(state_store: &dyn StateStorePort) -> RecordSto
 /// The observer handles quiet/channel logic internally — callers pass
 /// `&NoopObserver` for dry-run or `&LiveProgressObserver` for live output.
 ///
+/// `captured` carries discovery-captured bodies (F-05, #1229): URLs with a
+/// cached body skip the HTTP fetch and extract from the capture instead —
+/// one request per page. Misses fall back to a normal fetch. Pass `&[]`
+/// when discovery ran without a sink (dry-run, sitemap, single-page).
+///
 /// # Errors
 ///
 /// Returns [`crate::error::ScraperError`] if the configured H2/TLS profile name
@@ -151,6 +158,7 @@ pub async fn scrape_urls(
     engine: Option<&AdaptiveSelectorEngine>,
     root_correlation: &CorrelationId,
     cancel: &CancellationToken,
+    captured: &[CapturedPage],
 ) -> Result<
     (
         Vec<ScrapedContent>,
@@ -178,6 +186,17 @@ pub async fn scrape_urls(
     let robots_fetcher =
         container::build_robots_fetcher(http_config.tls_emulation, http_config.timeout_secs)?;
 
+    // F-05 (#1229 slice 2): index discovery-captured bodies by URL so
+    // cache hits skip the HTTP fetch — one request per page. First
+    // occurrence wins; the engine dedups, so dupes only arise from
+    // overlapping runs sharing a sink.
+    let mut captured_bodies: HashMap<String, String> = HashMap::with_capacity(captured.len());
+    for page in captured {
+        captured_bodies
+            .entry(page.url.clone())
+            .or_insert_with(|| page.html.clone());
+    }
+
     // Apply max_pages limit if configured
     let urls_to_process = apply_max_pages_limit(urls, scraper_config);
 
@@ -192,6 +211,7 @@ pub async fn scrape_urls(
         engine,
         robots_fetcher: robots_fetcher.as_ref(),
         fingerprint_repo: build_fingerprint_repo(opts).await,
+        captured_bodies: &captured_bodies,
     };
 
     // Concurrency bound (#653): the previous sequential loop made concurrency a
@@ -278,6 +298,9 @@ struct ScrapeContext<'a> {
     downloader: Option<&'a dyn crate::domain::ports::AssetDownloaderPort>,
     engine: Option<&'a AdaptiveSelectorEngine>,
     robots_fetcher: &'a dyn RobotsPort,
+    /// Discovery-captured bodies by URL (F-05, #1229): hits skip the
+    /// fetch and extract from the capture instead.
+    captured_bodies: &'a HashMap<String, String>,
     /// Extraction failure fingerprint sink (#792). `None` when
     /// `--extraction-fingerprint` is off — recording is opt-in.
     fingerprint_repo:
@@ -354,17 +377,34 @@ async fn scrape_one_url(
         .on_status_changed(url_str, ScrapeStatus::Fetching)
         .await;
 
-    match scrape_single_url(
-        ctx.router,
-        url,
-        ctx.scraper_config,
-        ctx.downloader,
-        ctx.engine,
-        None,
-        page_correlation,
-    )
-    .await
-    {
+    // F-05 (#1229 slice 2): reuse the discovery-captured body when
+    // present — one HTTP request per page. SSRF and robots above still
+    // apply; a miss (cap tripped, uncaptured URL) falls back to a normal
+    // fetch through the same post-processing below. No `PageSource` seam:
+    // the branch is a plain cache lookup at the call site.
+    let outcome = if let Some(html) = ctx.captured_bodies.get(url.as_str()) {
+        crate::application::crawler::extract_content(
+            html,
+            url,
+            ctx.scraper_config,
+            ctx.downloader,
+            ctx.engine,
+            page_correlation,
+        )
+        .await
+    } else {
+        scrape_single_url(
+            ctx.router,
+            url,
+            ctx.scraper_config,
+            ctx.downloader,
+            ctx.engine,
+            None,
+            page_correlation,
+        )
+        .await
+    };
+    match outcome {
         Ok(mut content) => {
             observer
                 .on_status_changed(url_str, ScrapeStatus::Extracting)
@@ -764,6 +804,7 @@ mod tests {
             None,
             &crate::domain::CorrelationId::new(),
             &cancel,
+            &[],
         )
         .await
         .expect("setup must succeed even when cancelled");
@@ -812,6 +853,7 @@ mod tests {
             None,
             &crate::domain::CorrelationId::new(),
             &cancel,
+            &[],
         )
         .await
         .expect("setup must succeed");

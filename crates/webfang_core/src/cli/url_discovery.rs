@@ -118,10 +118,15 @@ pub async fn discover_urls_unified(
     // F-05 (#1229 slice 2): the sink travels as an `EngineOptions` field.
     // Checkpoint-only, capture-only, and both all flow through the SAME
     // `crawl_site_with_options` path; only the plain metadata-only crawl
-    // without checkpointing keeps `crawl_site`.
+    // without checkpointing keeps `crawl_site`. The robots preference rides
+    // on the options too: `EngineOptions::ignore_robots` defaults to false,
+    // so without this propagation every capture-only crawl would issue an
+    // extra robots.txt fetch per run (and break the one-request-per-page
+    // contract the request-count test pins).
     let checkpoint = persistence_mode.checkpoint_cfg();
     let result = if sink.is_some() || checkpoint.is_some() {
         let mut options = EngineOptions {
+            ignore_robots: crawler_config.ignore_robots,
             content_sink: sink
                 .clone()
                 .map(|concrete| concrete as Arc<dyn CrawlContentSink>),
