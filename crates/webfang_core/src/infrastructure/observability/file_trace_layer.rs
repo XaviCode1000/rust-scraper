@@ -16,6 +16,16 @@
 //! is derived from the subscriber `Context` / span scope — the same source
 //! `on_close` uses. No thread-local span stack is consulted, so events keep
 //! attribution when Tokio moves a task across worker threads (issue #1238).
+//!
+//! Top-level `trace_id` is the root span's `Id` formatted as 16-hex
+//! (`format!("{:016x}", root.id().into_u64())`). One logical `trace_id` per
+//! run: every record inside the run's root scope shares it, so the full JSONL
+//! is reconstructable with `select(.trace_id == $ROOT)`. This value is
+//! EPHEMERAL to the process/run (identity-within-run, not durable global
+//! identity): span `Id`s are assigned by the in-process registry and are not
+//! stable across processes. Do not persist or join on it across runs. The
+//! durable run correlation lives in `span_fields.trace_id` /
+//! `span_fields.correlation_id` (`CorrelationId`, W3C traceparent), not here.
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -35,6 +45,10 @@ use tracing_subscriber::Layer;
 /// `span` (name, when inside a span), `trace_id`, `span_id`, `message`,
 /// and `fields` (all structured key-value pairs from the event).
 ///
+/// Top-level `trace_id` is EPHEMERAL identity-within-run: the root span's `Id`
+/// (16-hex), single per run, for offline reconstruction. It is not a durable
+/// global identity; durable correlation is `CorrelationId` in `span_fields`.
+///
 /// When a span closes, an additional record with `"record": "span_close"` is
 /// emitted carrying a **top-level** `span_duration_ms` (wall-clock milliseconds
 /// from span creation to close), so the `analyze-trace.sh <file> slow` workflow
@@ -43,6 +57,7 @@ pub struct FileTraceLayer {
     writer: Mutex<BufWriter<File>>,
     /// Stable per-invocation seed used as the fallback `trace_id` when no
     /// logical span context is available (e.g. events outside any span).
+    /// Like the root-span `trace_id`, this seed is EPHEMERAL to the run.
     trace_id_seed: u64,
 }
 
@@ -256,6 +271,11 @@ where
 /// Resolve a logical `trace_id` independent of the OS thread, so it stays
 /// stable when a task hops between worker threads (D3). Prefers the root
 /// span's ID; falls back to a per-invocation seed when no span is current.
+///
+/// The returned value is EPHEMERAL identity-within-run (root span `Id` as
+/// 16-hex, one per run), not a durable global identity. Reconstruct the run
+/// with `select(.trace_id == $ROOT)`; correlate across systems with
+/// `CorrelationId` in `span_fields`, not with this field.
 fn logical_trace_id<S>(seed: u64, ctx: &Context<'_, S>) -> String
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
