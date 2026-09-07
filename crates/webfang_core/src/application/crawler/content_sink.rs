@@ -12,6 +12,7 @@
 //! [`extract_content`](super::discovery::extract_content), and then runs the
 //! exact same export / vector-ingestion pipeline as single-page mode.
 
+use std::fmt;
 use std::sync::Mutex;
 
 /// A page body captured mid-crawl, before extraction.
@@ -35,6 +36,16 @@ pub struct CapturedPage {
 pub trait CrawlContentSink: Send + Sync {
     /// Record the body fetched for `url`.
     fn capture(&self, url: &str, html: &str);
+}
+
+/// A capture sink carries no observable state at the trait-object level, so
+/// there is nothing better to print. Same shape as
+/// `impl fmt::Debug for dyn DownloaderFactory`: lets option structs holding
+/// an `Arc<dyn CrawlContentSink>` (like `EngineOptions`) derive `Debug`.
+impl fmt::Debug for dyn CrawlContentSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("dyn CrawlContentSink")
+    }
 }
 
 /// Thread-safe in-memory [`CrawlContentSink`].

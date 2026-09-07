@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use tracing::warn;
 use url::Url;
 
 use crate::application::crawl_options::CrawlOptions;
-use crate::application::crawler::content_sink::{CapturedPage, CrawlContentSink};
+use crate::application::crawler::content_sink::{
+    CapturedPage, CrawlContentSink, InMemoryContentSink,
+};
 use crate::application::crawler::crawl_site;
 use crate::application::crawler::engine::{crawl_site_with_options, EngineOptions};
 use crate::application::discover_urls_single_fetch;
@@ -71,11 +72,11 @@ pub async fn discover_urls(
     Ok(discovered_urls)
 }
 
-/// Unified discovery output (F-14, #1232 slice 1).
+/// Unified discovery output (F-14, #1232 slice 1; capture in slice 2, #1229).
 ///
 /// `urls` is the ordered discovery set consumed by dry-run previews and
-/// the `plan_urls` boundary. `pages` carries captured bodies once a sink is
-/// wired (slice 2); in slice 1 the sink is always `None`, so it stays empty.
+/// the `plan_urls` boundary. `pages` carries the bodies captured during
+/// discovery when a sink is wired (slice 2); with `sink=None` it stays empty.
 #[derive(Debug, Clone, Default)]
 pub struct DiscoveryOutput {
     /// Ordered discovered URLs (seed handling stays in `plan_urls`).
@@ -93,32 +94,46 @@ pub struct DiscoveryOutput {
 /// XML); this function covers DOM mode only.
 ///
 /// `persistence_mode` selects the checkpointing Engine entry exactly as the
-/// legacy recursive path did. `sink` is reserved for slice 2 content
-/// capture and is always `None` in slice 1; a `Some` value is ignored with
-/// a warning so no engine change is needed (lead ruling b: no new engine
-/// entry variant, the future sink travels as a field, single path).
+/// legacy recursive path did. `sink` (F-05, #1229 slice 2) carries the
+/// bounded in-memory capture: when `Some`, it travels as the
+/// `EngineOptions::content_sink` field — no new engine entry function — and
+/// the drained bodies are returned as `pages`, so the consumer reuses them
+/// instead of refetching. `None` (dry-run) behaves exactly as in slice 1:
+/// metadata-only discovery, empty `pages`.
 ///
-/// Returns [`DiscoveryOutput`] with `pages` empty while no sink is wired.
+/// Returns [`DiscoveryOutput`] with `pages` populated only while a sink is wired.
+///
+/// # Errors
+///
+/// Returns [`crate::error::ScraperError`] on network/timeout errors from the
+/// Engine, exactly as the metadata-only path does.
 pub async fn discover_urls_unified(
     crawler_config: CrawlerConfig,
     opts: &CrawlOptions,
     persistence_mode: &PersistenceMode,
-    sink: Option<Arc<dyn CrawlContentSink>>,
+    sink: Option<Arc<InMemoryContentSink>>,
 ) -> ScraperResult<DiscoveryOutput> {
-    if sink.is_some() {
-        warn!("capture sink ignored in slice 1; continuing without content capture");
-    }
     let discovery_pb = build_discovery_progress_bar(opts, "Discovering URLs (recursive)...");
 
-    let result = if let Some(checkpoint) = persistence_mode.checkpoint_cfg() {
-        let options = EngineOptions {
-            checkpoint_path: Some(checkpoint.dir.clone()),
-            checkpoint_interval: checkpoint.interval,
+    // F-05 (#1229 slice 2): the sink travels as an `EngineOptions` field.
+    // Checkpoint-only, capture-only, and both all flow through the SAME
+    // `crawl_site_with_options` path; only the plain metadata-only crawl
+    // without checkpointing keeps `crawl_site`.
+    let checkpoint = persistence_mode.checkpoint_cfg();
+    let result = if sink.is_some() || checkpoint.is_some() {
+        let mut options = EngineOptions {
+            content_sink: sink
+                .clone()
+                .map(|concrete| concrete as Arc<dyn CrawlContentSink>),
             downloader_factory: Some(
                 crate::application::container::Container::downloader_factory(),
             ),
             ..EngineOptions::default()
         };
+        if let Some(cfg) = checkpoint {
+            options.checkpoint_path = Some(cfg.dir.clone());
+            options.checkpoint_interval = cfg.interval;
+        }
         crawl_site_with_options(crawler_config, options).await?
     } else {
         crawl_site(crawler_config).await?
@@ -126,15 +141,15 @@ pub async fn discover_urls_unified(
 
     let urls: Vec<Url> = result.urls.into_iter().map(|d| d.url).collect();
     let count = urls.len();
+    let pages: Vec<CapturedPage> = sink
+        .map(|concrete| concrete.take_pages())
+        .unwrap_or_default();
 
     if let Some(pb) = discovery_pb {
         pb.finish_with_message(format!("Found {count} URLs").to_owned());
     }
 
-    Ok(DiscoveryOutput {
-        urls,
-        pages: Vec::new(),
-    })
+    Ok(DiscoveryOutput { urls, pages })
 }
 
 /// Recursively discover URLs by running the real crawl Engine (BFS).
