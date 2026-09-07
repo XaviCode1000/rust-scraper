@@ -138,6 +138,15 @@ fn sanitize_env(mut cmd: Command) -> Command {
     for key in poisoned {
         cmd.env_remove(&key);
     }
+    // SSRF entry-guard allowance (F-06 + F-32, #1217): every behavioral
+    // mock binds 127.0.0.1 — a forbidden literal the production request
+    // path now rejects — so the harness disarms ONLY the entry layer for
+    // spawned binaries. Production never sets this; the entry-guard
+    // regression test opts back out with `.env_remove(...)`.
+    cmd.env(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    );
     cmd.env("XDG_CACHE_HOME", hermetic_cache_dir());
     cmd
 }

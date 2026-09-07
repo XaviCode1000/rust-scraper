@@ -2,11 +2,100 @@
 
 use crate::cmd;
 use crate::BehavioralTest;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tokio::time::timeout;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+// ---------------------------------------------------------------------------
+// #1215 (F-38 + F-02) fixtures: two articles that cross-link each other and a
+// shared /other page. A BFS-per-seed batch run fetches /other (twice) and
+// appends one export.jsonl line per fetched page, so 2 seeds yield 6 lines
+// over 3 unique URLs. A scrape-per-URL run fetches exactly the 2 seeds.
+// ---------------------------------------------------------------------------
+
+/// Mount the #1215 cross-linked article graph on `server`.
+async fn mount_article_graph(server: &MockServer) {
+    let uri = server.uri();
+    let article = format!(
+        "<html><head><title>Article</title></head><body><main><article>\
+         <h1>Article One</h1>\
+         <p>This is the first article with enough substantive text for the extractor.</p>\
+         <p><a href=\"{uri}/article/2\">Second article</a> \
+         <a href=\"{uri}/other\">Other page</a></p>\
+         </article></main></body></html>"
+    );
+    let article2 = format!(
+        "<html><head><title>Article Two</title></head><body><main><article>\
+         <h1>Article Two</h1>\
+         <p>This is the second article with enough substantive text for the extractor.</p>\
+         <p><a href=\"{uri}/article\">First article</a> \
+         <a href=\"{uri}/other\">Other page</a></p>\
+         </article></main></body></html>"
+    );
+    for (route, body) in [
+        ("/article", article),
+        ("/article/2", article2),
+        (
+            "/other",
+            "<html><head><title>Other</title></head><body><main><article>\
+             <h1>Other Page</h1>\
+             <p>An unrelated page reachable from both articles, causing BFS overlap.</p>\
+             </article></main></body></html>"
+                .to_string(),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(server)
+            .await;
+    }
+}
+
+/// Read export.jsonl as parsed JSON values (one per non-empty line).
+fn read_jsonl_lines(out: &std::path::Path) -> Vec<serde_json::Value> {
+    let raw = std::fs::read_to_string(out.join("export.jsonl"))
+        .expect("export.jsonl must exist after a successful --batch run");
+    raw.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("every export.jsonl line must be valid JSON"))
+        .collect()
+}
+
+/// Map every .md file under `out` by its path relative to `out`.
+fn md_files_by_relative_path(out: &std::path::Path) -> HashMap<String, Vec<u8>> {
+    walkdir::WalkDir::new(out)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .map(|e| {
+            let rel = e
+                .path()
+                .strip_prefix(out)
+                .expect("walked path must be under out")
+                .to_string_lossy()
+                .into_owned();
+            let bytes = std::fs::read(e.path()).expect("read .md file");
+            (rel, bytes)
+        })
+        .collect()
+}
+
+/// The identity export.jsonl must be idempotent on: same URL + same content
+/// hash is one record, no matter how many times it was fetched.
+fn record_identity(v: &serde_json::Value) -> (String, String) {
+    (
+        v["url"].as_str().unwrap_or_default().to_string(),
+        v["checksum_sha256"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
 
 // ---------------------------------------------------------------------------
 // --batch (stdin)
@@ -327,4 +416,168 @@ async fn batch_file_timeout_reports_failures() {
         stderr.to_lowercase().contains("timeout") || stderr.to_lowercase().contains("timed out"),
         "stderr should mention timeout, got: {stderr}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #1215 (F-38 + F-02): --batch scrapes each URL (one page per URL).
+// ---------------------------------------------------------------------------
+
+/// `--batch` over 2 cross-linked fixture URLs must yield exactly 2 export.jsonl
+/// lines over 2 unique URLs: each seed is scraped once, never BFS-expanded
+/// (which fetched /other and appended 6 lines over 3 unique URLs), and the
+/// append-only export never holds duplicate (url, content_hash) records.
+#[tokio::test]
+async fn batch_scrapes_each_url_once_no_jsonl_duplicates() {
+    let t = BehavioralTest::new().await;
+    mount_article_graph(&t.server).await;
+    let uri = t.server.uri();
+    let stdin_urls = format!("{uri}/article\n{uri}/article/2\n");
+
+    cmd()
+        .arg("--batch")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--no-checkpoint")
+        .arg("--delay-ms")
+        .arg("0")
+        .write_stdin(stdin_urls)
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+
+    let lines = read_jsonl_lines(t.out.path());
+    let unique_urls: HashSet<String> = lines
+        .iter()
+        .filter_map(|v| v["url"].as_str().map(str::to_string))
+        .collect();
+    let unique_records: HashSet<(String, String)> = lines.iter().map(record_identity).collect();
+
+    assert_eq!(
+        lines.len(),
+        2,
+        "--batch must scrape exactly the 2 seed URLs (got {} export.jsonl lines)",
+        lines.len()
+    );
+    assert_eq!(
+        unique_urls.len(),
+        2,
+        "export.jsonl must hold 2 unique URLs, got {unique_urls:?}"
+    );
+    assert_eq!(
+        unique_records.len(),
+        lines.len(),
+        "export.jsonl must hold no duplicate (url, content_hash) records"
+    );
+
+    // The BFS expansion fetched /other; a scrape-per-URL run must never touch it.
+    let requests = t.server.received_requests().await.unwrap();
+    let other_hits = requests.iter().filter(|r| r.url.path() == "/other").count();
+    assert_eq!(
+        other_hits, 0,
+        "--batch must not crawl links discovered on seed pages (/other was fetched {other_hits}x)"
+    );
+}
+
+/// `--batch --single-page` must equal per-URL `--single-page` scrapes: every
+/// .md file byte-identical, export.jsonl identical modulo the per-run
+/// `timestamp_utc` (a run-time instant by design, proven to be the ONLY
+/// divergence between two identical back-to-back runs).
+#[tokio::test]
+async fn batch_single_page_matches_per_url_single_page() {
+    let t = BehavioralTest::new().await;
+    mount_article_graph(&t.server).await;
+    let uri = t.server.uri();
+    let urls = [format!("{uri}/article"), format!("{uri}/article/2")];
+
+    // Batch run over both seeds with --single-page.
+    cmd()
+        .arg("--batch")
+        .arg("--single-page")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--no-checkpoint")
+        .arg("--delay-ms")
+        .arg("0")
+        .write_stdin(format!("{}\n{}\n", urls[0], urls[1]))
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+    let batch_md = md_files_by_relative_path(t.out.path());
+    let batch_jsonl = read_jsonl_lines(t.out.path());
+
+    // Per-URL --single-page reference runs, one output dir each.
+    let ref1 = TempDir::new().unwrap();
+    let ref2 = TempDir::new().unwrap();
+    for (url, dir) in [(&urls[0], &ref1), (&urls[1], &ref2)] {
+        cmd()
+            .arg("--url")
+            .arg(url)
+            .arg("--single-page")
+            .arg("--output")
+            .arg(dir.path())
+            .arg("--no-checkpoint")
+            .arg("--delay-ms")
+            .arg("0")
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .success();
+    }
+    let mut reference_md = md_files_by_relative_path(ref1.path());
+    reference_md.extend(md_files_by_relative_path(ref2.path()));
+    let mut reference_records: Vec<(String, String)> = Vec::new();
+    for dir in [ref1.path(), ref2.path()] {
+        reference_records.extend(read_jsonl_lines(dir).iter().map(record_identity));
+    }
+
+    assert_eq!(
+        batch_md, reference_md,
+        "--batch --single-page .md files must be byte-identical to per-URL --single-page"
+    );
+
+    let mut batch_records: Vec<(String, String)> =
+        batch_jsonl.iter().map(record_identity).collect();
+    batch_records.sort();
+    reference_records.sort();
+    assert_eq!(
+        batch_records, reference_records,
+        "--batch --single-page export.jsonl must hold the same (url, content_hash) \
+         records as the per-URL --single-page runs"
+    );
+}
+
+/// `--batch --max-pages 1` must still scrape EVERY seed (#1215: the report of
+/// seeds silently dropped with exit 0). In scrape-per-URL mode the crawl
+/// budget never gates seed fetching — each seed is one page by construction.
+#[tokio::test]
+async fn batch_max_pages_one_still_scrapes_every_seed() {
+    let t = BehavioralTest::new().await;
+    mount_article_graph(&t.server).await;
+    let uri = t.server.uri();
+
+    cmd()
+        .arg("--batch")
+        .arg("--max-pages")
+        .arg("1")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--no-checkpoint")
+        .arg("--delay-ms")
+        .arg("0")
+        .write_stdin(format!("{uri}/article\n{uri}/article/2\n"))
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+
+    let lines = read_jsonl_lines(t.out.path());
+    let unique_urls: HashSet<String> = lines
+        .iter()
+        .filter_map(|v| v["url"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "--max-pages 1 must not starve batch seeds (got {} lines)",
+        lines.len()
+    );
+    assert_eq!(unique_urls.len(), 2, "both seeds must be scraped");
 }

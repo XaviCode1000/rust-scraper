@@ -173,7 +173,9 @@ opt-level = 3
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# Unwind (default) is a correctness requirement, not a tuning knob: the
+# catch_unwind guards in bridge/elastic_ingestion/panic_hook only contain
+# panics under unwinding — panic = "abort" would make them dead code (#1219).
 strip = true
 
 [profile.bench]
@@ -187,4 +189,5 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# Unwind (default): same contract as [profile.release] — the size-optimized
+# core binary keeps catch_unwind containment working (#1219).

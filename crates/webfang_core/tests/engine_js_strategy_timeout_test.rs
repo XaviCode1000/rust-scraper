@@ -40,6 +40,12 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// timeout must abort in well under 10s and yield no successfully crawled pages.
 #[tokio::test]
 async fn engine_js_strategy_respects_config_timeout() {
+    // Entry-guard allowance (F-06 + F-32, #1217): the engine fetches a
+    // wiremock loopback literal through the production router.
+    let _guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))

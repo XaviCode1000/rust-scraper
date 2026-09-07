@@ -67,6 +67,15 @@ fn cmd() -> Command {
     for key in poisoned {
         c.env_remove(&key);
     }
+    // SSRF entry-guard allowance (F-06 + F-32, #1217): mocks bind 127.0.0.1 —
+    // a forbidden literal the production request path now rejects — so this
+    // funnel disarms ONLY the entry layer for spawned binaries. Production
+    // never sets this; `test_ssrf_literal_seeds_rejected_before_fetch` opts
+    // back out with `.env_remove(...)`.
+    c.env(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    );
     c
 }
 
@@ -318,6 +327,81 @@ async fn test_clean_ai_without_feature_fails_before_fetch() {
     assert!(
         requests.is_empty(),
         "preflight must fail before any network request, got {} requests",
+        requests.len()
+    );
+}
+
+// ============================================================================
+// Tests: SSRF literal-IP entry guard — F-06 + F-32 (#1217)
+// ============================================================================
+
+/// IP-literal seeds in ANY encoding must be rejected BEFORE any socket opens.
+///
+/// `127.0.0.1`, `169.254.169.254`, hex `0x7f000001`, decimal `2130706433`
+/// and abbreviated `127.1` all address loopback / link-local (cloud metadata).
+/// The CLI used to dial every one of them: entry validation lived in the MCP
+/// crate only, the connect-time resolver never sees IP literals (wreq
+/// short-circuits them), and the redirect guard fires on redirects only.
+/// Mirrors `test_clean_ai_without_feature_fails_before_fetch`: the mock
+/// proves zero outbound requests.
+#[tokio::test]
+async fn test_ssrf_literal_seeds_rejected_before_fetch() {
+    let mock_server = MockServer::start().await;
+
+    // If the CLI fetches anything, this mock would record it — the assertion
+    // below proves the entry guard fired before any request left the process.
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "<html><body><h1>Seed content</h1>\
+             <p>The seed page carries plenty of substantive server-rendered text so it \
+             comfortably clears the fifty character minimum content guard.</p>\
+             <a href=\"https://iana.org\">external link</a></body></html>",
+        ))
+        .mount(&mock_server)
+        .await;
+
+    // wiremock binds 127.0.0.1 — address the same listener in every encoding
+    // the URL parser accepts (dotted, hex, decimal, abbreviated).
+    let port = mock_server
+        .uri()
+        .rsplit(':')
+        .next()
+        .expect("mock uri carries a port")
+        .trim_end_matches('/')
+        .to_owned();
+    let literal_urls = [
+        format!("http://127.0.0.1:{port}/"),
+        format!("http://169.254.169.254:{port}/"),
+        format!("http://0x7f000001:{port}/"),
+        format!("http://2130706433:{port}/"),
+        format!("http://127.1:{port}/"),
+    ];
+
+    for url in literal_urls {
+        let out_dir = tempfile::TempDir::new().expect("create temp output dir");
+        // Opt out of the harness entry-guard allowance: production never sets
+        // it, so the spawned binary must enforce like production.
+        cmd()
+            .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
+            .arg("--url")
+            .arg(&url)
+            .arg("--single-page")
+            .arg("--output")
+            .arg(out_dir.path())
+            .arg("--timeout-secs")
+            .arg("3")
+            .arg("--max-retries")
+            .arg("0")
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("SSRF"));
+    }
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert!(
+        requests.is_empty(),
+        "entry guard must reject literal seeds before any socket opens, got {} requests",
         requests.len()
     );
 }

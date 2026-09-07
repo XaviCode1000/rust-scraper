@@ -38,6 +38,19 @@ Also see <a href="/third-page">the third page</a>.</p>
 </article></body></html>
 "#;
 
+const PAGE_WITH_STANDALONE_IMAGE: &str = r#"
+<html><head><title>Image Page</title></head>
+<body><article>
+<h1>Image Page</h1>
+<p>The expedition reached the northern observatory after a long climb through
+pine forests and granite ridges, carrying instruments for the winter survey.</p>
+<p><img src="/assets/pic.png" alt="pic"></p>
+<p>The photograph above shows the valley at dawn. See
+<a href="/other-page">this other page</a> for the full survey report and
+additional maps of the surrounding peaks.</p>
+</article></body></html>
+"#;
+
 const TAGGED_PAGE: &str = r#"
 <html><head><title>Tagged Page</title></head>
 <body><article>
@@ -101,6 +114,40 @@ async fn obsidian_wiki_links_removes_absolute_urls() {
     let content = t.read_md_content();
     assert_obsidian_snapshot(
         "obsidian_wiki_links_removes_absolute_urls",
+        t.out.path(),
+        &content,
+    );
+}
+
+/// #1218 (F-04): a standalone image must keep its URL under
+/// `--obsidian-wiki-links` while same-domain links still convert.
+#[tokio::test]
+async fn obsidian_wiki_links_keeps_standalone_image_url() {
+    let t = BehavioralTest::new().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(PAGE_WITH_STANDALONE_IMAGE))
+        .expect(1)
+        .mount(&t.server)
+        .await;
+
+    t.scraper_cmd()
+        .arg("--single-page")
+        .arg("--format")
+        .arg("markdown")
+        .arg("--obsidian-wiki-links")
+        .arg("--quiet")
+        .assert()
+        .success();
+
+    let content = t.read_md_content();
+    assert!(
+        content.contains("/assets/pic.png"),
+        "standalone image URL must survive, got: {content}"
+    );
+    assert_obsidian_snapshot(
+        "obsidian_wiki_links_keeps_standalone_image_url",
         t.out.path(),
         &content,
     );

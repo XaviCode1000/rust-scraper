@@ -88,6 +88,7 @@ impl CpuBridge {
         // blocking task. We intentionally drop it here because the task runs
         // fire-and-forget via a oneshot channel — the JoinHandle is not awaited.
         let handle = tokio::task::spawn_blocking(move || {
+            // Panic contract (#1219): panics are caught, process survives (requires unwind, never panic = "abort").
             let caught = catch_unwind(AssertUnwindSafe(move || pool.install(work)));
             // LCOV_EXCL_START defensive: cpu-pool-panic — a panic in Rayon work is a bug; the pool must not die with it
             let mapped: Result<R, ScraperError> = caught.map_err(|panic| {

@@ -15,8 +15,18 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// (`RobotsFetcher` derives the robots.txt URL from the page URL's origin).
 /// Construction is offline — only the checks perform network I/O, entirely
 /// against the mock server.
-fn fetcher_for_server() -> RobotsFetcher {
-    RobotsFetcher::with_default_profile(5).expect("robot fetcher construction is offline")
+///
+/// Also arms the SSRF entry-guard allowance (F-06 + F-32, #1217): every check
+/// below addresses a wiremock loopback literal, which production now rejects
+/// at entry. The returned guard must stay alive for the whole test.
+fn fetcher_for_server() -> (webfang_test_utils::EnvGuard, RobotsFetcher) {
+    let guard = webfang_test_utils::EnvGuard::with(&[(
+        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+        "1",
+    )]);
+    let fetcher =
+        RobotsFetcher::with_default_profile(5).expect("robot fetcher construction is offline");
+    (guard, fetcher)
 }
 
 /// Count `/robots.txt` requests on the wiremock server.
@@ -48,7 +58,7 @@ async fn negative_result_cached_after_first_missing_robots() {
     let server = MockServer::start().await;
     // No mock for /robots.txt → wiremock falls back to 404 by default, which
     // is exactly the "site without robots.txt" shape of the issue.
-    let fetcher = fetcher_for_server();
+    let (_guard, fetcher) = fetcher_for_server();
     let base = server.uri();
     let domain = format!("127.0.0.1:{}", server.address().port());
 
@@ -77,7 +87,7 @@ async fn non_success_status_is_cached_as_allow_all() {
     let server = MockServer::start().await;
     mount_robots(&server, 503, "Service Unavailable").await;
 
-    let fetcher = fetcher_for_server();
+    let (_guard, fetcher) = fetcher_for_server();
     let base = server.uri();
     let domain = format!("127.0.0.1:{}", server.address().port());
 
@@ -105,7 +115,7 @@ async fn successful_rules_cached_and_enforced_once() {
     let server = MockServer::start().await;
     mount_robots(&server, 200, "User-agent: *\nDisallow: /private/\n").await;
 
-    let fetcher = fetcher_for_server();
+    let (_guard, fetcher) = fetcher_for_server();
     let base = server.uri();
     let domain = format!("127.0.0.1:{}", server.address().port());
 
@@ -150,7 +160,8 @@ async fn concurrent_first_fetches_are_bounded() {
         .mount(&server)
         .await;
 
-    let fetcher = std::sync::Arc::new(fetcher_for_server());
+    let (_guard, fetcher) = fetcher_for_server();
+    let fetcher = std::sync::Arc::new(fetcher);
     let base = server.uri();
     let domain = format!("127.0.0.1:{}", server.address().port());
 
@@ -192,7 +203,7 @@ async fn cached_rules_are_not_downgraded_by_later_failures() {
     let server = MockServer::start().await;
     mount_robots(&server, 200, "User-agent: *\nDisallow: /private/\n").await;
 
-    let fetcher = fetcher_for_server();
+    let (_guard, fetcher) = fetcher_for_server();
     let base = server.uri();
     let domain = format!("127.0.0.1:{}", server.address().port());
 
