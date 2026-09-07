@@ -38,8 +38,8 @@ const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 /// use webfang_core::infrastructure::downloader::wreq_downloader::WreqDownloader;
 /// use webfang_core::infrastructure::downloader::Downloader;
 ///
-/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000).unwrap();
-/// let page = downloader.fetch(&"https://example.com".parse().unwrap()).await.unwrap();
+/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000,
+/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000, 50_000_000).unwrap();
 /// assert_eq!(page.status, 200);
 /// ```
 pub struct WreqDownloader {
@@ -55,6 +55,11 @@ pub struct WreqDownloader {
     /// Base delay for the exponential backoff applied to retriable failures.
     backoff_base_ms: u64,
     backoff_max_ms: u64,
+    /// Decompressed-body cap for page fetches (FIX-1, #1231 F-12). The read
+    /// aborts mid-body once the streamed byte count exceeds this value, so
+    /// memory stays bounded even against a decompression bomb with a tiny
+    /// declared Content-Length.
+    max_page_bytes: u64,
 }
 
 impl WreqDownloader {
@@ -102,6 +107,7 @@ impl WreqDownloader {
         max_retries: u32,
         backoff_base_ms: u64,
         backoff_max_ms: u64,
+        max_page_bytes: u64,
     ) -> Result<Self, DownloadError> {
         // Canonical detector seam (Q2): same "auto" as every other subsystem.
         let pool_size = std::cmp::max(
@@ -201,6 +207,7 @@ impl WreqDownloader {
             max_retries,
             backoff_base_ms,
             backoff_max_ms,
+            max_page_bytes,
         })
     }
 
@@ -212,6 +219,7 @@ impl WreqDownloader {
             client: Arc::new(client),
             timeout_secs,
             pinned_ua: None,
+            max_page_bytes: crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
             max_retries: 3,
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
@@ -387,7 +395,7 @@ impl WreqDownloader {
             })
             .collect();
 
-        let html = response.text().await.map_err(DownloadError::from)?;
+        let html = self.read_body_capped(response).await?;
 
         debug!(
             "Fetched {} ({} bytes, {} cookies)",
@@ -403,6 +411,57 @@ impl WreqDownloader {
             headers,
             cookies,
         })
+    }
+
+    /// Read the response body with a HARD cap on the decompressed byte count
+    /// (FIX-1, #1231 F-12).
+    ///
+    /// Replaces the unbounded `response.text()`: the body is consumed as a
+    /// stream of already-decompressed chunks and the read aborts as soon as
+    /// the accumulated size exceeds the configured `max_page_bytes`, so
+    /// memory stays bounded at ~cap + one chunk regardless of the wire
+    /// content (the audit's gzip bomb inflated 60 MB from a tiny
+    /// Content-Length). Charset handling mirrors wreq's `text_with_charset`:
+    /// the Content-Type charset param wins, UTF-8 as fallback.
+    async fn read_body_capped(&self, response: wreq::Response) -> Result<String, DownloadError> {
+        use futures::StreamExt;
+
+        // Charset from Content-Type BEFORE the body is consumed (headers stay
+        // readable until the body stream is taken).
+        let content_type = response
+            .headers()
+            .get(wreq::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                value.split(';').find_map(|part| {
+                    let part = part.trim();
+                    part.strip_prefix("charset=")
+                        .map(|c| c.trim_matches('"').trim().to_ascii_lowercase())
+                })
+            })
+            .unwrap_or_else(|| "utf-8".to_string());
+
+        let limit = self.max_page_bytes;
+        let mut stream = response.bytes_stream();
+        let mut buf = bytes::BytesMut::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(DownloadError::from)?;
+            if buf.len().saturating_add(chunk.len()) as u64 > limit {
+                // The outer fetch span already carries the URL; the event only
+                // needs the machine-readable cap facts.
+                warn!(
+                    limit = limit,
+                    "response body exceeded the page size cap; aborting read"
+                );
+                return Err(DownloadError::BodyTooLarge { limit });
+            }
+            buf.extend_from_slice(&chunk);
+        }
+
+        let (text, _, _) = encoding_rs::Encoding::for_label(content_type.as_bytes())
+            .unwrap_or(encoding_rs::UTF_8)
+            .decode(&buf);
+        Ok(text.into_owned())
     }
 
     #[instrument(
@@ -576,6 +635,7 @@ mod test_support {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -607,6 +667,7 @@ mod tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         assert!(!downloader.supports_interactions());
@@ -630,6 +691,7 @@ mod tests {
                 3,
                 1000,
                 10000,
+                crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
             )
             .unwrap_or_else(|e| panic!("client must build for profile {profile:?}: {e}"));
             assert!(!downloader.supports_interactions());
@@ -670,6 +732,7 @@ mod tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
 
@@ -775,6 +838,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/notfound", mock_server.uri()).parse().unwrap();
@@ -812,6 +876,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -863,6 +928,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/redirect", mock_server.uri()).parse().unwrap();
@@ -917,6 +983,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/redirect", mock_server.uri()).parse().unwrap();
@@ -961,6 +1028,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1021,6 +1089,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1063,6 +1132,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1091,6 +1161,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("newline is not a valid HTTP header name");
@@ -1117,6 +1188,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("newline is not a valid HTTP header value");
@@ -1136,6 +1208,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("NUL is not a valid Accept-Language value");
@@ -1172,6 +1245,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1254,6 +1328,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1317,6 +1392,7 @@ mod wiremock_tests {
             3,
             1,
             5,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .expect("client builds");
         let url: Url = format!("{}/", server.uri()).parse().expect("valid url");
@@ -1372,6 +1448,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1429,6 +1506,7 @@ mod wiremock_tests {
             2,
             10,
             50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .expect("test downloader builds");
 
@@ -1466,6 +1544,7 @@ mod wiremock_tests {
             3,
             10,
             50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .expect("test downloader builds");
 

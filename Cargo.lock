@@ -5937,6 +5937,7 @@ dependencies = [
  "dashmap 6.2.1",
  "deadpool-sqlite",
  "dirs 5.0.1",
+ "encoding_rs",
  "fs2",
  "futures",
  "globset",

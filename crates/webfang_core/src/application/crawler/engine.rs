@@ -438,6 +438,12 @@ impl Engine {
                         backoff_base_ms,
                         backoff_max_ms,
                         obscura_binary,
+                        // FIX-1 (#1231 F-12): the historical 50 MiB cap.
+                        // Plumbing an engine-side operator flag for it is a
+                        // follow-up (CrawlerConfig change, gate3-pinned).
+                        max_page_bytes: Some(
+                            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+                        ),
                     },
                     // #509: the Full strategy's governor shares the engine token
                     // so permit waits abort on shutdown.

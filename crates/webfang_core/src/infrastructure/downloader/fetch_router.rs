@@ -114,6 +114,7 @@ pub(crate) fn build_fetch_router(
     backoff_base_ms: u64,
     backoff_max_ms: u64,
     obscura_binary: &str,
+    max_page_bytes: u64,
 ) -> Result<FetchRouter, DownloadError> {
     let connect_timeout = timeout_secs.min(10);
     Ok(match strategy {
@@ -128,6 +129,7 @@ pub(crate) fn build_fetch_router(
             max_retries,
             backoff_base_ms,
             backoff_max_ms,
+            max_page_bytes,
         )?)),
         JsStrategy::Hybrid => {
             let l1 = WreqDownloader::new(
@@ -141,6 +143,7 @@ pub(crate) fn build_fetch_router(
                 max_retries,
                 backoff_base_ms,
                 backoff_max_ms,
+                max_page_bytes,
             )?;
             let l2 = build_obscura_layer(timeout_secs, obscura_binary);
             let l3 = ChromiumoxideDownloader::new(cookie_bridge);
@@ -243,6 +246,8 @@ impl DownloaderFactory for DefaultDownloaderFactory {
             spec.backoff_base_ms,
             spec.backoff_max_ms,
             &spec.obscura_binary,
+            spec.max_page_bytes
+                .unwrap_or(crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES),
         )?;
         Ok(Arc::new(router))
     }
@@ -276,6 +281,7 @@ mod router_tests {
             1000,
             10000,
             "obscura",
+            50_000_000,
         )
         .expect("static router must build");
         assert!(
@@ -301,6 +307,7 @@ mod router_tests {
             1000,
             10000,
             "obscura",
+            50_000_000,
         )
         .expect("hybrid router must build");
         assert!(
@@ -326,6 +333,7 @@ mod router_tests {
             1000,
             10000,
             "obscura",
+            50_000_000,
         )
         .expect("full router must build");
         assert!(
