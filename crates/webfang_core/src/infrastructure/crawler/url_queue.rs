@@ -10,7 +10,8 @@
 //!   point. The dedup `seen` set is a lock-free `DashSet`.
 //! - **mem-with-capacity**: Pre-allocates internal structures.
 //! - **mem-u64-dedup**: `seen` stores `u64` hashes (8 B) instead of `String`s
-//!   (~150 B), keyed by a per-process `ahash::RandomState` seed.
+//!   (~150 B), keyed by the fixed deterministic `ahash::RandomState` seed
+//!   (F-13 crawl order, #1237).
 //! - **coll-binaryheap**: Uses `BinaryHeap` for priority queue semantics.
 
 use std::cmp::Ordering;
@@ -24,12 +25,32 @@ use crate::domain::crawler_port::{UrlQueuePort, UrlSource};
 use crate::domain::url_validation::{normalize_url, NormalizeConfig, RemoveQueryParameters};
 use crate::domain::DiscoveredUrl;
 
+/// Fixed `ahash` seeds pinning the frontier hash to one deterministic stream
+/// (F-13 deterministic crawl order, #1237).
+///
+/// Nothing-up-my-sleeve numbers: the first 256 bits of the fractional part of
+/// π in hexadecimal
+/// (3.243F_6A88_85A3_08D3_1319_8A2E_0370_7344_A409_3822_299F_31D0_082E_FA98_EC4E_6C89…),
+/// split into four `u64` lanes for [`ahash::RandomState::with_seeds`].
+///
+/// HashDoS tradeoff: a fixed seed forgoes per-process randomization, so a
+/// hostile page could in principle feed colliding URLs at the dedup set. The
+/// risk is accepted because this queue is CLI-local (the operator chooses the
+/// seeds they crawl; worst case is local slowdown, bounded by `max_pages`),
+/// and the fixed seed is the deterministic base the #1222 checkpoint needs:
+/// same seed/config/input HTML ⇒ same push set ⇒ same pop sequence.
+const FIXED_SEED_K0: u64 = 0x243F_6A88_85A3_08D3;
+const FIXED_SEED_K1: u64 = 0x1319_8A2E_0370_7344;
+const FIXED_SEED_K2: u64 = 0xA409_3822_299F_31D0;
+const FIXED_SEED_K3: u64 = 0x082E_FA98_EC4E_6C89;
+
 // UrlSource moved to domain::crawler_port (sub-slice 3.A). Infra re-exports
 // it for backwards compatibility.
 
 /// A URL with priority for the priority queue.
 ///
-/// Implements `Ord` so that `BinaryHeap` yields highest-priority URLs first.
+/// Implements `Ord` so that `BinaryHeap` yields highest-priority URLs first;
+/// equal priorities yield the lexicographically smallest URL first (F-13).
 #[derive(Debug, Clone)]
 pub struct PrioritizedUrl {
     /// The discovered URL
@@ -68,7 +89,9 @@ impl PrioritizedUrl {
 
 impl PartialEq for PrioritizedUrl {
     fn eq(&self, other: &Self) -> bool {
-        self.priority == other.priority
+        // Kept consistent with `Ord` (F-13): equality is the full
+        // (priority, URL) identity, so `==` and `cmp` never disagree.
+        self.priority == other.priority && self.url.url.as_str() == other.url.url.as_str()
     }
 }
 
@@ -76,8 +99,12 @@ impl Eq for PrioritizedUrl {}
 
 impl Ord for PrioritizedUrl {
     fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is a max-heap, so higher priority = greater
-        self.priority.cmp(&other.priority)
+        // BinaryHeap is a max-heap: higher priority pops first. The URL
+        // tie-break is REVERSED so the lexicographically smallest URL
+        // compares greatest and pops first (F-13 total order, #1237).
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| other.url.url.as_str().cmp(self.url.url.as_str()))
     }
 }
 
@@ -100,7 +127,7 @@ pub struct UrlQueue {
     /// Set of URL hashes already enqueued or visited (for deduplication).
     /// `u64` keys (8 B) instead of `String` (~150 B).
     seen: DashSet<u64, ahash::RandomState>,
-    /// Per-process randomized hash seed (FR-3). Cloned into `seen` at
+    /// Fixed deterministic hash seed (F-13, #1237). Cloned into `seen` at
     /// construction so both use identical keys.
     rs: ahash::RandomState,
 }
@@ -108,11 +135,18 @@ pub struct UrlQueue {
 impl UrlQueue {
     /// Create a new URL queue
     ///
-    /// Following **mem-with-capacity**: pre-allocates internal structures and
-    /// a per-process randomized hash seed (FR-3 HashDoS resistance).
+    /// Following **mem-with-capacity**: pre-allocates internal structures.
+    /// The hash seed is FIXED (`FIXED_SEED_K0..K3`, F-13) so every queue
+    /// built from the same input drains in the same order in every process;
+    /// see the `FIXED_SEED_*` docs for the accepted HashDoS tradeoff.
     #[must_use]
     pub fn new() -> Self {
-        let rs = ahash::RandomState::new();
+        let rs = ahash::RandomState::with_seeds(
+            FIXED_SEED_K0,
+            FIXED_SEED_K1,
+            FIXED_SEED_K2,
+            FIXED_SEED_K3,
+        );
         Self {
             queue: Mutex::new(BinaryHeap::with_capacity(100)),
             seen: DashSet::with_capacity_and_hasher(100, rs.clone()),
@@ -142,7 +176,7 @@ impl UrlQueue {
     pub async fn push_prioritized(&self, url: DiscoveredUrl, source: UrlSource) -> bool {
         // Lock-free, atomic check-and-insert via DashSet::insert (no Mutex, no
         // .await). Prevents the race where two tasks both pass contains() and
-        // both insert. The hash uses the per-process randomized seed (FR-3/FR-5).
+        // both insert. The hash uses the fixed deterministic seed (F-13, #1237).
         //
         // The URL is normalized to its canonical form BEFORE hashing (#517):
         // the seed enters the queue raw while links arrive already normalized,
