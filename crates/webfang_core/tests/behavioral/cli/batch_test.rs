@@ -133,16 +133,53 @@ async fn batch_stdin_processes_urls() {
     );
 }
 
-#[test]
-fn batch_empty_stdin_exits_64() {
-    cmd()
-        .arg("--batch")
-        .write_stdin("")
-        .timeout(Duration::from_secs(5))
-        .assert()
-        .code(64)
-        .stderr(predicates::str::contains("No URLs provided"));
-}
+    #[test]
+    fn batch_empty_stdin_exits_64() {
+        cmd()
+            .arg("--batch")
+            .write_stdin("")
+            .timeout(Duration::from_secs(5))
+            .assert()
+            .code(64)
+            .stderr(predicates::str::contains("No URLs provided"));
+    }
+
+    /// FIX-0 (#1235): record cardinality against the REAL binary. AUDIT-01
+    /// F-02 made `--batch` write every export.jsonl record TWICE (2 URLs → 4
+    /// lines, corrupting downstream RAG); #1225 fixed it but no test counted.
+    /// This pins the invariant with a NAMED test: N stdin URLs produce
+    /// exactly N export.jsonl records — one per unique URL, no duplicates.
+    #[tokio::test]
+    async fn batch_stdin_record_cardinality_matches_url_count() {
+        let t = BehavioralTest::new().await;
+        for (route, title) in [("/a", "Alpha"), ("/b", "Beta")] {
+            Mock::given(method("GET"))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    "<html><body><article><h1>{title}</h1>\
+                     <p>Substantive body text for {title} so the extractor keeps the page.</p>\
+                     </article></body></html>"
+                )))
+                .mount(&t.server)
+                .await;
+        }
+        let base = t.server.uri();
+
+        cmd()
+            .arg("--batch")
+            .arg("--output")
+            .arg(t.out.path())
+            .write_stdin(format!("{base}/a\n{base}/b\n"))
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .success();
+
+        assert_eq!(
+            t.record_count("export.jsonl"),
+            2,
+            "2 stdin URLs must produce exactly 2 export.jsonl records (F-02 duplication regression)"
+        );
+    }
 
 // ---------------------------------------------------------------------------
 // --batch file output (#631): the full pipeline must write .md + .jsonl, not
