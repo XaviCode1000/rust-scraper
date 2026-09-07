@@ -458,12 +458,6 @@ pub trait StateStorePort: Send + Sync {
     /// [`crate::error::ScraperError`] if the file is missing or unparsable.
     fn load(&self) -> crate::error::Result<ExportState>;
 
-    /// Persist export state to disk atomically.
-    ///
-    /// # Errors
-    /// [`crate::error::ScraperError`] on directory, write, or rename failure.
-    fn save(&self, state: &ExportState) -> crate::error::Result<()>;
-
     /// Load existing state or return a fresh one when absent or stale-versioned.
     ///
     /// # Errors
