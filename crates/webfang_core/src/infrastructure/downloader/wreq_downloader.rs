@@ -500,15 +500,23 @@ impl WreqDownloader {
                     if matches!(dl_err.classify(), ErrorClass::PermanentFatal) {
                         return Err(dl_err);
                     }
-                    warn!(
-                        attempt = attempt,
-                        max_retries = self.max_retries,
-                        error = %dl_err,
-                        "Transport failure fetching {url} — retrying"
-                    );
+                    // The "retrying" event only fires when a retry will
+                    // actually happen: on the last attempt the loop ends and
+                    // the stored error surfaces without a wasted backoff.
+                    let will_retry = attempt < self.max_retries;
+                    if will_retry {
+                        warn!(
+                            attempt = attempt,
+                            max_retries = self.max_retries,
+                            error = %dl_err,
+                            "Transport failure fetching {url} — retrying"
+                        );
+                    }
                     last_error = Some(dl_err);
-                    self.sleep_before_retry(attempt, self.backoff_delay_ms(attempt))
-                        .await;
+                    if will_retry {
+                        self.sleep_before_retry(attempt, self.backoff_delay_ms(attempt))
+                            .await;
+                    }
                     continue;
                 },
             };
