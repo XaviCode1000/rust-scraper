@@ -12,12 +12,11 @@
 //! thread-ID-based `trace_id`, which fragmented across threads. `parent_id` is
 //! also emitted so the logical trace tree is reconstructable from the JSONL.
 //!
-//! **Thread-safety note:** This layer uses thread-local span tracking
-//! (`SPAN_STACK`). It assumes `on_enter`/`on_exit`/`on_event` are called from
-//! the same thread for a given span lifecycle — guaranteed by
-//! `tracing_subscriber::Registry`.
+//! Span context (`span`, `span_id`, `parent_id`, `trace_id`, `span_fields`)
+//! is derived from the subscriber `Context` / span scope — the same source
+//! `on_close` uses. No thread-local span stack is consulted, so events keep
+//! attribution when Tokio moves a task across worker threads (issue #1238).
 
-use std::cell::RefCell;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -29,14 +28,6 @@ use tracing::Subscriber;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
-
-// Thread-local span stack for tracking the current span inside `on_event`.
-// When a span is entered, its ID is pushed; when exited, it's popped IF the
-// exiting ID matches the top. This prevents stack corruption from out-of-order
-// span exits.
-thread_local! {
-    static SPAN_STACK: RefCell<Vec<tracing::Id>> = const { RefCell::new(Vec::new()) };
-}
 
 /// A `tracing_subscriber::Layer` that writes JSONL trace files.
 ///
@@ -97,22 +88,6 @@ impl<S> Layer<S> for FileTraceLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
-    fn on_enter(&self, id: &tracing::Id, _ctx: Context<'_, S>) {
-        SPAN_STACK.with(|stack| stack.borrow_mut().push(id.clone()));
-    }
-
-    fn on_exit(&self, id: &tracing::Id, _ctx: Context<'_, S>) {
-        SPAN_STACK.with(|stack| {
-            let mut stack = stack.borrow_mut();
-            // Only pop if the exiting ID matches the top of the stack.
-            // Out-of-order exits (e.g., inner guard dropped before outer)
-            // would corrupt the stack — this check prevents that.
-            if stack.last() == Some(id) {
-                stack.pop();
-            }
-        });
-    }
-
     fn on_new_span(
         &self,
         attrs: &tracing::span::Attributes<'_>,
@@ -141,46 +116,45 @@ where
             "target": meta.target(),
         });
 
-        // Span context from thread-local span stack
-        let current_span_id = SPAN_STACK.with(|stack| stack.borrow().last().cloned());
+        // Span context from the subscriber Context (same source as on_close).
+        // Never consult a thread-local span stack here: under Tokio
+        // multi_thread the polling thread changes per `.await`, so a
+        // thread-local view orphans events (issue #1238).
+        if let Some(current) = ctx.lookup_current() {
+            record["span"] = json!(current.name());
+            record["span_id"] = json!(format!("{:016x}", current.id().into_u64()));
 
-        if let Some(ref id) = current_span_id {
-            if let Some(span_ref) = ctx.span(id) {
-                record["span"] = json!(span_ref.name());
-                record["span_id"] = json!(format!("{:016x}", id.into_u64()));
-
-                // Capture span fields from the CURRENT span AND its parents (the
-                // scope), so the root span's fields (e.g. the seed URL) become
-                // visible offline without an external OTel collector (S2).
-                // Child fields take precedence on key collision.
-                let mut span_fields: Map<String, Value> = Map::new();
-                for ancestor in span_ref.scope() {
-                    if let Some(rec) = ancestor.extensions().get::<EventRecorder>() {
-                        for (k, v) in &rec.fields {
-                            span_fields.entry(k.clone()).or_insert(v.clone());
-                        }
+            // Capture span fields from the CURRENT span AND its parents (the
+            // scope), so the root span's fields (e.g. the seed URL) become
+            // visible offline without an external OTel collector (S2).
+            // Child fields take precedence on key collision.
+            let mut span_fields: Map<String, Value> = Map::new();
+            for ancestor in current.scope() {
+                if let Some(rec) = ancestor.extensions().get::<EventRecorder>() {
+                    for (k, v) in &rec.fields {
+                        span_fields.entry(k.clone()).or_insert(v.clone());
                     }
                 }
-                if !span_fields.is_empty() {
-                    record["span_fields"] = Value::Object(span_fields);
-                }
             }
-        }
+            if !span_fields.is_empty() {
+                record["span_fields"] = Value::Object(span_fields);
+            }
 
-        // parent_id: reconstruct the logical trace tree. The current span's
-        // parent (enclosing span) is serialized so the tree is recoverable from
-        // the JSONL. Previously absent -> correlation was impossible (D2).
-        if let Some(current) = ctx.lookup_current() {
+            // parent_id: reconstruct the logical trace tree. The current span's
+            // parent (enclosing span) is serialized so the tree is recoverable
+            // from the JSONL.
             if let Some(parent) = current.parent() {
                 record["parent_id"] = json!(format!("{:016x}", parent.id().into_u64()));
             }
-        }
 
-        // trace_id: logical identifier that survives thread hops (D3). Uses the
-        // root span's ID (stable for the whole run, survives worker-thread hops)
-        // with a stable per-invocation seed fallback.
-        let trace_id = logical_trace_id(self.trace_id_seed, &ctx);
-        record["trace_id"] = json!(trace_id);
+            // trace_id: logical identifier that survives thread hops. Uses the
+            // root span's ID (stable for the whole run, survives worker-thread
+            // hops) with a stable per-invocation seed fallback.
+            let trace_id = logical_trace_id(self.trace_id_seed, &ctx);
+            record["trace_id"] = json!(trace_id);
+        } else {
+            record["trace_id"] = json!(format!("{:016x}", self.trace_id_seed));
+        }
 
         // Single-pass field capture: extracts all fields AND the message
         // in one traversal, avoiding the double-visit antipattern.
