@@ -12,7 +12,7 @@ use crate::cli::error::CliExit;
 use crate::cli::export_flow::{run_export, save_files, ExportConfig};
 use crate::cli::parse::parse_asset_naming;
 use crate::cli::scrape_flow::{apply_resume_mode, scrape_urls};
-use crate::cli::url_discovery::{discover_urls, discover_urls_recursive};
+use crate::cli::url_discovery::{discover_urls, discover_urls_unified};
 use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::persistence::PersistenceMode;
@@ -453,10 +453,19 @@ async fn run_dry_run(opts: CrawlOptions) -> CliExit {
         return CliExit::Success;
     }
 
-    // Bug 4: honest dry-run - call real URL discovery
+    // F-14 (#1232 slice 1): dry-run shares the unified recursive discovery
+    // with the real DOM path, so `--max-depth` is honored in previews.
     info!("Dry-run: discovering URLs without scraping...");
-    let discovered = match crate::cli::url_discovery::discover_urls(&crawler_config, &opts).await {
-        Ok(urls) => urls,
+    let persistence_mode = resolve_persistence_mode(&opts);
+    let discovered = match crate::cli::url_discovery::discover_urls_unified(
+        crawler_config,
+        &opts,
+        &persistence_mode,
+        None,
+    )
+    .await
+    {
+        Ok(output) => output.urls,
         Err(e) => return CliExit::NetworkError(format!("URL discovery failed: {e}")),
     };
 
@@ -589,17 +598,15 @@ async fn prepare_phase(
             // patterns; the existing scrape_phase + export_phase still own
             // content extraction and on-disk output.
             //
-            // The persistence_mode is forwarded to `discover_urls_recursive`,
-            // which applies `crawl_site_with_options` when the mode enables
-            // checkpointing and falls back to `crawl_site` otherwise — single
-            // call site, no orchestrator-level branching (slice 5c followup).
-            // F-35 (#1216): clone — the planning boundary below reuses this
-            // same config for the seed pattern guard in `plan_urls`.
-            match discover_urls_recursive(crawler_config.clone(), opts, persistence_mode).await {
+            // Unified DOM discovery (F-14, #1232): recursive Engine with
+            // `None` sink until slice 2. F-35 (#1216): clone — `plan_urls`
+            // reuses the config for the seed pattern guard.
+            let cfg = crawler_config.clone();
+            match discover_urls_unified(cfg, opts, persistence_mode, None).await {
                 Err(e) => {
                     return Err(CliExit::NetworkError(format!("URL discovery failed: {e}")));
                 },
-                Ok(urls) => urls,
+                Ok(output) => output.urls,
             }
         };
 
