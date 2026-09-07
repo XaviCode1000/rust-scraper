@@ -249,12 +249,12 @@ If the Arrange phase is complex, fix the production design, not the test.
 ### Conventions
 
 - **Structured fields, not string soup:** `tracing::info!(pages = n, url = %url, "msg")` — never `format!` data into the message.
-- **Correlation:** every event/span carries its `trace_id`, so a whole operation is reconstructable with `jq 'select(.fields.trace_id == "...")'`.
+- **Correlation:** every event/span carries a top-level `trace_id` equal to the root span Id (16-hex, **ephemeral identity-within-run** — do not persist it or join across runs; the durable cross-run identity is the `CorrelationId` UUID). Reconstruct a whole run with `ROOT=<16-hex root>; jq -c 'select(.trace_id == "$ROOT")' <file>` (top-level, NOT `.fields.trace_id` — that inner field is only populated on the error path). Note `span_close` records share `.span` names, so counts/stage queries must exclude `.record == "span_close"`.
 - **User-facing errors in Spanish; tracing fields/logs in English.**
 - **No new metrics backends:** do not reintroduce OpenTelemetry or any external collector. Emit a structured tracing event and query it from the JSONL.
 - **Snapshots stay deterministic:** `correlation_id`/`trace_id` are internal and `#[serde(skip)]` on scraped output; redact via `redact_nondeterministic()`.
 
-See `docs/debugging.md` and `scripts/analyze-trace.sh` for the full query cookbook. The observability module lives in `crates/webfang_core/src/infrastructure/observability/`.
+See `docs/src/debugging.md` and `scripts/analyze-trace.sh` for the full query cookbook. The observability module lives in `crates/webfang_core/src/infrastructure/observability/`.
 
 ---
 
