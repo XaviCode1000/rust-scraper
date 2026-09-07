@@ -356,7 +356,7 @@ async fn scrape_single_url_inner(
                 .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {url}")))?
                 .to_string(),
             content,
-            url: ValidUrl::new(url.clone()),
+            url: ValidUrl::try_from_url(url.clone())?,
             excerpt: None,
             author: None,
             date: None,
