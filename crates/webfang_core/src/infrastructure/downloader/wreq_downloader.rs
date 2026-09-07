@@ -1565,4 +1565,125 @@ mod wiremock_tests {
             "no-retry path must fail fast, took {elapsed:?}"
         );
     }
+
+    // FIX-1 #1231 F-12: the decompressed body cap. Both tests build real
+    // gzip wire bodies with the existing `async-compression` workspace dep
+    // (same helper pattern as the sitemap_parser tests); wreq's
+    // `.gzip(true)` client transparently inflates them, so the stream
+    // `read_body_capped` accumulates is the DECOMPRESSED payload.
+
+    /// Compress `data` with gzip over tokio (async-compression bufread).
+    async fn gzip_compress(data: &[u8]) -> Vec<u8> {
+        use async_compression::tokio::bufread::GzipEncoder;
+        use tokio::io::{AsyncReadExt, BufReader};
+
+        let mut encoder = GzipEncoder::new(BufReader::new(std::io::Cursor::new(data)));
+        let mut out = Vec::new();
+        encoder
+            .read_to_end(&mut out)
+            .await
+            .expect("in-memory gzip encode");
+        out
+    }
+
+    /// F-12 (negative): a "gzip bomb" — 134 bytes on the wire inflating to
+    /// 100 KiB — must abort at the configured DECOMPRESSED cap with
+    /// `BodyTooLarge`, and because that error classifies PermanentFatal it
+    /// must surface after exactly ONE outbound request (no retry).
+    #[tokio::test]
+    async fn gzip_bomb_is_rejected_at_the_decompressed_cap() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/bomb"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(gzip_compress(&[b'a'; 102_400]).await, "application/gzip")
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+
+        // 64 KiB cap: below the 100 KiB inflated body.
+        let bomb_cap: u64 = 64 * 1024;
+        let dl = WreqDownloader::new(
+            10,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+            bomb_cap,
+        )
+        .expect("test downloader builds");
+
+        let bomb_url: Url = format!("{}/bomb", server.uri())
+            .parse()
+            .expect("server uri parses");
+        match dl.fetch(&bomb_url).await {
+            Ok(page) => panic!(
+                "100 KiB inflated body must exceed the 64 KiB cap, got {} bytes",
+                page.html.len()
+            ),
+            Err(DownloadError::BodyTooLarge { limit }) => {
+                assert_eq!(limit, bomb_cap, "error must carry the configured cap");
+            },
+            Err(other) => panic!("expected BodyTooLarge, got: {other:?}"),
+        }
+
+        let hits = server
+            .received_requests()
+            .await
+            .expect("received requests")
+            .len();
+        assert_eq!(
+            hits, 1,
+            "BodyTooLarge is PermanentFatal: exactly one attempt, got {hits}"
+        );
+    }
+
+    /// F-12 (positive): a gzipped body UNDER the cap is served in full
+    /// after transparent decompression — the cap counts decompressed bytes
+    /// and leaves the happy path untouched.
+    #[tokio::test]
+    async fn gzipped_body_under_the_cap_is_served_decompressed() {
+        let server = MockServer::start().await;
+        let body = b"hello compressed world";
+        Mock::given(method("GET"))
+            .and(path("/small"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(gzip_compress(body).await, "application/gzip")
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+
+        let dl = WreqDownloader::new(
+            10,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+        )
+        .expect("test downloader builds");
+
+        let url: Url = format!("{}/small", server.uri())
+            .parse()
+            .expect("server uri parses");
+        let page = dl
+            .fetch(&url)
+            .await
+            .expect("under-cap gzip body must fetch normally");
+        assert_eq!(page.html, "hello compressed world");
+    }
 }
