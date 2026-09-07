@@ -39,10 +39,10 @@ use clap::Parser;
 use std::collections::BTreeMap;
 use std::path::Path;
 use webfang_core::cli::config::ConfigDefaults;
-use webfang_core::domain::ValidUrl;
 use webfang_core::cli::error::EXIT_CONFIG;
 use webfang_core::cli::preflight::{normalize, ArgSources, NormalizedConfig};
 use webfang_core::domain::config_value::ConfigSource;
+use webfang_core::domain::ValidUrl;
 use webfang_core::{Args, CliExit};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
@@ -458,9 +458,15 @@ fn target_url_flag_and_env_deliver_same_args_outcome() {
     // parser (#1239), so both paths hold a hardened ValidUrl.
     let mut via_env = Args::parse_from(["webfang"]);
     via_env.crawler.url = Some(ValidUrl::parse(url).unwrap());
-    
-    assert_eq!(via_flag.crawler.url.as_ref().map(ValidUrl::as_str), Some(url));
-    assert_eq!(via_env.crawler.url.as_ref().map(ValidUrl::as_str), Some(url));
+
+    assert_eq!(
+        via_flag.crawler.url.as_ref().map(ValidUrl::as_str),
+        Some(url)
+    );
+    assert_eq!(
+        via_env.crawler.url.as_ref().map(ValidUrl::as_str),
+        Some(url)
+    );
 }
 
 #[test]

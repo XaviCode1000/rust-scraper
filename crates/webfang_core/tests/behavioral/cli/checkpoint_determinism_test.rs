@@ -56,7 +56,7 @@ async fn mount_determinism_site(t: &BehavioralTest) {
 async fn crawl_once(seed: Url, shared_state_dir: &std::path::Path) -> BTreeSet<String> {
     let mut opts = CrawlOptions {
         url: webfang_core::domain::ValidUrl::try_from_url(seed.clone())
-.expect("test seed URL is a valid http(s) URL"),
+            .expect("test seed URL is a valid http(s) URL"),
         ..CrawlOptions::default()
     };
     opts.crawl.max_depth = 1;

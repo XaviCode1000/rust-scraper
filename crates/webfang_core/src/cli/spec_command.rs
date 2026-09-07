@@ -108,16 +108,16 @@ fn build_arg(spec: &'static OptionSpec, headings: Headings) -> clap::Arg {
             });
             arg.value_parser(parser)
         },
-            // Text stays the generic String parser EXCEPT ids with a typed
-            // text binding (#1239: the seed URL parses into a hardened
-            // `ValidUrl` at the argv boundary — see `text_binding`).
-            ValueKind::Text => {
-                if let Some(parser) = text_binding(spec.id) {
-                    arg.value_parser(parser)
-                } else {
-                    arg.value_parser(clap::value_parser!(String))
-                }
-            },
+        // Text stays the generic String parser EXCEPT ids with a typed
+        // text binding (#1239: the seed URL parses into a hardened
+        // `ValidUrl` at the argv boundary — see `text_binding`).
+        ValueKind::Text => {
+            if let Some(parser) = text_binding(spec.id) {
+                arg.value_parser(parser)
+            } else {
+                arg.value_parser(clap::value_parser!(String))
+            }
+        },
         ValueKind::TextList => {
             // Comma-delimited list: parser stays `String` and the
             // `value_delimiter` (applied above from `spec.value_delimiter`)
@@ -179,20 +179,20 @@ fn hidden_placeholder_help(spec: &OptionSpec) -> &'static str {
 /// `parse_seed_url`; the Spanish error surfaces as a clap usage error,
 /// exit 64, never a panic).
 fn text_binding(id: &str) -> Option<ValueParser> {
-match id {
-"url" => Some(str_fn(super::args::crawler::parse_seed_url)),
-_ => None,
-}
+    match id {
+        "url" => Some(str_fn(super::args::crawler::parse_seed_url)),
+        _ => None,
+    }
 }
 
 /// Wrap a spec-bound `&str -> Result<T, String>` validator into a clap
 /// `ValueParser` (shared by `numeric_binding` and `text_binding`).
 fn str_fn<T, F>(f: F) -> ValueParser
 where
-T: Send + Sync + Clone + 'static,
-F: Fn(&str) -> Result<T, String> + Send + Sync + Clone + 'static,
+    T: Send + Sync + Clone + 'static,
+    F: Fn(&str) -> Result<T, String> + Send + Sync + Clone + 'static,
 {
-ValueParser::from(f)
+    ValueParser::from(f)
 }
 
 /// Typed enum parser per spec id: the concrete domain enums behind the

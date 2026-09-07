@@ -541,7 +541,11 @@ async fn prepare_phase(
             .include_patterns(opts.crawl.include_patterns.clone())
             .exclude_patterns(opts.crawl.exclude_patterns.clone())
             .build();
-        plan_urls(true, false, opts.url.as_url().clone(), Vec::new(), &seed_guard)
+        // Short local keeps the arg-span under rustfmt's fn_call_width,
+        // so the call stays single-line and prepare_phase under the
+        // clippy too_many_lines ratchet ceiling (#516).
+        let seed = opts.url.as_url().clone();
+        plan_urls(true, false, seed, Vec::new(), &seed_guard)
     } else {
         // Honor `--h2-profile` for URL discovery (#312): an unknown profile is a
         // config error (exit 78), consistent with the scrape and batch phases.

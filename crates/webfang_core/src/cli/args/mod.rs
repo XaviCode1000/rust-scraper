@@ -43,7 +43,7 @@ pub(crate) mod test_support {
         f()
     }
 }
-    
+
 /// CLI Arguments for the webfang binary.
 ///
 /// Parsed using `clap` with derive macros.
@@ -62,7 +62,10 @@ pub(crate) mod test_support {
 ///     "--resume",
 /// ]);
 ///
-/// assert_eq!(args.crawler.url.as_deref(), Some("https://example.com"));
+/// assert_eq!(
+///     args.crawler.url.as_ref().map(webfang_core::domain::ValidUrl::as_str),
+///     Some("https://example.com")
+/// );
 /// ```
 #[derive(Parser, Debug, Default)]
 #[command(name = "webfang", version)]
@@ -332,8 +335,7 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
 fn url_from_args(args: &Args) -> ValidUrl {
     match args.crawler.url.clone() {
         Some(url) => url,
-        None => ValidUrl::parse("https://example.com")
-            .expect("hardcoded fallback URL must parse"),
+        None => ValidUrl::parse("https://example.com").expect("hardcoded fallback URL must parse"),
     }
 }
 
@@ -440,8 +442,8 @@ mod tests {
         let args = Args::try_parse_from(["webfang", "https://example.com"]).expect("valid args");
         assert_eq!(
             args.positional_url.as_ref().map(ValidUrl::as_str),
-            Some("https://example.com"),
-            "positional URL captured"
+            Some("https://example.com/"),
+            "positional URL captured (trailing slash added by ValidUrl)"
         );
     }
 
@@ -450,7 +452,10 @@ mod tests {
         clean_env();
         let args = Args::try_parse_from(["webfang", "https://example.com", "--max-pages", "5"])
             .expect("valid args");
-        assert_eq!(args.positional_url.as_ref().map(ValidUrl::as_str), Some("https://example.com"));
+        assert_eq!(
+            args.positional_url.as_ref().map(ValidUrl::as_str),
+            Some("https://example.com/")
+        );
         assert_eq!(args.crawler.max_pages, 5);
     }
 

@@ -1,8 +1,8 @@
 use clap::Parser;
-use webfang_core::domain::ValidUrl;
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};
 use webfang_core::cli::args::{AiArgs, Args, CrawlerArgs, ExportArgs, ObsidianArgs};
+use webfang_core::domain::ValidUrl;
 use webfang_core::infrastructure::autotuning::ElasticOverrides;
 
 /// Remove poisoned env vars once before any arg-parsing test runs.
@@ -418,6 +418,55 @@ fn test_poisoned_webfang_ai_model_id_env_parses_valid_scrape_command() {
         result.is_ok(),
         "poisoned WEBFANG_AI_MODEL_ID must not break arg parsing: {:?}",
         result.err().map(|e| e.to_string())
+    );
+}
+
+/// #1239: the seed URL is hardened at the argv boundary. A malformed URL
+/// is a clap usage error (exit 64), never a panic — before this change
+/// `url_from_args` `.expect()`ed and aborted the process (exit 134).
+#[test]
+fn malformed_seed_url_is_a_usage_error_not_a_panic() {
+    clean_env();
+    let result = Args::try_parse_from(["webfang", "--url", "ht!tp://x"]);
+
+    let err = result.expect_err("malformed URL must be rejected at the argv boundary");
+    assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    assert!(
+        err.to_string().contains("URL inválida"),
+        "the Spanish boundary error must surface in the usage message: {err}"
+    );
+}
+
+/// #1239: a credentialed seed URL parses successfully, but the credential
+/// strip applies AT THE BOUNDARY — the stored value never observes the
+/// credentials (the behavioral trace invariant lives in
+/// `export_test::trace_file_never_leaks_url_credentials`).
+#[test]
+fn credentialed_seed_url_is_stripped_at_the_boundary() {
+    clean_env();
+    let args = Args::try_parse_from(["webfang", "--url", "https://user:secretpass@example.com/x"])
+        .expect("credentialed http(s) URL is scheme-valid and must parse");
+
+    let url = args.crawler.url.expect("--url was provided");
+    assert_eq!(
+        url.as_str(),
+        "https://example.com/x",
+        "credentials must be stripped before anything downstream runs"
+    );
+    assert!(
+        !url.as_str().contains("secretpass"),
+        "the password must not survive in any form"
+    );
+}
+
+/// #1239: the scheme allow-list (#675-2) applies at the argv boundary.
+#[test]
+fn non_http_seed_url_is_rejected_at_the_boundary() {
+    clean_env();
+    let result = Args::try_parse_from(["webfang", "--url", "ftp://example.com/file"]);
+    assert!(
+        result.is_err(),
+        "ftp:// seed must be rejected by the scheme allow-list"
     );
 }
 

@@ -70,7 +70,10 @@ pub(crate) fn parse_selector(s: &str) -> Result<String, String> {
 /// is stored already-sanitized, so downstream code can never observe
 /// credentials through `CrawlOptions::url`.
 pub(crate) fn parse_seed_url(s: &str) -> Result<ValidUrl, String> {
-    ValidUrl::parse(s).map_err(|e| format!("URL inválida «{s}»: {e}"))
+    // The ScraperError display is already the Spanish user-facing message
+    // ("URL inválida: …") and clap names the offending value itself, so no
+    // extra prefix is added (which would duplicate "URL inválida").
+    ValidUrl::parse(s).map_err(|e| e.to_string())
 }
 
 pub(crate) fn parse_timeout_secs(s: &str) -> Result<u64, String> {
@@ -636,7 +639,10 @@ mod spec_parity_tests {
         // Short forms in isolation (`--url` may only appear once per parse).
         let shorts =
             parse_args(&["-u", "https://example.org", "-s", "main"]).expect("shorts must parse");
-        assert_eq!(shorts.crawler.url.as_ref().map(ValidUrl::as_str), Some("https://example.org"));
+        assert_eq!(
+            shorts.crawler.url.as_ref().map(ValidUrl::as_str),
+            Some("https://example.org/")
+        );
         assert_eq!(shorts.crawler.selector, "main");
     }
 
@@ -669,7 +675,10 @@ mod spec_parity_tests {
         .expect("representative crawler flags must parse");
 
         let c = &parsed.crawler;
-        assert_eq!(c.url.as_ref().map(ValidUrl::as_str), Some("https://example.com"));
+        assert_eq!(
+            c.url.as_ref().map(ValidUrl::as_str),
+            Some("https://example.com/")
+        );
         assert_eq!(c.selector, "article p");
         assert_eq!(c.delay_ms, 250);
         assert_eq!(c.max_pages, 5);
