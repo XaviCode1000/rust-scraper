@@ -5,7 +5,7 @@
 use tracing::{error, info, instrument, warn};
 
 use crate::application::batch::{BatchManager, BatchManagerSummary};
-use crate::application::crawl_options::CrawlOptions;
+use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
 use crate::application::crawler::BoundedFileSink;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
@@ -847,7 +847,14 @@ fn permanent_io_error_for_failures(
     })
 }
 
-/// Run batch processing mode: crawl multiple URLs from stdin or file.
+/// Run batch processing mode: scrape multiple URLs from stdin or file.
+///
+/// #1215: `--batch` SCRAPES each input URL (exactly one page per URL) — it
+/// never BFS-crawls seeds. The crawl-expansion knobs (`--max-depth`,
+/// `--max-pages`, `--sitemap`) do NOT apply here; a non-default value earns
+/// a loud warning in [`prepare_batch_manager`] instead of silently changing
+/// the run. `--single-page` is honored trivially: single-page is what batch
+/// always does.
 ///
 /// The batch pipeline spools every fetched page body through a shared
 /// [`BoundedFileSink`] and then runs the full export / elastic / resume
@@ -942,10 +949,10 @@ async fn run_batch(
     batch_exit_code(results.len(), total_failed, &all_errors)
 }
 
-/// Crawl every batch URL through the engine, spooling each fetched body to
-/// disk, and return the run summary plus the sink holding the spool. Performs
-/// the no-URL / no-content guards so `--batch` fails loudly instead of writing
-/// nothing (#631).
+/// Scrape every batch URL (one page per URL, #1215), spooling each fetched
+/// body to disk, and return the run summary plus the sink holding the spool.
+/// Performs the no-URL / no-content guards so `--batch` fails loudly instead
+/// of writing nothing (#631).
 ///
 /// The sink is a [`BoundedFileSink`], not an in-memory buffer: a large batch of
 /// heavy pages must not grow the resident set without a ceiling (#653).
@@ -969,12 +976,49 @@ async fn run_batch_crawl(
     Ok((summary, sink))
 }
 
+/// Warn when crawl-expansion flags are set on a `--batch` run (#1215).
+///
+/// Batch scrapes each input URL (one page per URL), so `--max-depth`,
+/// `--max-pages`, and `--sitemap` cannot expand anything here. A value that
+/// differs from the default means the operator asked for a crawl — staying
+/// silent would let them assume one happened — hence `warn!`, naming every
+/// inert flag. Defaults are read from [`CrawlLimits::default`] (the same
+/// source the CLI defaults mirror) rather than hardcoded, so the comparison
+/// cannot rot when defaults move.
+fn warn_batch_crawl_flags_ignored(opts: &CrawlOptions) {
+    let defaults = CrawlLimits::default();
+    let mut inert = Vec::new();
+    if opts.crawl.max_depth != defaults.max_depth {
+        inert.push(format!("--max-depth {}", opts.crawl.max_depth));
+    }
+    if opts.crawl.max_pages != defaults.max_pages {
+        inert.push(format!("--max-pages {}", opts.crawl.max_pages));
+    }
+    if opts.crawl.use_sitemap || opts.crawl.sitemap_url.is_some() {
+        inert.push("--sitemap".to_string());
+    }
+    if inert.is_empty() {
+        info!("Batch mode scrapes each input URL (one page per URL, no crawling)");
+    } else {
+        warn!(
+            flags = inert.join(", "),
+            "--batch scrapes each input URL (one page per URL): crawl-expansion flags are ignored (#1215)"
+        );
+    }
+}
+
 /// Load the batch manager, attach the capture sink, and assert it has work.
+///
+/// Warns loudly when crawl-expansion flags (`--max-depth`, `--max-pages`,
+/// `--sitemap`) differ from their defaults: since #1215 batch scrapes each
+/// URL instead of crawling it, those flags are inert here and the operator
+/// must hear about it rather than assume a crawl happened.
 async fn prepare_batch_manager(
     opts: &CrawlOptions,
     tls_emulation: wreq_util::Profile,
     sink: std::sync::Arc<BoundedFileSink>,
 ) -> Result<BatchManager, CliExit> {
+    warn_batch_crawl_flags_ignored(opts);
     let budget = crate::domain::budget::BudgetModel::build(
         opts.budget_overrides,
         &crate::domain::budget::detector::SystemDetector,
@@ -1205,6 +1249,12 @@ fn resolve_batch_tls_emulation(opts: &CrawlOptions) -> Result<wreq_util::Profile
 /// `--delay-ms` and the concurrency bound are propagated here (#653): without
 /// them the batch engine crawled at full speed with its own default concurrency,
 /// making both flags silent no-ops on the `--batch` path.
+///
+/// #1215: the `max_pages`/`max_depth` values carried here are the CLI crawl
+/// budget, but they never expand batch seeds — the processor rebuilds a
+/// seed-only config per URL (the batch processor pins depth 0 / 1 page),
+/// so every seed is scraped exactly once and `--max-pages 1` can no longer
+/// starve seeds.
 ///
 /// The concurrency bound comes from the run's [`BudgetModel`] Operation.crawl
 /// tier (task 2.5b).

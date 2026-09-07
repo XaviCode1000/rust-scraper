@@ -131,7 +131,7 @@ pub struct CrawlerArgs {
     pub sitemap_url: Option<String>,
 
     // ========== Behavior ==========
-    /// Scrape only the seed URL without discovery or crawling
+    /// Scrape only the seed URL without discovery or crawling (batch mode always scrapes one page per URL)
     pub single_page: bool,
 
     /// Resume mode - skip URLs already processed

@@ -124,7 +124,7 @@ Discovery:
 
 Behavior:
       --single-page
-          Scrape only the seed URL without discovery or crawling
+          Scrape only the seed URL without discovery or crawling (batch mode always scrapes one page per URL)
           
           [env: WEBFANG_SINGLE_PAGE=]
 
@@ -408,12 +408,12 @@ Elastic Ingestion:
 
 Batch Processing:
       --batch
-          Enable batch mode — read URLs from stdin (one per line)
+          Enable batch mode — scrape each URL from stdin (one per line), one page per URL, no crawling
           
           [env: WEBFANG_BATCH=]
 
       --batch-file <BATCH_FILE>
-          Path to a file containing URLs to crawl (one per line)
+          Path to a file containing URLs to scrape (one per line), one page per URL, no crawling
           
           [env: WEBFANG_BATCH_FILE=]
 
