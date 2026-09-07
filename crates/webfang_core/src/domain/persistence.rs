@@ -58,7 +58,9 @@ pub struct ResumeConfig {
 /// Checkpoint configuration — directory and interval.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckpointCfg {
-    /// Directory where `crawl_checkpoint.json` lives.
+    /// Directory holding the per-seed checkpoint file
+    /// (`crawl_checkpoint_<seed-hash>.json`, F-01 scoped so concurrent
+    /// `--resume` runs for different sites sharing one dir cannot collide).
     pub dir: PathBuf,
     /// Pages between automatic checkpoint saves (0 is disabled, but this struct
     /// is only constructed when checkpoint is enabled, so interval > 0 here).
@@ -93,9 +95,12 @@ pub enum PersistenceMode {
 ///
 /// The resolver stays pure (no IO, no logging): every decision the caller
 /// might need to surface is returned as data. Today that is exactly one
-/// case — `--state-dir` without `--resume` is ignored. The CLI layer
-/// re-emits the `warn!` from `ignored_state_dir`; callers without user
-/// flags (batch, MCP, tests) drop the notes.
+/// case — `--state-dir` that had no effect, i.e. the resolved mode is
+/// `Disabled` while a `state_dir` was passed (no `--resume` opt-in and no
+/// checkpoint opt-in, or checkpointing disabled via interval 0 /
+/// `--no-checkpoint`). The CLI layer re-emits the `warn!` from
+/// `ignored_state_dir`; callers without user flags (batch, MCP, tests) drop
+/// the notes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolverNotes {
     /// The `--state-dir` value that was ignored (`Some` only when
@@ -107,9 +112,23 @@ impl PersistenceMode {
     /// Pure resolver — no IO, no logging.
     ///
     /// `default_state_dir` is the caller-supplied fallback (XDG_CACHE_HOME or
-    /// `~/.cache/webfang/state`). `state_dir` without `--resume` is ignored;
-    /// callers that owe the operator a `warn!` must use
-    /// [`from_config_with_notes`](Self::from_config_with_notes) instead.
+    /// `~/.cache/webfang/state`). Truth table over
+    /// `(resume, state_dir, interval, no_checkpoint)` (F-01, Option A):
+    ///
+    /// - `no_checkpoint` or `interval == 0` → `Disabled` (checkpoint off).
+    /// - `(false, None, N>0, false)` → `Disabled`: the default interval alone
+    ///   never enables checkpointing, so repeat crawls stay deterministic
+    ///   unless the operator opts in. Rationale: defaulting the interval to 0
+    ///   instead would silently disable `--resume`-without-explicit-interval
+    ///   (`checkpoint_enabled = interval != 0 && !no_checkpoint`), breaking
+    ///   the resume UX — the opt-in gate achieves determinism without that.
+    /// - `(false, Some(dir), N>0, false)` → `Checkpoint{dir}`: an explicit
+    ///   `--state-dir` is the checkpoint opt-in and is honoured.
+    /// - `(true, _, N>0, false)` → `Resume`/`Full` over `dir or default`.
+    ///
+    /// Callers that owe the operator a `warn!` for an ignored `--state-dir`
+    /// must use [`from_config_with_notes`](Self::from_config_with_notes)
+    /// instead (the note is set exactly when the mode is `Disabled`).
     pub fn from_config(cfg: &ResumeConfig, default_state_dir: &Path) -> Self {
         Self::from_config_with_notes(cfg, default_state_dir).0
     }
@@ -117,22 +136,17 @@ impl PersistenceMode {
     /// Pure resolver with side-channel notes — no IO, no logging.
     ///
     /// Returns the resolved mode plus [`ResolverNotes`]: `ignored_state_dir`
-    /// is `Some` exactly when `--state-dir` was passed without `--resume`
-    /// and therefore ignored. The caller that knows about user flags emits
-    /// `warn!(state_dir = ?notes.ignored_state_dir, "ignoring --state-dir
-    /// without --resume")` from it; all other callers ignore the notes.
+    /// is `Some` exactly when `--state-dir` had no effect (resolved mode is
+    /// `Disabled` while a `state_dir` was passed). The caller that knows about
+    /// user flags emits `warn!(state_dir = ?notes.ignored_state_dir,
+    /// "ignoring --state-dir without --resume")` from it; all other callers
+    /// ignore the notes.
     pub fn from_config_with_notes(
         cfg: &ResumeConfig,
         default_state_dir: &Path,
     ) -> (Self, ResolverNotes) {
-        let ignored_state_dir = if cfg.state_dir.is_some() && !cfg.resume {
-            cfg.state_dir.clone()
-        } else {
-            None
-        };
         let checkpoint_enabled = cfg.checkpoint_interval != 0 && !cfg.no_checkpoint;
-        let resume_enabled = cfg.resume;
-        let mode = match (resume_enabled, checkpoint_enabled) {
+        let mode = match (cfg.resume, checkpoint_enabled) {
             (false, false) => Self::Disabled,
             (true, false) => {
                 let dir = cfg
@@ -141,13 +155,18 @@ impl PersistenceMode {
                     .unwrap_or_else(|| default_state_dir.to_path_buf());
                 Self::Resume { dir }
             },
-            (false, true) => {
-                // --state-dir without --resume is ignored → default dir.
-                let checkpoint = CheckpointCfg {
-                    dir: default_state_dir.to_path_buf(),
-                    interval: cfg.checkpoint_interval,
-                };
-                Self::Checkpoint { cfg: checkpoint }
+            // F-01 opt-in gate: without --resume, checkpointing requires
+            // an explicit --state-dir; the default interval alone stays
+            // Disabled so repeat crawls are deterministic.
+            (false, true) => match cfg.state_dir.clone() {
+                Some(dir) => {
+                    let checkpoint = CheckpointCfg {
+                        dir,
+                        interval: cfg.checkpoint_interval,
+                    };
+                    Self::Checkpoint { cfg: checkpoint }
+                },
+                None => Self::Disabled,
             },
             (true, true) => {
                 let resume_dir = cfg
@@ -163,6 +182,12 @@ impl PersistenceMode {
                     checkpoint,
                 }
             },
+        };
+        // `--state-dir` is ignored exactly when it had no effect: the
+        // resolved mode is Disabled while a state_dir was passed.
+        let ignored_state_dir = match (&mode, &cfg.state_dir) {
+            (Self::Disabled, Some(dir)) => Some(dir.clone()),
+            _ => None,
         };
         (mode, ResolverNotes { ignored_state_dir })
     }
@@ -489,31 +514,35 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_only_with_default_dir() {
-        let m = PersistenceMode::from_config(&cfg(false, None, 100, false), &default_dir());
-        assert_eq!(
-            m,
-            PersistenceMode::Checkpoint {
-                cfg: CheckpointCfg {
-                    dir: default_dir(),
-                    interval: 100
-                }
-            }
-        );
+    fn default_resume_config_resolves_to_disabled() {
+        // F-01: a bare `ResumeConfig::default()` (no --resume, no --state-dir,
+        // interval 0) must never enable persistence. Repeat crawls stay
+        // deterministic unless the operator opts in via --resume/--state-dir.
+        let m = PersistenceMode::from_config(&ResumeConfig::default(), &default_dir());
+        assert_eq!(m, PersistenceMode::Disabled);
     }
 
     #[test]
-    fn checkpoint_with_custom_interval() {
+    fn repeat_crawl_without_opt_in_is_disabled() {
+        // F-01 INVERT (Option A): (false, None, N>0, false) → Disabled.
+        // A repeat crawl with no --resume and no --state-dir must not pick up
+        // checkpoint state from the shared default dir — otherwise the second
+        // identical crawl resumes from the first and produces a different
+        // output set. Checkpoint requires an explicit opt-in (--resume or
+        // --state-dir); the default interval alone never enables it.
+        let m = PersistenceMode::from_config(&cfg(false, None, 100, false), &default_dir());
+        assert_eq!(m, PersistenceMode::Disabled);
+        assert!(m.checkpoint_cfg().is_none());
+    }
+
+    #[test]
+    fn checkpoint_stays_disabled_without_opt_in_custom_interval() {
+        // Same invert as above with a non-default interval: without --resume
+        // or --state-dir there is no opt-in, so any N>0 still resolves to
+        // Disabled.
         let m = PersistenceMode::from_config(&cfg(false, None, 50, false), &default_dir());
-        assert_eq!(
-            m,
-            PersistenceMode::Checkpoint {
-                cfg: CheckpointCfg {
-                    dir: default_dir(),
-                    interval: 50
-                }
-            }
-        );
+        assert_eq!(m, PersistenceMode::Disabled);
+        assert!(m.checkpoint_cfg().is_none());
     }
 
     #[test]
@@ -574,17 +603,18 @@ mod tests {
     // ——— state_dir without --resume is ignored ———
 
     #[test]
-    fn state_dir_without_resume_is_ignored_checkpoint_uses_default() {
+    fn explicit_state_dir_without_resume_opts_into_checkpoint() {
+        // Requirement (c): an explicit --state-dir is the checkpoint opt-in —
+        // it is honoured (not ignored) and scopes the checkpoint to that dir.
         let m = PersistenceMode::from_config(
             &cfg(false, Some("/tmp/cache"), 100, false),
             &default_dir(),
         );
-        // Should be Checkpoint with default dir, NOT /tmp/cache.
         assert_eq!(
             m,
             PersistenceMode::Checkpoint {
                 cfg: CheckpointCfg {
-                    dir: default_dir(),
+                    dir: PathBuf::from("/tmp/cache"),
                     interval: 100
                 }
             }
@@ -601,12 +631,26 @@ mod tests {
     // ——— ResolverNotes side-channel (#1045) ———
 
     #[test]
-    fn notes_report_ignored_state_dir_only_without_resume() {
+    fn notes_report_ignored_state_dir_only_when_disabled() {
+        // ResolverNotes.ignored_state_dir is Some exactly when the resolved
+        // mode is Disabled and a --state-dir was passed (i.e. the flag had no
+        // effect). A checkpoint-enabled run consumes --state-dir, so no note.
+        let (_, notes) = PersistenceMode::from_config_with_notes(
+            &cfg(false, Some("/tmp/cache"), 0, false),
+            &default_dir(),
+        );
+        assert_eq!(notes.ignored_state_dir, Some(PathBuf::from("/tmp/cache")));
+    }
+
+    #[test]
+    fn notes_empty_when_state_dir_opts_into_checkpoint() {
+        // (false, Some(dir), N>0, false) → Checkpoint{dir}: the flag is
+        // honoured, so there is nothing to report.
         let (_, notes) = PersistenceMode::from_config_with_notes(
             &cfg(false, Some("/tmp/cache"), 100, false),
             &default_dir(),
         );
-        assert_eq!(notes.ignored_state_dir, Some(PathBuf::from("/tmp/cache")));
+        assert_eq!(notes, ResolverNotes::default());
     }
 
     #[test]
@@ -620,8 +664,11 @@ mod tests {
 
     #[test]
     fn notes_empty_when_no_state_dir_given() {
+        // No --state-dir: nothing to ignore. Uses an opt-out case (Disabled
+        // via --no-checkpoint) so the assertion holds under the F-01 truth
+        // table regardless of the interval default.
         let (_, notes) =
-            PersistenceMode::from_config_with_notes(&cfg(false, None, 100, false), &default_dir());
+            PersistenceMode::from_config_with_notes(&cfg(false, None, 100, true), &default_dir());
         assert_eq!(notes, ResolverNotes::default());
     }
 
@@ -630,7 +677,9 @@ mod tests {
         // `from_config` is the notes-dropping façade: same mode, no notes.
         for (resume, state_dir, interval, no_checkpoint) in [
             (false, None, 0, false),
+            (false, None, 100, false),
             (false, Some("/tmp/cache"), 100, false),
+            (false, Some("/tmp/cache"), 0, false),
             (true, Some("/tmp/cache"), 50, false),
             (true, None, 100, true),
         ] {

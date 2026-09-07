@@ -83,8 +83,10 @@ pub async fn discover_urls(
 /// unchanged.
 ///
 /// `persistence_mode` is the unified control-plane from slice 5c:
-/// when the mode enables checkpointing (`Checkpoint` or `Full`), the
-/// engine is wired with `crawl_site_with_options` so `crawl_checkpoint.json`
+/// when the mode enables checkpointing (`Checkpoint` or `Full` — only via
+/// an explicit `--resume`/`--state-dir` opt-in, F-01), the
+/// engine is wired with `crawl_site_with_options` so the scoped
+/// `crawl_checkpoint_<seed-hash>.json`
 /// is created and the interval flows from the mode (not hardcoded).
 /// `Disabled` and `Resume` fall back to `crawl_site` — the no-checkpoint path.
 pub async fn discover_urls_recursive(
