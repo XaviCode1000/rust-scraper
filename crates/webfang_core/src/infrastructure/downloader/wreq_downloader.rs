@@ -425,13 +425,20 @@ impl WreqDownloader {
             let response = match self.send_request(url, None).await {
                 Ok(res) => res,
                 Err(dl_err) => {
-                    // Per-request timeouts are the configured ceiling: retrying against
-                    // the same dead peer doubles wall time without any chance of success.
-                    // Mid-body transients (Io::ConnectionReset / UnexpectedEof) DO retry
-                    // (#649 mid-body transient fix). Only Timeout is terminal here.
-                    if matches!(dl_err, DownloadError::Timeout(_))
-                        || matches!(dl_err.classify(), ErrorClass::PermanentFatal)
-                    {
+                    // Single classification rule (FIX-1, #1236): retry
+                    // everything the domain classifier deems transient, surface
+                    // PermanentFatal immediately. Request timeouts are
+                    // TransientBackoff (F-08, #1231): the most common transient
+                    // failure in crawling (slow-not-dead peer), and the
+                    // configured timeout still caps EACH attempt, so the retry
+                    // budget of `max_retries` x `timeout_secs` is exactly what
+                    // the operator asked for. Builder-class invalid requests
+                    // (unsupported scheme, malformed URL) map to InvalidUrl ->
+                    // PermanentFatal and fail after a single attempt (F-09,
+                    // #1236); mid-body transients (Io::ConnectionReset /
+                    // UnexpectedEof) stay retriable (#649 mid-body transient
+                    // fix).
+                    if matches!(dl_err.classify(), ErrorClass::PermanentFatal) {
                         return Err(dl_err);
                     }
                     warn!(
@@ -1375,5 +1382,108 @@ mod wiremock_tests {
             .expect("rotated retry succeeds for unpinned downloads");
         assert_eq!(page.status, 200);
         assert_eq!(page.html, "<html>rotated</html>");
+    }
+    // ------------------------------------------------------------------
+    // FIX-1 (#1231 F-08, #1236 F-09): retry classification contract tests.
+    // The retry loop must honor DownloadError::classify() for the whole
+    // transient family: request timeouts are retriable (the most common
+    // transient failure in crawling), while builder-class errors (invalid
+    // request: unsupported scheme, malformed URL) are permanent and must
+    // surface after a SINGLE attempt.
+    // ------------------------------------------------------------------
+
+    /// F-08: a request that times out is RETRIED and recovery is served.
+    /// wiremock: first /slow hit sleeps past the client timeout (served
+    /// once, `.up_to_n_times(1)`), subsequent /slow hits respond
+    /// instantly. Asserts exactly 2 outbound requests and a successful
+    /// page — the timeout retry fired and its result was used.
+    #[tokio::test]
+    async fn timeout_is_retried_and_recovery_is_served() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("late")
+                    .set_delay(Duration::from_millis(1500)),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("fast"))
+            .mount(&server)
+            .await;
+
+        // timeout 1s so the first /slow hit (1.5s) trips it; short backoff
+        // keeps the test fast.
+        let dl = WreqDownloader::new(
+            1,
+            1,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            2,
+            10,
+            50,
+        )
+        .expect("test downloader builds");
+
+        let slow_url: Url = format!("{}/slow", server.uri())
+            .parse()
+            .expect("server uri parses");
+        let page = dl
+            .fetch(&slow_url)
+            .await
+            .expect("retry after timeout must recover");
+        assert_eq!(page.html, "fast");
+        let hits = server
+            .received_requests()
+            .await
+            .expect("received requests")
+            .len();
+        assert_eq!(
+            hits, 2,
+            "timeout retry must produce exactly one re-request, got {hits}"
+        );
+    }
+
+    /// F-09: a builder-class error (unsupported scheme) must NOT be
+    /// retried — single attempt, immediate permanent error.
+    #[tokio::test]
+    async fn unsupported_scheme_is_not_retried() {
+        let dl = WreqDownloader::new(
+            5,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+        )
+        .expect("test downloader builds");
+
+        let url = url::Url::parse("ftp://example.com/x").expect("parseable scheme");
+        let start = std::time::Instant::now();
+        let err = dl.fetch(&url).await.expect_err("ftp must fail");
+        let elapsed = start.elapsed();
+
+        // No exponential backoff between attempts: a single attempt fails
+        // fast. The attempt count itself is not observable without a
+        // socket; the typed error + fast failure are the observables.
+        assert!(
+            matches!(err, DownloadError::InvalidUrl(_)),
+            "builder error must map to InvalidUrl, got: {err:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "no-retry path must fail fast, took {elapsed:?}"
+        );
     }
 }

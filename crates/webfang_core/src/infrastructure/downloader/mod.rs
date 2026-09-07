@@ -27,6 +27,16 @@ impl From<wreq::Error> for DownloadError {
     fn from(e: wreq::Error) -> Self {
         use std::error::Error as _;
 
+        // FIX-1 (#1236 F-09): builder-class errors mean the REQUEST ITSELF is
+        // invalid (unsupported scheme, malformed URL). They never open a
+        // socket, so retrying cannot help: classify them as PermanentFatal via
+        // the dedicated InvalidUrl variant instead of Network (InternalFatal,
+        // which the old mapping produced and the retry loop re-attempted up to
+        // `max_retries` times with full exponential backoff).
+        if e.is_builder() {
+            return DownloadError::InvalidUrl(e.to_string());
+        }
+
         let mut source = e.source();
         while let Some(s) = source {
             if let Some(io_err) = s.downcast_ref::<std::io::Error>() {
