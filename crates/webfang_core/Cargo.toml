@@ -250,3 +250,7 @@ path = "tests/security_traversal_test.rs"
 name = "security_bombs_test"
 path = "tests/security_bombs_test.rs"
 
+
+[[test]]
+name = "parser_property_test"
+path = "tests/parser_property_test.rs"
