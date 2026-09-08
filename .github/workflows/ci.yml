@@ -419,14 +419,27 @@ jobs:
           cargo test -p webfang_ai --features ai --test ai_integration -- \
             --ignored --test-threads=1
           # CLI+AI tests (#[ignore]'d, require model)
-          # --skip: waf_gauntlet_observability_trace is #[ignore]'d for KNOWN
-          # FLAKINESS (wiremock FIFO doesn't guarantee 403→429→200 order — see
-          # its own doc comment/TODO), not for the model requirement. The
-          # blanket --ignored here would run it and fail nondeterministically.
-          # It keeps running daily as advisory via bug-discovery.yml.
+          # Explicit allowlist, NOT a blanket `--ignored`. This job is REQUIRED,
+          # and `--ignored` force-runs every ignored test in the target — including
+          # ones ignored because the finding they pin is still OPEN. #1240 hit that
+          # with cli::export_test::trace_file_never_leaks_url_credentials (#1239,
+          # F-31 residual: the raw CLI seed URL reaches --trace-file through the
+          # root `run` span, not through ValidUrl). libtest ORs positional filters,
+          # so entering this gate is now a deliberate edit, not a side effect of
+          # adding #[ignore].
+          # Trade-off: a new model-requiring test stays out until listed here.
+          # check_ignored_guard.sh fails on any #[ignore] count drift against
+          # docs/test-inventory.md, so every addition touches that inventory —
+          # that is where the reminder lives. Open-finding tests keep running
+          # daily as advisory in bug-discovery.yml (--run-ignored only).
+          # `--skip waf_gauntlet_observability_trace` is deleted, not ported: that
+          # test is no longer #[ignore]'d (counter-based mock), so the skip was
+          # inert and the non-ignored gates already cover it.
           cargo test -p webfang_core --features ai --test behavioral -- \
             --ignored --test-threads=1 \
-            --skip waf_gauntlet_observability_trace
+            cli::ai_integration_test:: \
+            cli::export_test::vector_export_total_documents_matches_documents \
+            cli::trace_correlation_test::scrape_trace_and_vector_export_share_per_page_correlation
           # MCP+AI tests (#[ignore]'d, require model)
           cargo test -p webfang_mcp --features mcp,ai --test mcp_behavioral_test -- \
             --ignored --test-threads=1

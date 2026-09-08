@@ -484,7 +484,7 @@ fn build_crawler_config_for_discovery(
     opts: &CrawlOptions,
     tls_emulation: wreq_util::Profile,
 ) -> Result<CrawlerConfig, CliExit> {
-    let crawler_config = CrawlerConfig::builder(opts.url.clone())
+    let crawler_config = CrawlerConfig::builder(opts.url.as_url().clone())
         .max_pages(opts.crawl.max_pages)
         .max_depth(opts.crawl.max_depth)
         .include_patterns(opts.crawl.include_patterns.clone())
@@ -537,11 +537,15 @@ async fn prepare_phase(
         // F-35 (#1216): single-page mode never runs discovery, so the seed
         // pattern guard needs a patterns-only config — no TLS/sitemap
         // projection involved, keeping `--h2-profile` semantics unchanged here.
-        let seed_guard = CrawlerConfig::builder(opts.url.clone())
+        let seed_guard = CrawlerConfig::builder(opts.url.as_url().clone())
             .include_patterns(opts.crawl.include_patterns.clone())
             .exclude_patterns(opts.crawl.exclude_patterns.clone())
             .build();
-        plan_urls(true, false, opts.url.clone(), Vec::new(), &seed_guard)
+        // Short local keeps the arg-span under rustfmt's fn_call_width,
+        // so the call stays single-line and prepare_phase under the
+        // clippy too_many_lines ratchet ceiling (#516).
+        let seed = opts.url.as_url().clone();
+        plan_urls(true, false, seed, Vec::new(), &seed_guard)
     } else {
         // Honor `--h2-profile` for URL discovery (#312): an unknown profile is a
         // config error (exit 78), consistent with the scrape and batch phases.
@@ -602,7 +606,7 @@ async fn prepare_phase(
         plan_urls(
             false,
             opts.crawl.use_sitemap,
-            opts.url.clone(),
+            opts.url.as_url().clone(),
             discovered_urls,
             &crawler_config,
         )
@@ -1274,7 +1278,7 @@ fn build_batch_crawler_config(
     tls_emulation: wreq_util::Profile,
     budget: &crate::domain::budget::BudgetModel,
 ) -> Result<CrawlerConfig, CliExit> {
-    let crawler_config = CrawlerConfig::builder(opts.url.clone())
+    let crawler_config = CrawlerConfig::builder(opts.url.as_url().clone())
         .max_pages(opts.crawl.max_pages)
         .max_depth(opts.crawl.max_depth)
         .include_patterns(opts.crawl.include_patterns.clone())
@@ -2563,7 +2567,7 @@ mod tests {
         use crate::application::crawl_options::{CrawlLimits, NetworkOptions};
         use crate::cli::orchestrator::prepare_phase;
 
-        let url = url::Url::parse("https://example.com").expect("valid url");
+        let url = crate::domain::ValidUrl::parse("https://example.com").expect("valid url");
         let opts = CrawlOptions {
             url,
             crawl: CrawlLimits {

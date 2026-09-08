@@ -31,6 +31,7 @@ use wreq_util::Profile;
 
 use super::checkpoint::{
     BannedDomain, BincodeCheckpoint, CheckpointPath, CheckpointStore, CrawlCheckpoint,
+    CURRENT_CHECKPOINT_VERSION,
 };
 use super::collector::ResultsCollector;
 use super::concurrency_level::{ConcurrencyLevel, SharedConcurrencyLevel};
@@ -551,10 +552,18 @@ impl Engine {
             .unwrap_or_default();
         CrawlCheckpoint {
             visited: visited_set,
-            queued: self.scheduler.snapshot_pending().await,
+            // Bounded by the run's own budget (#1234 / F-39). The frontier is an
+            // execution artefact, not a site map: a crawl never visits more than
+            // max_pages, so anything past that is dead weight by definition, and an
+            // unbounded frontier made every later --resume drain a stale list first
+            // because max_pages was never part of the checkpoint.
+            queued: self
+                .scheduler
+                .snapshot_pending_bounded(self.config.max_pages)
+                .await,
             pages_crawled: pages,
             banned_domains: banned,
-            version: 1,
+            version: CURRENT_CHECKPOINT_VERSION,
         }
     }
 
@@ -756,7 +765,10 @@ impl Engine {
         }
     }
 
-    /// Restore the pending queue from a checkpoint.
+    /// Restore the pending frontier from a checkpoint.
+    ///
+    /// The list was truncated to the run's `max_pages` when it was written
+    /// (#1234), so this can never re-inject an unbounded frontier.
     fn restore_queued(scheduler: &mut CrawlScheduler, queued: &[String]) {
         if !queued.is_empty() {
             scheduler.restore_pending(queued);
