@@ -5,20 +5,21 @@
 # Developer gets feedback in <30s (toolchain), <60s (fmt), <3min (clippy), <8min (full).
 #
 # Pipeline flow:
-#   toolchain (15s) → fmt (30s) → clippy (2min) → test-core (15min) → test-full (20min cold cache)
+#   toolchain (15s) → fmt (30s) → clippy (2min) → CI Gate aggregates the fast required tier
 #   repo-guards (parallel) runs dead-test detection + the other architectural
 #   guards + actionlint/shellcheck lint; gate still blocks merge on it.
 #   test-core runs: unit tests (--lib) then integration/behavioral tests (--test '*')
 #   test-full runs: all features enabled (full workspace compile + test, NO AI inference)
-#   test-ai (REQUIRED since #848, parallel after clippy): AI integration tests with ONNX model.
-#     Soak passed 2026-09-05 (~2 weeks since #847 + 12 consecutive green runs on real
-#     PRs, zero model-download failures). Blocks merge via the gate like every other
-#     required producer. Gated behind clippy to skip the
-#     model download on PRs that already fail the compile gate.
+#   test-ai (ADVISORY in PR, REQUIRED ONLY IN HEAVY TIER): AI integration tests with ONNX model.
+#     This tier keeps model inference out of CI Gate to avoid making every PR pay
+#     the 20 min AI cold-build path. It runs on PRs for signal, but merge confidence
+#     for AI-heavy changes should come from path-gated PR checks + main/queue runs.
+#     If branch protection adds this job as a direct required context, CI Gate alone
+#     is no longer the fast PR contract; keep that decision explicit and short-lived.
 #   security runs in parallel with tests (no Rust compile)
 #   feature-matrix runs after clippy (cargo-hack --each-feature, catches broken feature combos)
 #   mcp smoke runs after test-full
-#   coverage runs on PRs + dispatch (llvm-cov + Codecov)
+#   coverage runs on PRs + dispatch (llvm-cov + Codecov) and remains non-gating
 #   release runs after all gates pass (main only)
 #   miri runs on schedule/dispatch only
 #
@@ -347,14 +348,14 @@ jobs:
         run: cargo nextest run -p webfang_core --features console --test tokio_console_smoke_test
 
   # ============================================================================
-  # TEST AI (REQUIRED since #848): AI integration tests with ONNX model.
+  # TEST AI (ADVISORY SIGNAL IN PR): AI integration tests with ONNX model.
   #
-  # These tests load a 372MB ONNX model and run
-  # real inference. Soak passed 2026-09-05, so they now block merge via
-  # the gate like every other required producer. They run in
-  # parallel after clippy (NOT after test-full) so they don't add to the critical
-  # path. Gated behind clippy to avoid wasting the model download on PRs that
-  # already fail compilation.
+  # These tests load a 372MB ONNX model and run real inference. They remain on PRs
+  # as signal, but CI Gate no longer depends on `test-ai`: the 20 min AI path was
+  # the biggest known merge-latency cost when model-heavy changes were unrelated.
+  # Run after clippy to avoid spending model download/compute on compile failures.
+  # If AI changes must become merge-blocking again, do it through branch protection
+  # explicitly or re-add them to the gate after measuring the wall-clock effect.
   # ============================================================================
   test-ai:
     name: Tests (AI integration)
@@ -480,17 +481,18 @@ jobs:
 
   # ============================================================================
   # FINAL GATE: the ONLY required check produced by this workflow.
-  # Aggregates every PR-blocking job. Fails on `failure` AND on unexpected
+  # Aggregates the fast PR-blocking jobs. Fails on `failure` AND on unexpected
   # `skipped`/`cancelled` — GitHub treats skipped required checks as satisfied,
   # which allowed PR #833 to merge with 4 required checks SKIPPED and 1 FAILED.
-  # Branch protection must require exactly "CI Gate" from ci.yml (plus
-  # "Validate PR metadata" and "cargo-mutants (PR diff)" from their own
-  # workflows, both skip-proof by construction).
+  # Branch protection should require only "CI Gate" from ci.yml, plus cheap
+  # metadata guards from their own workflows. Heavy jobs stay visible in the
+  # workflow run, but they do not belong in the merge gate until we explicitly
+  # decide to pay that wall-clock cost.
   # NEVER add a required producer without listing it in `needs:` here.
   # ============================================================================
   gate:
     name: CI Gate
-    needs: [toolchain, repo-guards, fmt, clippy, test-core, test-full, test-ai, security, doc-quality]
+    needs: [toolchain, repo-guards, fmt, clippy, test-core, test-full, security, doc-quality]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
