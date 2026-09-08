@@ -85,7 +85,10 @@ impl McpHandler {
         description = "List all WAF/CAPTCHA providers that can be detected by the WAF inspector."
     )]
     #[instrument(skip(self))]
-    async fn list_waf_providers(&self) -> Result<CallToolResult, McpError> {
+    async fn list_waf_providers(
+        &self,
+        Parameters(_params): Parameters<ListWafProvidersParams>,
+    ) -> Result<CallToolResult, McpError> {
         let _permit = acquire_semaphore!(self, security);
 
         let providers =
@@ -100,7 +103,10 @@ impl McpHandler {
         description = "Get scraping metrics including request timing, status code distribution, and pages scraped per domain. Per-domain stats are capped at 500 domains; domains beyond the cap aggregate under \"otros\""
     )]
     #[instrument(skip(self))]
-    async fn get_scrape_metrics(&self) -> Result<CallToolResult, McpError> {
+    async fn get_scrape_metrics(
+        &self,
+        Parameters(_params): Parameters<GetScrapeMetricsParams>,
+    ) -> Result<CallToolResult, McpError> {
         let _permit = acquire_semaphore!(self, security);
 
         Ok(render_metrics(&self.state.metrics_snapshot()))
@@ -616,7 +622,7 @@ mod tests {
         let (_tmp, container) = super_test_container().await;
         let handler = McpHandler::new(McpState::new(container));
         let res = handler
-            .list_waf_providers()
+            .list_waf_providers(Parameters(ListWafProvidersParams {}))
             .await
             .expect("list_waf_providers returns Ok");
         let text = result_text(&res);
@@ -628,7 +634,7 @@ mod tests {
         let (_tmp, container) = super_test_container().await;
         let handler = McpHandler::new(McpState::new(container));
         let res = handler
-            .get_scrape_metrics()
+            .get_scrape_metrics(Parameters(GetScrapeMetricsParams {}))
             .await
             .expect("get_scrape_metrics returns Ok");
         let json = serde_json::to_value(&res).expect("serialize");
@@ -654,7 +660,7 @@ mod tests {
             Duration::from_millis(5),
         ));
         let res = handler
-            .get_scrape_metrics()
+            .get_scrape_metrics(Parameters(GetScrapeMetricsParams {}))
             .await
             .expect("get_scrape_metrics returns Ok");
         let text = result_text(&res);

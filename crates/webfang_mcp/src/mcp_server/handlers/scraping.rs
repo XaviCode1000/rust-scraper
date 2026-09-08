@@ -1079,6 +1079,7 @@ mod tests {
                 urls: vec![vu("http://127.0.0.1/")],
                 concurrency: Some(2),
                 ignore_robots: None,
+                single_page: None,
             }))
             .await;
         assert_ssrf_rejected(res);
@@ -1106,6 +1107,7 @@ mod tests {
             urls: vec![vu("https://example.com")],
             concurrency: Some(0),
             ignore_robots: None,
+            single_page: None,
         }
         .validate();
         assert!(batch.is_err(), "concurrency 0 must be rejected: {batch:?}");

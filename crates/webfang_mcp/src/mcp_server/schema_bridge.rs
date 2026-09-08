@@ -97,9 +97,12 @@ pub const PROCESS_EXPORT_PIPELINE_PROPERTIES: &[SpecProperty] = &[
 /// `scrape_batch`: the `ignore_robots` field overlaps `crawler::GROUP`
 /// (issue #948 coverage gap — the tool was registered in WU3 without
 /// a bridge table). Other params (`urls`, `concurrency`) are MCP-only
-/// and stay on the schemars derive.
-pub const SCRAPE_BATCH_PROPERTIES: &[SpecProperty] =
-    &[prop("ignore_robots", &crawler::IGNORE_ROBOTS)];
+/// and stay on the schemars derive. `single_page` overlaps the spec too
+/// (AUDIT-02 P6-4 CLI `--single-page` parity).
+pub const SCRAPE_BATCH_PROPERTIES: &[SpecProperty] = &[
+    prop("ignore_robots", &crawler::IGNORE_ROBOTS),
+    prop("single_page", &crawler::SINGLE_PAGE),
+];
 
 /// `get_accessibility_snapshot`: the `selector` field overlaps
 /// `crawler::GROUP` (issue #948 coverage gap). `url`, `interactive_only`,
@@ -657,6 +660,24 @@ mod tests {
             rendered["default"], derived_ignore_robots["default"],
             "bridge must override the schemars derive's default with the spec's"
         );
+    }
+
+    /// Proof (AUDIT-02 P6-4): `scrape_batch` advertises `single_page`
+    /// through the spec entry — CLI `--single-page` parity — with the F5
+    /// nullability promotion for the `Option<bool>` field.
+    #[test]
+    fn scrape_batch_single_page_renders_through_spec_entry() {
+        let schema = scrape_batch_input_schema();
+        let rendered = &schema["properties"]["single_page"];
+
+        let expected = crawler::SINGLE_PAGE.json_schema();
+        assert_eq!(
+            rendered["type"],
+            json!(["boolean", "null"]),
+            "single_page (Option<bool>) must advertise a nullable type"
+        );
+        assert_eq!(rendered["description"], expected["description"]);
+        assert_eq!(rendered["default"], expected["default"]);
     }
 
     /// Proof (issue #948 coverage gap): `get_accessibility_snapshot` now

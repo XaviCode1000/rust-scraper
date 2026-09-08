@@ -281,6 +281,7 @@ fn scrape_batch_params_rejects_empty_list() {
         urls: vec![],
         concurrency: None,
         ignore_robots: None,
+        single_page: None,
     };
     let err = p.validate().unwrap_err();
     assert!(matches!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS));
@@ -305,6 +306,7 @@ fn scrape_batch_params_rejects_oversize_concurrency() {
         urls: vec![vu("https://example.com")],
         concurrency: Some(65),
         ignore_robots: None,
+        single_page: None,
     };
     let err = p.validate().unwrap_err();
     assert!(matches!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS));
@@ -316,6 +318,7 @@ fn scrape_batch_params_accepts_valid() {
         urls: vec![vu("https://example.com"), vu("https://other.example/path")],
         concurrency: Some(8),
         ignore_robots: None,
+        single_page: None,
     };
     p.validate().expect("valid batch");
 }
