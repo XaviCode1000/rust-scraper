@@ -139,28 +139,59 @@ impl std::fmt::Display for CorrelationId {
 /// This enforces that ScrapedContent always has a valid URL,
 /// preventing runtime errors from invalid URLs.
 ///
+/// Every public construction path applies the URL hardening policy — the
+/// #675-2 http(s) scheme allow-list and the #675-5 credential strip — via
+/// [`parse`](Self::parse), [`try_from_url`](Self::try_from_url) or
+/// [`TryFrom<url::Url>`](std::convert::TryFrom). AUDIT-01 F-31 (#1233)
+/// removed the two unhardened doors that used to bypass it: the public
+/// infallible `new` and the blanket `From<url::Url>` impl.
+///
 /// # Examples
 ///
 /// ```
 /// use webfang_core::domain::ValidUrl;
 ///
-/// // Create from parsed URL
-/// let url = url::Url::parse("https://example.com").unwrap();
-/// let valid = ValidUrl::new(url);
-/// assert_eq!(valid.as_str(), "https://example.com/");  // URL adds trailing slash
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// // From a string: parse applies the hardening policy.
+/// let valid = ValidUrl::parse("https://example.com")?;
+/// assert_eq!(valid.as_str(), "https://example.com/"); // URL adds trailing slash
 ///
-/// // Or parse directly
-/// let valid = ValidUrl::parse("https://example.com").unwrap();
-/// assert!(valid.as_str().starts_with("https://example.com"));
+/// // From an already-parsed url::Url: a FALLIBLE conversion, never `into()`.
+/// let url = url::Url::parse("https://example.com/article")?;
+/// let valid = ValidUrl::try_from(url)?;
+/// assert_eq!(valid.as_str(), "https://example.com/article");
+///
+/// // Credentials never survive and non-http(s) schemes never construct.
+/// let leaky = url::Url::parse("https://user:secretpass@example.com/x")?;
+/// assert_eq!(ValidUrl::try_from(leaky)?.as_str(), "https://example.com/x");
+/// assert!(ValidUrl::parse("file:///etc/passwd").is_err());
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ValidUrl(url::Url);
 
 impl ValidUrl {
-    /// Create a new ValidUrl from a validated url::Url
+    /// Wrap an already-parsed `url::Url` WITHOUT applying any policy.
     ///
-    /// This is infallible since the URL is already parsed.
-    pub fn new(url: url::Url) -> Self {
+    /// AUDIT-01 F-31 (#1233): this is the raw wrap — no #675-2 scheme
+    /// allow-list and no #675-5 credential strip. It used to be `pub`, so
+    /// any caller holding a `url::Url` could mint a `ValidUrl` for a
+    /// `data:` URL or for `https://user:pass@host`, and the credentials then
+    /// reached `ScrapedContent.url` and leaked into Markdown frontmatter and
+    /// every downstream export.
+    ///
+    /// It is now `pub(crate)` AND test-only: once every production call site
+    /// moved to [`try_from_url`](Self::try_from_url), no shipped code path
+    /// needed an unhardened wrap at all, so `#[cfg(test)]` keeps the door
+    /// closed in release builds (and keeps the lint clean without an
+    /// `#[allow(dead_code)]` suppression). Construction from outside this
+    /// crate goes through [`parse`](Self::parse),
+    /// [`try_from_url`](Self::try_from_url) or
+    /// [`TryFrom<url::Url>`](std::convert::TryFrom) — all fallible, all
+    /// hardened.
+    #[cfg(test)]
+    pub(crate) fn new(url: url::Url) -> Self {
         Self(url)
     }
 
@@ -192,9 +223,10 @@ impl ValidUrl {
     /// For callers like the asset extractor, whose URLs come from
     /// `base.join(src)` (a hostile `src` can change the scheme), this is
     /// the validating edge that keeps the policy in ONE place instead of
-    /// re-implementing it per call site. An inherent method rather than
-    /// `TryFrom<url::Url>` because the existing infallible
-    /// `From<url::Url>` impl already owns the blanket `TryFrom`.
+    /// re-implementing it per call site. Since F-31 (#1233) deleted the
+    /// infallible `From<url::Url>` impl, [`TryFrom<url::Url>`](std::convert::TryFrom)
+    /// is available too and delegates here, so the trait spelling and the
+    /// inherent spelling are the same gate.
     ///
     /// # Errors
     ///
@@ -245,9 +277,16 @@ impl ValidUrl {
     }
 }
 
-impl From<url::Url> for ValidUrl {
-    fn from(url: url::Url) -> Self {
-        Self(url)
+/// F-31 (#1233): the hardened conversion. Delegates to
+/// [`try_from_url`](Self::try_from_url), so it applies the #675-2 scheme
+/// allow-list and the #675-5 credential strip. This impl exists only
+/// because the infallible `From<url::Url>` blanket — which owned the
+/// coherence slot and let `url.into()` bypass every policy — was deleted.
+impl TryFrom<url::Url> for ValidUrl {
+    type Error = crate::ScraperError;
+
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        Self::try_from_url(url)
     }
 }
 
@@ -398,9 +437,9 @@ mod tests {
     }
 
     #[test]
-    fn test_valid_url_from_trait() {
+    fn test_valid_url_try_from_trait() {
         let url = url::Url::parse("https://example.com").unwrap();
-        let valid: ValidUrl = url.into();
+        let valid: ValidUrl = ValidUrl::try_from(url).expect("https must convert");
         assert_eq!(valid.as_str(), "https://example.com/"); // URL adds trailing slash
     }
 
@@ -634,5 +673,68 @@ mod tests {
         let ok = base.join("/img/a.png").expect("joins");
         let valid = ValidUrl::try_from_url(ok).expect("https passes");
         assert_eq!(valid.as_str(), "https://example.com/img/a.png");
+    }
+
+    /// F-31 (#1233): the trait spelling must be the SAME gate as
+    /// `try_from_url`. Before the fix, `From<url::Url>`/`new` let a joined
+    /// `data:`/`blob:`/`file:` URL through untouched.
+    #[test]
+    fn valid_url_try_from_trait_applies_scheme_hardening() {
+        let base = url::Url::parse("https://example.com/").expect("base");
+        for hostile in [
+            "data:text/html,<h1>x</h1>",
+            "blob:https://example.com/uuid",
+            "file:///etc/passwd",
+        ] {
+            let joined = base.join(hostile).expect("joins");
+            assert!(
+                ValidUrl::try_from(joined).is_err(),
+                "{hostile} must not construct a ValidUrl via TryFrom"
+            );
+        }
+    }
+
+    /// F-31 (#1233): THE assertion that was missing. `parse` already stripped
+    /// credentials, but the infallible doors did not, so `user:secretpass@host`
+    /// reached `ScrapedContent.url` and the exports built from it. `TryFrom`
+    /// must strip them exactly like `parse` does.
+    #[test]
+    fn valid_url_try_from_trait_strips_credentials() {
+        let url = url::Url::parse("https://user:secretpass@example.com/path").expect("parses");
+        let valid = ValidUrl::try_from(url).expect("https is an allowed scheme");
+        assert_eq!(valid.as_str(), "https://example.com/path");
+        assert!(valid.as_url().username().is_empty());
+        assert!(valid.as_url().password().is_none());
+        assert!(
+            !valid.as_str().contains("secretpass"),
+            "password must not survive"
+        );
+    }
+
+    /// Same guarantee through the inherent spelling, so both doors are pinned
+    /// independently of how a caller reaches the gate.
+    #[test]
+    fn valid_url_try_from_url_strips_credentials() {
+        let url = url::Url::parse("http://admin:hunter2@127.0.0.1:9/path").expect("parses");
+        let valid = ValidUrl::try_from_url(url).expect("http is an allowed scheme");
+        assert_eq!(valid.as_str(), "http://127.0.0.1:9/path");
+        assert!(
+            !valid.as_str().contains("hunter2"),
+            "password must not survive"
+        );
+    }
+
+    /// F-31 (#1233): the deleted `From<url::Url>` impl made an unchecked
+    /// wrap IMPLICIT via `.into()`. Pin that the coercion no longer exists by
+    /// asserting the fallible path is the only one that compiles for a
+    /// hostile URL.
+    #[test]
+    fn valid_url_try_from_trait_rejects_before_wrapping() {
+        let url = url::Url::parse("file:///etc/passwd").expect("WHATWG-valid");
+        let err = ValidUrl::try_from(url).expect_err("file: must never construct a ValidUrl");
+        assert!(
+            err.to_string().contains("file"),
+            "Error should name the rejected scheme, got: {err}"
+        );
     }
 }

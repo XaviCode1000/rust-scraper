@@ -217,10 +217,19 @@ impl McpHandler {
                 Some(serde_json::Value::String("filename".to_string())),
             )
         })?;
+        // F-31 (#1233): the synthetic URL goes through the HARDENED gate, not
+        // the old infallible wrap. A `filename` that smuggled credentials or
+        // flipped the scheme can no longer reach an export unvalidated.
+        let valid_url = webfang_core::domain::ValidUrl::try_from_url(url.clone()).map_err(|e| {
+            McpError::invalid_params(
+                format!("URL no soportada para el nombre de archivo '{url}': {e}"),
+                Some(serde_json::Value::String("filename".to_string())),
+            )
+        })?;
         let scraped = ScrapedContent {
             title: filename.clone(),
             content: params.content.clone(),
-            url: webfang_core::domain::ValidUrl::new(url),
+            url: valid_url,
             excerpt: None,
             author: None,
             date: None,
@@ -542,7 +551,10 @@ mod handler_tests {
         let content = ScrapedContent {
             title: "Seed".to_string(),
             content: "seed body".to_string(),
-            url: ValidUrl::new(url::Url::parse("https://example.com/seed").expect("valid")),
+            url: ValidUrl::try_from_url(
+                url::Url::parse("https://example.com/seed").expect("valid"),
+            )
+            .expect("seed fixture is a plain https URL"),
             excerpt: None,
             author: None,
             date: None,
@@ -859,7 +871,10 @@ mod handler_tests {
             content: ScrapedContent {
                 title: "Slow".to_string(),
                 content: "slow scan body".to_string(),
-                url: ValidUrl::new(url::Url::parse("https://example.com/slow").expect("valid")),
+                url: ValidUrl::try_from_url(
+                    url::Url::parse("https://example.com/slow").expect("valid"),
+                )
+                .expect("slow fixture is a plain https URL"),
                 excerpt: None,
                 author: None,
                 date: None,

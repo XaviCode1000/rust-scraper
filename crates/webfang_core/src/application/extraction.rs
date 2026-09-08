@@ -345,7 +345,7 @@ pub async fn extract_content(
             Ok(ScrapedContent {
                 title: crate::application::resolve_title(&article.title, url),
                 content: article.text_content,
-                url: ValidUrl::new(url.clone()),
+                url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: article.excerpt.as_deref().map(|e| {
                     crate::domain::excerpt_repair::repair_empty_byline(e, author.as_deref())
                 }),
@@ -398,7 +398,7 @@ pub async fn extract_content(
                     .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {url}")))?
                     .to_string(),
                 content: fallback_content,
-                url: ValidUrl::new(url.clone()),
+                url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: None,
                 author: None,
                 date: None,

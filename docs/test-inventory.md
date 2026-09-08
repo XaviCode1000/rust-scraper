@@ -1,7 +1,7 @@
 # Test Inventory — `#[ignore]` Catalog (Gate 0)
 
-**Source of truth:** `rg -n "#\[ignore" crates/ --glob '!target'` — **31 rows** (26 test attributes + 5 doc/comment mentions).
-Generated: `2026-08-21`. Linked to `COMPATIBILITY-MATRIX.md`.
+**Source of truth:** `rg -n "#\[ignore" crates/ --glob '!target'` — **32 rows** (27 test attributes + 5 doc/comment mentions).
+Generated: `2026-08-21`, updated `2026-09-07`. Linked to `COMPATIBILITY-MATRIX.md`.
 
 **CI enforcement:** this baseline is a frozen budget — `scripts/check_ignored_guard.sh` runs in the CI `toolchain` job and fails on any drift between this inventory and the live count (stabilization-sitemap-regression). Update this file in the same PR when adding/removing an ignored test.
 
@@ -14,8 +14,9 @@ Generated: `2026-08-21`. Linked to `COMPATIBILITY-MATRIX.md`.
 | Tracing | 1 | `tracing global subscriber` | #501 | Keep ignored; subscriber race |
 | WAF | 1 | `waf` / bare `#[ignore]` | #337 | Keep ignored; manual gauntlet |
 | Comments/docs | 5 | doc comment mentions `#[ignore]` | #386 | Not tests — count only |
+| Reproduction | 1 | race window too narrow to force from a fixture | #1230 | Keep ignored; the deterministic pin is the seam test |
 
-Total: 21+3+1+1+5 = **31**.
+Total: 21+3+1+1+5+1 = **32**.
 
 ## Sitemap correction
 
@@ -25,7 +26,7 @@ Stale roadmap claim "7 sitemap tests ignored" is **false**. Reality:
 
 Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 
-## Full catalog (31 rows)
+## Full catalog (32 rows)
 
 | # | Test / Location | File:Line | Reason | Issue | Next |
 |---|-----------------|-----------|--------|-------|------|
@@ -52,7 +53,7 @@ Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 | 21 | `ai_integration` | `crates/webfang_core/tests/behavioral/cli/ai_integration_test.rs:407` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 22 | `doc comment` | `crates/webfang_core/tests/behavioral/cli/error_path_test.rs:288` | `/// No #[ignore]: the gate fires before any ONNX model could load.` | #386 | docs only |
 | 23 | `doc comment` | `crates/webfang_core/tests/behavioral/cli/error_path_test.rs:366` | `/// No #[ignore]: the gate fires before any ONNX model could load.` | #386 | docs only |
-| 24 | `export_vector` | `crates/webfang_core/tests/behavioral/cli/export_test.rs:25` | `requires cached ONNX model` | #433 | Sprint 1 |
+| 24 | `vector_export_total_documents_matches_documents` | `crates/webfang_core/tests/behavioral/cli/export_test.rs:51` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 25 | `trace_correlation` | `crates/webfang_core/tests/behavioral/cli/trace_correlation_test.rs:217` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 26 | `waf_gauntlet` | `crates/webfang_core/tests/behavioral/cli/waf_gauntlet_test.rs:126` | `#[ignore]` (bare, WAF fixtures) | #337 | manual |
 | 27 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1375` | `requires cached ONNX model` | #433 | Sprint 1 |
@@ -60,6 +61,28 @@ Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 | 29 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1475` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 30 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1530` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 31 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1559` | `requires cached ONNX model` | #433 | Sprint 1 |
+| 32 | `concurrent_resume_processes_lose_no_records` | `crates/webfang_core/tests/behavioral/cli/transactional_store_test.rs:221` | `asserts the no-loss invariant under real multi-process contention, but measured 8/8 runs against the unfixed code with zero records lost — the clobber window is microseconds wide and a fixture cannot force it. NOT a falsifier of #1230; the deterministic falsifier is tests/record_store_transaction_test.rs` | #1230 | Keep ignored; run by hand for stress evidence |
+
+> **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
+> the **count** against the `Total:` line above. The `File:Line` column is informational and has
+> silently drifted — e.g. `sitemap_parser.rs` is recorded at `:1218` but the live attribute is at
+> `:1404`, and `waf_gauntlet_test.rs` at `:126` vs live `:157`. The line-level diff only prints when
+> the counts already disagree, so drift is invisible until an unrelated PR trips the budget. The
+> `:Line` values below are therefore **not** reliable anchors.
+
+> **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
+> the **count** against the `Total:` line above. The `File:Line` column is informational and has
+> silently drifted — e.g. `sitemap_parser.rs` is recorded at `:1218` but the live attribute is at
+> `:1404`, and `waf_gauntlet_test.rs` at `:126` vs live `:157`. The line-level diff only prints when
+> the counts already disagree, so drift is invisible until an unrelated PR trips the budget. The
+> `:Line` values below are therefore **not** reliable anchors.
+
+> **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
+> the **count** against the `Total:` line above. The `File:Line` column is informational and has
+> silently drifted — e.g. `sitemap_parser.rs` is recorded at `:1218` but the live attribute is at
+> `:1404`, and `waf_gauntlet_test.rs` at `:126` vs live `:157`. The line-level diff only prints when
+> the counts already disagree, so drift is invisible until an unrelated PR trips the budget. The
+> `:Line` values below are therefore **not** reliable anchors.
 
 ## Generation
 

@@ -394,6 +394,13 @@ impl Container {
             backoff_base_ms: http_config.backoff_base_ms,
             backoff_max_ms: http_config.backoff_max_ms,
             obscura_binary: opts.network.obscura_binary.clone(),
+            // FIX-1 (#1231 F-12): the operator's --max-file-size now also caps PAGE
+            // bodies (it only bounded assets before).
+            max_page_bytes: Some(
+                opts.network
+                    .max_file_size
+                    .unwrap_or(crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES),
+            ),
         }
     }
 

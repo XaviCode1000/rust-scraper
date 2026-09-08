@@ -50,7 +50,7 @@ case "$CMD" in
     jq -r 'select(.span_duration_ms != null) | [.span_duration_ms, .span] | @tsv' "$FILE" | sort -rn | head -n "$N"
     ;;
   stages)
-    jq -r 'select(.span == "pipeline_stage") | .fields.stage' "$FILE" | sort | uniq -c | sort -rn
+    jq -r 'select(.span == "pipeline_stage" and .record != "span_close") | .fields.stage' "$FILE" | sort | uniq -c | sort -rn
     ;;
   progress)
     jq -c 'select(.fields.message? == "crawl progress") | {pages: .fields.pages_crawled, pct: .fields.progress_pct, eta_s: .fields.eta_secs}' "$FILE"
@@ -59,7 +59,7 @@ case "$CMD" in
     jq -c 'select(.fields.message? == "crawl completed")' "$FILE"
     ;;
   counts)
-    jq -r '.span // "event"' "$FILE" | sort | uniq -c | sort -rn
+    jq -r 'select(.record != "span_close") | .span // "event"' "$FILE" | sort | uniq -c | sort -rn
     ;;
   urls-failed)
     jq -r 'select(.level == "ERROR") | .fields.url // empty' "$FILE" | sort -u
@@ -70,7 +70,7 @@ case "$CMD" in
       echo "error: 'trace' requires a <trace_id> argument" >&2
       exit 1
     fi
-    jq -c "select(.trace_id == \"$TRACE\" or ((.fields.trace_id? // \"\") | contains(\"$TRACE\")))" "$FILE"
+    jq -c "select(.trace_id == \"$TRACE\")" "$FILE"
     ;;
   waf)
     jq -c 'select((.fields.message? // "") | test("WAF|Banned domain"; "i"))' "$FILE"

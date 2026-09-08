@@ -38,7 +38,7 @@ const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 /// use webfang_core::infrastructure::downloader::wreq_downloader::WreqDownloader;
 /// use webfang_core::infrastructure::downloader::Downloader;
 ///
-/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000).unwrap();
+/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000, 50_000_000).unwrap();
 /// let page = downloader.fetch(&"https://example.com".parse().unwrap()).await.unwrap();
 /// assert_eq!(page.status, 200);
 /// ```
@@ -55,6 +55,11 @@ pub struct WreqDownloader {
     /// Base delay for the exponential backoff applied to retriable failures.
     backoff_base_ms: u64,
     backoff_max_ms: u64,
+    /// Decompressed-body cap for page fetches (FIX-1, #1231 F-12). The read
+    /// aborts mid-body once the streamed byte count exceeds this value, so
+    /// memory stays bounded even against a decompression bomb with a tiny
+    /// declared Content-Length.
+    max_page_bytes: u64,
 }
 
 impl WreqDownloader {
@@ -102,6 +107,7 @@ impl WreqDownloader {
         max_retries: u32,
         backoff_base_ms: u64,
         backoff_max_ms: u64,
+        max_page_bytes: u64,
     ) -> Result<Self, DownloadError> {
         // Canonical detector seam (Q2): same "auto" as every other subsystem.
         let pool_size = std::cmp::max(
@@ -201,6 +207,7 @@ impl WreqDownloader {
             max_retries,
             backoff_base_ms,
             backoff_max_ms,
+            max_page_bytes,
         })
     }
 
@@ -212,6 +219,7 @@ impl WreqDownloader {
             client: Arc::new(client),
             timeout_secs,
             pinned_ua: None,
+            max_page_bytes: crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
             max_retries: 3,
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
@@ -387,7 +395,7 @@ impl WreqDownloader {
             })
             .collect();
 
-        let html = response.text().await.map_err(DownloadError::from)?;
+        let html = self.read_body_capped(response).await?;
 
         debug!(
             "Fetched {} ({} bytes, {} cookies)",
@@ -403,6 +411,57 @@ impl WreqDownloader {
             headers,
             cookies,
         })
+    }
+
+    /// Read the response body with a HARD cap on the decompressed byte count
+    /// (FIX-1, #1231 F-12).
+    ///
+    /// Replaces the unbounded `response.text()`: the body is consumed as a
+    /// stream of already-decompressed chunks and the read aborts as soon as
+    /// the accumulated size exceeds the configured `max_page_bytes`, so
+    /// memory stays bounded at ~cap + one chunk regardless of the wire
+    /// content (the audit's gzip bomb inflated 60 MB from a tiny
+    /// Content-Length). Charset handling mirrors wreq's `text_with_charset`:
+    /// the Content-Type charset param wins, UTF-8 as fallback.
+    async fn read_body_capped(&self, response: wreq::Response) -> Result<String, DownloadError> {
+        use futures::StreamExt;
+
+        // Charset from Content-Type BEFORE the body is consumed (headers stay
+        // readable until the body stream is taken).
+        let content_type = response
+            .headers()
+            .get(wreq::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                value.split(';').find_map(|part| {
+                    let part = part.trim();
+                    part.strip_prefix("charset=")
+                        .map(|c| c.trim_matches('"').trim().to_ascii_lowercase())
+                })
+            })
+            .unwrap_or_else(|| "utf-8".to_string());
+
+        let limit = self.max_page_bytes;
+        let mut stream = response.bytes_stream();
+        let mut buf = bytes::BytesMut::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(DownloadError::from)?;
+            if buf.len().saturating_add(chunk.len()) as u64 > limit {
+                // The outer fetch span already carries the URL; the event only
+                // needs the machine-readable cap facts.
+                warn!(
+                    limit = limit,
+                    "response body exceeded the page size cap; aborting read"
+                );
+                return Err(DownloadError::BodyTooLarge { limit });
+            }
+            buf.extend_from_slice(&chunk);
+        }
+
+        let (text, _, _) = encoding_rs::Encoding::for_label(content_type.as_bytes())
+            .unwrap_or(encoding_rs::UTF_8)
+            .decode(&buf);
+        Ok(text.into_owned())
     }
 
     #[instrument(
@@ -425,24 +484,39 @@ impl WreqDownloader {
             let response = match self.send_request(url, None).await {
                 Ok(res) => res,
                 Err(dl_err) => {
-                    // Per-request timeouts are the configured ceiling: retrying against
-                    // the same dead peer doubles wall time without any chance of success.
-                    // Mid-body transients (Io::ConnectionReset / UnexpectedEof) DO retry
-                    // (#649 mid-body transient fix). Only Timeout is terminal here.
-                    if matches!(dl_err, DownloadError::Timeout(_))
-                        || matches!(dl_err.classify(), ErrorClass::PermanentFatal)
-                    {
+                    // Single classification rule (FIX-1, #1236): retry
+                    // everything the domain classifier deems transient, surface
+                    // PermanentFatal immediately. Request timeouts are
+                    // TransientBackoff (F-08, #1231): the most common transient
+                    // failure in crawling (slow-not-dead peer), and the
+                    // configured timeout still caps EACH attempt, so the retry
+                    // budget of `max_retries` x `timeout_secs` is exactly what
+                    // the operator asked for. Builder-class invalid requests
+                    // (unsupported scheme, malformed URL) map to InvalidUrl ->
+                    // PermanentFatal and fail after a single attempt (F-09,
+                    // #1236); mid-body transients (Io::ConnectionReset /
+                    // UnexpectedEof) stay retriable (#649 mid-body transient
+                    // fix).
+                    if matches!(dl_err.classify(), ErrorClass::PermanentFatal) {
                         return Err(dl_err);
                     }
-                    warn!(
-                        attempt = attempt,
-                        max_retries = self.max_retries,
-                        error = %dl_err,
-                        "Transport failure fetching {url} — retrying"
-                    );
+                    // The "retrying" event only fires when a retry will
+                    // actually happen: on the last attempt the loop ends and
+                    // the stored error surfaces without a wasted backoff.
+                    let will_retry = attempt < self.max_retries;
+                    if will_retry {
+                        warn!(
+                            attempt = attempt,
+                            max_retries = self.max_retries,
+                            error = %dl_err,
+                            "Transport failure fetching {url} — retrying"
+                        );
+                    }
                     last_error = Some(dl_err);
-                    self.sleep_before_retry(attempt, self.backoff_delay_ms(attempt))
-                        .await;
+                    if will_retry {
+                        self.sleep_before_retry(attempt, self.backoff_delay_ms(attempt))
+                            .await;
+                    }
                     continue;
                 },
             };
@@ -569,6 +643,7 @@ mod test_support {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -600,6 +675,7 @@ mod tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         assert!(!downloader.supports_interactions());
@@ -623,6 +699,7 @@ mod tests {
                 3,
                 1000,
                 10000,
+                crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
             )
             .unwrap_or_else(|e| panic!("client must build for profile {profile:?}: {e}"));
             assert!(!downloader.supports_interactions());
@@ -663,6 +740,7 @@ mod tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
 
@@ -768,6 +846,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/notfound", mock_server.uri()).parse().unwrap();
@@ -805,6 +884,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -856,6 +936,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/redirect", mock_server.uri()).parse().unwrap();
@@ -910,6 +991,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = format!("{}/redirect", mock_server.uri()).parse().unwrap();
@@ -954,6 +1036,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1014,6 +1097,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1056,6 +1140,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1084,6 +1169,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("newline is not a valid HTTP header name");
@@ -1110,6 +1196,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("newline is not a valid HTTP header value");
@@ -1129,6 +1216,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .err()
         .expect("NUL is not a valid Accept-Language value");
@@ -1165,6 +1253,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1247,6 +1336,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1310,6 +1400,7 @@ mod wiremock_tests {
             3,
             1,
             5,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .expect("client builds");
         let url: Url = format!("{}/", server.uri()).parse().expect("valid url");
@@ -1365,6 +1456,7 @@ mod wiremock_tests {
             3,
             1000,
             10000,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
         )
         .unwrap();
         let url: Url = mock_server.uri().parse().unwrap();
@@ -1375,5 +1467,231 @@ mod wiremock_tests {
             .expect("rotated retry succeeds for unpinned downloads");
         assert_eq!(page.status, 200);
         assert_eq!(page.html, "<html>rotated</html>");
+    }
+    // ------------------------------------------------------------------
+    // FIX-1 (#1231 F-08, #1236 F-09): retry classification contract tests.
+    // The retry loop must honor DownloadError::classify() for the whole
+    // transient family: request timeouts are retriable (the most common
+    // transient failure in crawling), while builder-class errors (invalid
+    // request: unsupported scheme, malformed URL) are permanent and must
+    // surface after a SINGLE attempt.
+    // ------------------------------------------------------------------
+
+    /// F-08: a request that times out is RETRIED and recovery is served.
+    /// wiremock: first /slow hit sleeps past the client timeout (served
+    /// once, `.up_to_n_times(1)`), subsequent /slow hits respond
+    /// instantly. Asserts exactly 2 outbound requests and a successful
+    /// page — the timeout retry fired and its result was used.
+    #[tokio::test]
+    async fn timeout_is_retried_and_recovery_is_served() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("late")
+                    .set_delay(Duration::from_millis(1500)),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("fast"))
+            .mount(&server)
+            .await;
+
+        // timeout 1s so the first /slow hit (1.5s) trips it; short backoff
+        // keeps the test fast.
+        let dl = WreqDownloader::new(
+            1,
+            1,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            2,
+            10,
+            50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+        )
+        .expect("test downloader builds");
+
+        let slow_url: Url = format!("{}/slow", server.uri())
+            .parse()
+            .expect("server uri parses");
+        let page = dl
+            .fetch(&slow_url)
+            .await
+            .expect("retry after timeout must recover");
+        assert_eq!(page.html, "fast");
+        let hits = server
+            .received_requests()
+            .await
+            .expect("received requests")
+            .len();
+        assert_eq!(
+            hits, 2,
+            "timeout retry must produce exactly one re-request, got {hits}"
+        );
+    }
+
+    /// F-09: a builder-class error (unsupported scheme) must NOT be
+    /// retried — single attempt, immediate permanent error.
+    #[tokio::test]
+    async fn unsupported_scheme_is_not_retried() {
+        let dl = WreqDownloader::new(
+            5,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+        )
+        .expect("test downloader builds");
+
+        let url = url::Url::parse("ftp://example.com/x").expect("parseable scheme");
+        let start = std::time::Instant::now();
+        let err = dl.fetch(&url).await.expect_err("ftp must fail");
+        let elapsed = start.elapsed();
+
+        // No exponential backoff between attempts: a single attempt fails
+        // fast. The attempt count itself is not observable without a
+        // socket; the typed error + fast failure are the observables.
+        assert!(
+            matches!(err, DownloadError::InvalidUrl(_)),
+            "builder error must map to InvalidUrl, got: {err:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "no-retry path must fail fast, took {elapsed:?}"
+        );
+    }
+
+    // FIX-1 #1231 F-12: the decompressed body cap. Both tests build real
+    // gzip wire bodies with the existing `async-compression` workspace dep
+    // (same helper pattern as the sitemap_parser tests); wreq's
+    // `.gzip(true)` client transparently inflates them, so the stream
+    // `read_body_capped` accumulates is the DECOMPRESSED payload.
+
+    /// Compress `data` with gzip over tokio (async-compression bufread).
+    async fn gzip_compress(data: &[u8]) -> Vec<u8> {
+        use async_compression::tokio::bufread::GzipEncoder;
+        use tokio::io::{AsyncReadExt, BufReader};
+
+        let mut encoder = GzipEncoder::new(BufReader::new(std::io::Cursor::new(data)));
+        let mut out = Vec::new();
+        encoder
+            .read_to_end(&mut out)
+            .await
+            .expect("in-memory gzip encode");
+        out
+    }
+
+    /// F-12 (negative): a "gzip bomb" — 134 bytes on the wire inflating to
+    /// 100 KiB — must abort at the configured DECOMPRESSED cap with
+    /// `BodyTooLarge`, and because that error classifies PermanentFatal it
+    /// must surface after exactly ONE outbound request (no retry).
+    #[tokio::test]
+    async fn gzip_bomb_is_rejected_at_the_decompressed_cap() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/bomb"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(gzip_compress(&[b'a'; 102_400]).await, "application/gzip")
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+
+        // 64 KiB cap: below the 100 KiB inflated body.
+        let bomb_cap: u64 = 64 * 1024;
+        let dl = WreqDownloader::new(
+            10,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+            bomb_cap,
+        )
+        .expect("test downloader builds");
+
+        let bomb_url: Url = format!("{}/bomb", server.uri())
+            .parse()
+            .expect("server uri parses");
+        match dl.fetch(&bomb_url).await {
+            Ok(page) => panic!(
+                "100 KiB inflated body must exceed the 64 KiB cap, got {} bytes",
+                page.html.len()
+            ),
+            Err(DownloadError::BodyTooLarge { limit }) => {
+                assert_eq!(limit, bomb_cap, "error must carry the configured cap");
+            },
+            Err(other) => panic!("expected BodyTooLarge, got: {other:?}"),
+        }
+
+        let hits = server
+            .received_requests()
+            .await
+            .expect("received requests")
+            .len();
+        assert_eq!(
+            hits, 1,
+            "BodyTooLarge is PermanentFatal: exactly one attempt, got {hits}"
+        );
+    }
+
+    /// F-12 (positive): a gzipped body UNDER the cap is served in full
+    /// after transparent decompression — the cap counts decompressed bytes
+    /// and leaves the happy path untouched.
+    #[tokio::test]
+    async fn gzipped_body_under_the_cap_is_served_decompressed() {
+        let server = MockServer::start().await;
+        let body = b"hello compressed world";
+        Mock::given(method("GET"))
+            .and(path("/small"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(gzip_compress(body).await, "application/gzip")
+                    .insert_header("content-encoding", "gzip"),
+            )
+            .mount(&server)
+            .await;
+
+        let dl = WreqDownloader::new(
+            10,
+            5,
+            Profile::Chrome145,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            10,
+            50,
+            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+        )
+        .expect("test downloader builds");
+
+        let url: Url = format!("{}/small", server.uri())
+            .parse()
+            .expect("server uri parses");
+        let page = dl
+            .fetch(&url)
+            .await
+            .expect("under-cap gzip body must fetch normally");
+        assert_eq!(page.html, "hello compressed world");
     }
 }
