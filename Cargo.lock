@@ -5912,7 +5912,6 @@ dependencies = [
  "dirs 5.0.1",
  "tokio",
  "tracing",
- "url",
  "webfang_ai",
  "webfang_core",
 ]

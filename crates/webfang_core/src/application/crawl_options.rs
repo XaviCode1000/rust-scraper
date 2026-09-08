@@ -52,7 +52,7 @@ impl Default for AiConfig {
 pub struct CrawlOptions {
     /// Target URL to scrape.
     ///
-    /// Hardened [`ValidUrl`] (#1239): parsed at the argv boundary by the CLI
+    /// Hardened [`crate::domain::ValidUrl`] (#1239): parsed at the argv boundary by the CLI
     /// (`parse_seed_url` value parser), so the #675-2 scheme allow-list and
     /// the #675-5 credential strip are applied before the value can reach
     /// `--trace-file` spans, logs, or exports.
