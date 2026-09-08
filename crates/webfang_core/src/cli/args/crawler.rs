@@ -114,7 +114,7 @@ pub(crate) fn parse_max_depth(s: &str) -> Result<u8, String> {
 pub struct CrawlerArgs {
     // ========== Target ==========
     /// URL to scrape (required unless using a subcommand), parsed into a
-    /// hardened [`ValidUrl`] at the argv boundary by [`parse_seed_url`] (#1239).
+    /// hardened [`ValidUrl`] at the argv boundary by `parse_seed_url` (#1239).
     pub url: Option<ValidUrl>,
 
     /// CSS selector for content extraction
