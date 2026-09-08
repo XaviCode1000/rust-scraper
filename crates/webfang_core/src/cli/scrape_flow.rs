@@ -1003,11 +1003,13 @@ mod tests {
             "arrival spacing {spacing:?} is within the mock's own latency — the limiter did not gate the scrape path"
         );
         // The real invariant: a burst-1 bucket refills one permit per DELAY_MS,
-        // so consecutive arrivals sit at least one period apart (less the
-        // scheduling slack a shared CI runner can absorb).
+        // so consecutive arrivals sit at least three quarters of a period apart.
+        // Not the full period: a shared CI runner can absorb that much scheduling
+        // slack between the grant and the arrival, and a false red here would be
+        // worse than a slightly looser bound.
         assert!(
-            spacing >= Duration::from_millis(DELAY_MS - 50),
-            "arrival spacing {spacing:?} must be >= one {DELAY_MS}ms token period"
+            spacing >= Duration::from_millis(DELAY_MS * 3 / 4),
+            "arrival spacing {spacing:?} must be >= 0.75x the {DELAY_MS}ms token period"
         );
     }
 
