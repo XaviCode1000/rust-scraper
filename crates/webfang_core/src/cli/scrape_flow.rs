@@ -1072,6 +1072,7 @@ mod tests {
             None,
             &crate::domain::CorrelationId::new(),
             &CancellationToken::new(),
+            &[],
         )
         .await
         .expect("setup must succeed");
