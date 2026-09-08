@@ -80,36 +80,36 @@ jobs:
       # Always reported check: when the diff touches no gated hot path,
       # the job short-circuits to SUCCESS instead of silently not running.
       - name: Check for hot-path changes
-            id: hotpath
-            run: |
-              # The detector is DERIVED from `.cargo/mutants.toml` `examine_globs`
-              # (#1235, F-40): that file is the single source of the scope policy,
-              # and the previous hand-written regex had drifted from it AND was
-              # anchored to `^crates/` — a pattern that matches nothing in `git
-              # diff` output (real path lines are `+++ b/crates/...`), so the
-              # required check reported SUCCESS for EVERY PR, including ones
-              # touching the gated scope. The derivation extracts each glob,
-              # strips the src/ prefix (the in-diff path form), escapes dots,
-              # and anchors each alternative to `^+++ b/`. `**` tails become `.*`.
-              SCOPE=$(sed -n '/^examine_globs/,/^]/p' .cargo/mutants.toml \
-                | grep -oE '"[^"]+"' | tr -d '"')
-              if [ -z "$SCOPE" ]; then
-                echo "::error::could not derive hot-path scope from .cargo/mutants.toml examine_globs"
-                exit 1
-              fi
-              PATTERN=$(printf '%s\n' "$SCOPE" \
-                | sed -e 's|^crates/webfang_core/src/||' \
-                      -e 's|\.|\\.|g' \
-                | sed -e 's|\*\*$|.*|' \
-                      -e 's|^|\\+\\+\\+ b/crates/webfang_core/src/|' \
-                      -e '/[.][*]$/!s/$/$/' \
-                | paste -sd '|' -)
-              echo "Hot-path detector pattern: $PATTERN"
-              if grep -qE "$PATTERN" git.diff; then
-                echo "changed=true" >> "$GITHUB_OUTPUT"
-              else
-                echo "changed=false" >> "$GITHUB_OUTPUT"
-              fi
+        id: hotpath
+        run: |
+          # The detector is DERIVED from `.cargo/mutants.toml` `examine_globs`
+          # (#1235, F-40): that file is the single source of the scope policy,
+          # and the previous hand-written regex had drifted from it AND was
+          # anchored to `^crates/` — a pattern that matches nothing in `git
+          # diff` output (real path lines are `+++ b/crates/...`), so the
+          # required check reported SUCCESS for EVERY PR, including ones
+          # touching the gated scope. The derivation extracts each glob,
+          # strips the src/ prefix (the in-diff path form), escapes dots,
+          # and anchors each alternative to `^+++ b/`. `**` tails become `.*`.
+          SCOPE=$(sed -n '/^examine_globs/,/^]/p' .cargo/mutants.toml \
+            | grep -oE '"[^"]+"' | tr -d '"')
+          if [ -z "$SCOPE" ]; then
+            echo "::error::could not derive hot-path scope from .cargo/mutants.toml examine_globs"
+            exit 1
+          fi
+          PATTERN=$(printf '%s\n' "$SCOPE" \
+            | sed -e 's|^crates/webfang_core/src/||' \
+                  -e 's|\.|\\.|g' \
+            | sed -e 's|\*\*$|.*|' \
+                  -e 's|^|\\+\\+\\+ b/crates/webfang_core/src/|' \
+                  -e '/[.][*]$/!s/$/$/' \
+            | paste -sd '|' -)
+          echo "Hot-path detector pattern: $PATTERN"
+          if grep -qE "$PATTERN" git.diff; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Skip mutation testing (no hot-path changes)
         if: steps.hotpath.outputs.changed == 'false'
