@@ -849,25 +849,29 @@ Notes for agents: `ddiff`/`dshow`/`dlog` require `difft` (Difftastic) on PATH. `
 
 ---
 
-## 🚧 Sprint 0 Gate 0 — Freeze + StateStore (sdd/stabilization-sprint0-baseline)
+## 🚧 Sprint 0 — StateStore resume contract (sdd/stabilization-sprint0-baseline)
 
-### Freeze policy
+### Gate 0 freeze — RETIRED (2026-09-07, #1241)
 
-- `FREEZE_FEATURES=true` in `.github/workflows/pr-validation.yml` (workflow `env`). When frozen, `type:feature` and `type:breaking-change` are **blocked** with `::error::Gate 0 freeze … Ver sdd/stabilization-sprint0-baseline`.
-- Bypass only with **both** `freeze-exception` label **and** CODEOWNER approval via `gh api repos/$REPO/pulls/$PR/reviews` (`APPROVED` count >0). Fail-closed when `gh` empty or non-numeric. **In this single-maintainer repo the bypass is unreachable** (GitHub forbids self-approval) — verified empirically with PR #814.
-- `enforce_admins:true` (branch protection, `strict:true`) guarantees admins also blocked. Documented here and in `pr-validation.yml` comment.
+The `FREEZE_FEATURES` gate that blocked `type:feature` / `type:breaking-change` PRs has been removed
+from `.github/workflows/pr-validation.yml`, together with `FREEZE_DRAIN_UNTIL`, the drain contract, and
+`scripts/test_freeze_gate.sh`. The Sprint 0 stabilization baseline it protected is complete: all six
+gates ratified and the ADR-0012 intra-crate allowlist at its terminal state (19 entries → 2, both
+declared permanent).
 
-### Drain contract (opening the freeze)
+Two facts from that regime stay in force as general knowledge, because they outlive the gate:
 
-Setting `FREEZE_FEATURES="false"` is NOT a bare toggle. It REQUIRES all three, in the same batch:
+- **A freeze bypass is unreachable in this single-maintainer repo.** Any future gate that requires a
+  CODEOWNER *approval* (`gh api repos/$REPO/pulls/$PR/reviews`, `APPROVED` count > 0) cannot be
+  satisfied by this maintainer — GitHub forbids self-approval. Verified empirically with PR #814.
+  Design future gates on labels or artifact checks, not on approvals nobody can grant.
+- **For `pull_request` events, GitHub evaluates the workflow file from the PR's own merge ref, not
+  `main`'s.** A PR that changes a gate can therefore pass its own new (or relaxed) validation. This is
+  not a freeze-specific quirk — it applies to every `pr-validation.yml` edit, and it is why policy
+  changes need review of the *diff*, not just of the resulting check status.
 
-1. **Linked issue** documenting why the drain is open and what it drains.
-2. **Hard deadline**: set `FREEZE_DRAIN_UNTIL` (ISO date `YYYY-MM-DD`) in the workflow `env`. Empty = no active drain.
-3. **Closing revert PR** restoring `"true"`, created before or with the drain-opening commit.
-
-Enforcement is fail-closed (#820/#821): once today's UTC date passes `FREEZE_DRAIN_UNTIL`, **every** PR fails `Validate PR metadata` until the flag is restored or the deadline is deliberately extended in a new commit. A forgotten drain cannot silently disable Gate 0.
-
-> ⚠️ **Gotcha:** for `pull_request` events GitHub evaluates the workflow file from the PR's own merge ref, not main's. A batch PR that *contains* `FREEZE_FEATURES="false"` passes its own Gate 0 validation even with a `type:feature` label. This is how drain batches merge — and why the closing revert must exist as its own tracked step.
+To reinstate a freeze for a future stabilization sprint: `git revert` the retirement PR (#1241) and
+re-read that issue's rationale for why the parked machinery was deleted rather than left switched off.
 
 ### StateStore resume contract
 
