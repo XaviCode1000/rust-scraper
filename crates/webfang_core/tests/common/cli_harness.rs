@@ -253,6 +253,49 @@ impl BehavioralTest {
             .arg(self.out.path());
         cmd
     }
+
+    /// Count the JSONL records in the export file at `relative` (relative to
+    /// the output dir). FIX-0 (#1235): the audit instrument — record
+    /// cardinality against the REAL binary, so a writer that duplicates or
+    /// drops records fails the test instead of the user finding it in a
+    /// downstream RAG pipeline (AUDIT-01 F-02: batch wrote every record
+    /// twice; nothing in the suite counted).
+    ///
+    /// Every non-empty line is one record: the JSONL writer emits one record
+    /// per line and the exporter has no multi-line records.
+    pub fn record_count(&self, relative: &str) -> usize {
+        let path = self.out.path().join(relative);
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        body.lines().filter(|l| !l.trim().is_empty()).count()
+    }
+
+    /// Register a request-counting mock: responds to `count` GETs on `route`
+    /// with `status`/`body`, and FAILS the test on drop if the binary made a
+    /// different number of requests (wiremock verifies expectations on
+    /// `MockGuard` drop).
+    ///
+    /// FIX-0 (#1235): the audit instrument for request-count invariants —
+    /// the fixture server counted requests at `GET /state`; in tests the
+    /// equivalent is a wiremock expectation held by a guard the caller must
+    /// keep alive for the whole command.
+    ///
+    /// Returns the guard: bind it (`let _guard = ...`), NOT `let _ =` — a
+    /// dropped guard verifies immediately, before the command runs.
+    pub async fn mount_counting(
+        &self,
+        route: &str,
+        count: u64,
+        status: u16,
+        body: &str,
+    ) -> wiremock::MockGuard {
+        Mock::given(method("GET"))
+            .and(wm_path(route))
+            .respond_with(ResponseTemplate::new(status).set_body_string(body))
+            .expect(count)
+            .mount_as_scoped(&self.server)
+            .await
+    }
 }
 
 /// Register a wiremock mock that responds to GET on the given relative path
