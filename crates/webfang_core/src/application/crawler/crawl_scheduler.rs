@@ -144,17 +144,17 @@ impl CrawlScheduler {
         urls.iter().cloned().collect()
     }
 
-    /// Snapshot URLs that are pending (queued but not yet visited) for
-    /// checkpoint persistence.
+    /// The pending frontier truncated to the run's own page budget (#1234).
     ///
-    /// Combines the shared discovery queue (links pushed by in-flight tasks but
-    /// not yet drained) with the scheduler's local pending buffer. The engine
-    /// persists this so a resume re-enqueues exactly what was left to crawl —
-    /// without it, `save_checkpoint` used to write an empty queue and a resume
-    /// after the seed was already visited would crawl nothing (#517).
-    pub(crate) async fn snapshot_pending(&self) -> Vec<String> {
+    /// Already-dequeued `pending` items come first — they are next in line — and
+    /// the queue contributes only what fits, in true priority order. A crawl can
+    /// never visit more than `max_pages`, so anything beyond that is dead weight
+    /// by definition; F-39 measured 4955 queued URLs against 49 visited.
+    pub(crate) async fn snapshot_pending_bounded(&self, budget: usize) -> Vec<String> {
         let mut urls: Vec<String> = self.pending.iter().map(|d| d.url.to_string()).collect();
-        urls.extend(self.queue.snapshot_urls().await);
+        let remaining = budget.saturating_sub(urls.len());
+        urls.extend(self.queue.snapshot_urls_bounded(remaining).await);
+        urls.truncate(budget);
         urls
     }
 
@@ -469,10 +469,51 @@ mod tests {
         s.queue()
             .push_prioritized(disc("/queued"), UrlSource::Link)
             .await;
-        let snap = s.snapshot_pending().await;
+        let snap = s.snapshot_pending_bounded(usize::MAX).await;
         assert_eq!(snap.len(), 2, "both sources must be captured: {snap:?}");
         assert!(snap.iter().any(|u| u.ends_with("/buffered")));
         assert!(snap.iter().any(|u| u.ends_with("/queued")));
+    }
+
+    /// #1234 / F-39 — the persisted frontier can never exceed the budget the run
+    /// already set for itself.
+    ///
+    /// The pathological file F-39 measured held 4955 queued URLs against 49
+    /// visited, and the next `--resume` drained all of it first because
+    /// `max_pages` was never part of the checkpoint. Deleting the field was tried
+    /// and measured: it strands resume at zero pages. The bound is the fix, and
+    /// it lives here, next to the queue it truncates.
+    #[tokio::test]
+    async fn snapshot_pending_bounded_caps_at_the_page_budget() {
+        let mut s = sched(4);
+        s.restore_pending(&["https://example.com/buffered".into()]);
+        for i in 0..50 {
+            s.queue()
+                .push_prioritized(disc(&format!("/q{i}")), UrlSource::Link)
+                .await;
+        }
+        assert_eq!(
+            s.snapshot_pending_bounded(usize::MAX).await.len(),
+            51,
+            "baseline: one buffered + fifty queued",
+        );
+
+        let bounded = s.snapshot_pending_bounded(10).await;
+        assert_eq!(
+            bounded.len(),
+            10,
+            "the frontier must never exceed the run's own budget (#1234)",
+        );
+        assert!(
+            bounded.iter().any(|u| u.ends_with("/buffered")),
+            "already-dequeued work is next in line and must survive truncation: {bounded:?}",
+        );
+
+        assert_eq!(
+            s.snapshot_pending_bounded(100).await.len(),
+            51,
+            "a budget larger than the frontier must neither invent nor drop entries",
+        );
     }
 
     #[tokio::test]
@@ -482,7 +523,7 @@ mod tests {
         s.queue()
             .push_prioritized(disc("/queued"), UrlSource::Link)
             .await;
-        let _ = s.snapshot_pending().await;
+        let _ = s.snapshot_pending_bounded(usize::MAX).await;
         assert!(s.has_pending_work(), "pending buffer must survive snapshot");
         assert_eq!(s.queue().len().await, 1, "queue must survive snapshot");
     }
@@ -531,7 +572,7 @@ mod tests {
         s.queue()
             .push_prioritized(disc("/queued"), UrlSource::Link)
             .await;
-        let snap = s.snapshot_pending().await;
+        let snap = s.snapshot_pending_bounded(usize::MAX).await;
 
         let mut s2 = sched(4);
         s2.restore_pending(&snap);

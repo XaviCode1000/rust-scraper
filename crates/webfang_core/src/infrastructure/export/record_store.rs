@@ -82,14 +82,22 @@ impl StoreFs for RealFs {
     }
 }
 
-/// RAII exclusive lock over the store's state file, mirroring the
-/// `state_store::StateLock` pattern (#761): on drop the OS lock is released
-/// and the `.json.lock` file is deleted so no orphan remains. SIGKILL closes
-/// the fd and releases the OS lock (E3); only the empty lock file may linger.
+/// RAII exclusive lock over the store's state file.
+///
+/// The lock file is a PERMANENT sentinel: it is created on demand and never
+/// deleted. Removing it on drop — the previous behaviour — breaks mutual
+/// exclusion, and #1230 is the symptom. `flock(2)` guards an **inode**, not a
+/// path: once the holder unlinks the file, a second writer can `create()` a
+/// NEW inode, lock it immediately, and enter the critical section while the
+/// first writer (still blocked on the unlinked inode) is inside it. Two
+/// threads in one process were observed destroying each other's state file
+/// exactly that way, surfacing as `Io { NotFound }` from the loser's rename.
+///
+/// SIGKILL closes the fd and releases the OS lock (E3). The empty sentinel
+/// stays behind, which is harmless and bounded: one per state file.
 #[must_use]
 pub(crate) struct StoreLock {
     handle: fs::File,
-    lock_path: PathBuf,
 }
 
 impl StoreLock {
@@ -110,18 +118,15 @@ impl StoreLock {
                 path: lock_path.clone(),
                 source: std::io::Error::other(format!("failed to acquire record-store lock: {e}")),
             })?;
-        Ok(Self {
-            handle: lock_file,
-            lock_path,
-        })
+        Ok(Self { handle: lock_file })
     }
 }
 
 impl Drop for StoreLock {
     fn drop(&mut self) {
-        // Best-effort both steps: failure must not mask the real result.
+        // Best-effort: failure must not mask the real result. The sentinel is
+        // deliberately NOT removed — see the type-level doc above.
         let _ = FileExt::unlock(&self.handle);
-        let _ = fs::remove_file(&self.lock_path);
     }
 }
 
@@ -198,10 +203,13 @@ impl RecordStore {
     }
 
     fn tmp_path(&self, final_path: &std::path::Path) -> PathBuf {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or_default();
+        // `pid` alone is not unique inside a multi-threaded process, and
+        // `subsec_nanos` can repeat: two writers entering the critical section
+        // a nanosecond apart produced the SAME tmp name, one renamed it away, and
+        // the other's rename failed with ENOENT. A monotonic per-process counter
+        // makes the name unique for the lifetime of the process.
+        static TMP_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nonce = TMP_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut name = final_path.file_name().map_or_else(
             || "state.json".to_string(),
             |n| n.to_string_lossy().into_owned(),
@@ -316,26 +324,92 @@ impl RecordStore {
             debug!(domain = %self.domain_key, "no record store yet; starting fresh");
             return Ok(DomainRecords::new());
         }
-        self.gc_tmp_files(&path);
-        let bytes = fs::read(&path).map_err(|source| RecordStoreError::Io {
-            path: path.clone(),
+        // #1230: the read belongs to the same critical section as the write.
+        // A lock-free `load` paired with a locked `save` is precisely the
+        // read-modify-write window that lost records between processes.
+        let _lock = StoreLock::acquire(&path)?;
+        self.load_under_lock(&path)
+    }
+
+    /// Load with the store lock already held.
+    ///
+    /// Callers: [`Self::load`] and [`Self::update`]. Never acquires the lock
+    /// itself — `StoreLock` is `flock(2)` on a fresh file descriptor, so
+    /// re-entering it from the same process would self-deadlock.
+    fn load_under_lock(&self, path: &std::path::Path) -> Result<DomainRecords, RecordStoreError> {
+        self.gc_tmp_files(path);
+        let bytes = fs::read(path).map_err(|source| RecordStoreError::Io {
+            path: path.to_path_buf(),
             source,
         })?;
-        let envelope: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|_| RecordStoreError::Corrupt { path: path.clone() })?;
+        let envelope: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| RecordStoreError::Corrupt {
+                path: path.to_path_buf(),
+            })?;
         match envelope
             .get("version")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(1) as u32
         {
             CURRENT_VERSION => {
-                let file: StoreFile = serde_json::from_value(envelope)
-                    .map_err(|_| RecordStoreError::Corrupt { path: path.clone() })?;
-                Ok(Self::validate_and_quarantine(file.records, &path))
+                let file: StoreFile =
+                    serde_json::from_value(envelope).map_err(|_| RecordStoreError::Corrupt {
+                        path: path.to_path_buf(),
+                    })?;
+                Ok(Self::validate_and_quarantine(file.records, path))
             },
-            1 => Self::migrate_v1(self, &path, &bytes),
-            found => Err(RecordStoreError::UnsupportedVersion { path, found }),
+            1 => self.migrate_v1(path, &bytes),
+            found => Err(RecordStoreError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                found,
+            }),
         }
+    }
+
+    /// Atomic read-modify-write under the store's exclusive lock (#1230).
+    ///
+    /// `StoreLock` is held across load → mutate → save, so two `--resume`
+    /// processes sharing one `--state-dir` can never both start from a stale
+    /// snapshot and clobber each other. The closure observes exactly what is
+    /// durable at the instant the lock is taken and its result is persisted
+    /// before the lock is released.
+    ///
+    /// Unlike [`Self::load_or_init`] this never degrades to an empty view:
+    /// beginning a *transaction* from a fabricated empty state is how
+    /// unreadable state silently becomes a whole-file overwrite (P8-3).
+    ///
+    /// # Errors
+    ///
+    /// [`RecordStoreError`] from the load, from `mutate`, or from the save.
+    /// When `mutate` returns `Err`, nothing is written and the file on disk
+    /// is untouched.
+    pub fn update(
+        &self,
+        mutate: &mut dyn FnMut(&mut DomainRecords) -> Result<(), RecordStoreError>,
+    ) -> Result<(), RecordStoreError> {
+        let path = self.state_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|source| RecordStoreError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let _lock = StoreLock::acquire(&path)?;
+        // Same crash point `save` uses, and it must stay here: `update` is now
+        // the live write path, so a crash point that only `save` hits is a
+        // guard off the critical path — the RC-3 defect class this sprint
+        // exists to delete. Without this line the SIGKILL-while-holding-the-
+        // lock cell of the crash matrix silently stops testing anything.
+        crate::cli::crash_points::hit(crate::cli::crash_points::WHILE_HOLDING_LOCK);
+        // Re-checked INSIDE the lock: another writer may have created the
+        // file between the caller's decision and our acquisition.
+        let mut records = if path.exists() {
+            self.load_under_lock(&path)?
+        } else {
+            DomainRecords::new()
+        };
+        mutate(&mut records)?;
+        self.save_locked(&records, now_millis())
     }
 
     /// E5 policy wrapper: corrupt or unsupported-version state files are
@@ -396,6 +470,10 @@ impl RecordStore {
     /// [`MIGRATED_V1_RUN_ID`], then save v2 atomically. The original v1
     /// bytes stay untouched until the rename succeeds; the backup covers
     /// even that window.
+    ///
+    /// Called only from [`Self::load_under_lock`], which already holds the
+    /// store lock; it deliberately does not re-acquire it (`flock(2)` on a
+    /// second descriptor would self-deadlock).
     fn migrate_v1(
         &self,
         path: &std::path::Path,
@@ -468,14 +546,14 @@ impl RecordStore {
             source,
         })?;
 
-        // (2)+(3) Save the upgraded envelope atomically.
+        // (2)+(3) Save the upgraded envelope atomically. The lock is already
+        // held by the load that routed us here (#1230).
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|source| RecordStoreError::Io {
                 path: parent.to_path_buf(),
                 source,
             })?;
         }
-        let _lock = StoreLock::acquire(path)?;
         self.save_locked(&records, updated_at)?;
         tracing::info!(
             domain = %self.domain_key,
@@ -497,6 +575,13 @@ impl RecordStore {
 }
 
 impl RecordStorePort for RecordStore {
+    fn update(
+        &self,
+        mutate: &mut dyn FnMut(&mut DomainRecords) -> Result<(), RecordStoreError>,
+    ) -> Result<(), RecordStoreError> {
+        RecordStore::update(self, mutate)
+    }
+
     fn save(&self, records: &DomainRecords) -> Result<(), RecordStoreError> {
         RecordStore::save(self, records)
     }

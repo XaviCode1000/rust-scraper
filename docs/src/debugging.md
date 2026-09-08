@@ -5,7 +5,7 @@ collector, no feature flags, no infrastructure: run with `--trace-file` and
 post-process the JSONL with `jq`.
 
 > **Mandate:** every new feature or hot path must be observable. See the
-> "Observability (MANDATORY)" section of `AGENTS.md`.
+> "Observability (MANDATORY)" section of `../../AGENTS.md`.
 
 ---
 
@@ -42,7 +42,8 @@ Each line of `debug.jsonl` is a JSON object:
   "target": "webfang_core::application::crawler::engine",
   "span": "crawl_page",
   "span_id": "0000000000000042",
-  "trace_id": "01949e0e8b8e70008000000000000001",
+  "parent_id": "0000000000000001",
+  "trace_id": "0000000000000001",
   "fields": {
     "url": "https://example.com/page1",
     "depth": 1,
@@ -50,6 +51,12 @@ Each line of `debug.jsonl` is a JSON object:
   }
 }
 ```
+
+Top-level `trace_id` is the root span `Id` (16-hex), one per run, EPHEMERAL
+to the process/run (identity-within-run, not a durable global identity). Do
+not persist or join on it across runs. Durable run correlation is the
+`CorrelationId` UUID in `span_fields.trace_id` /
+`span_fields.correlation_id` (W3C traceparent).
 
 When a span closes, a second record type is emitted carrying a top-level
 `span_duration_ms` (wall-clock milliseconds) — this is what the "Slowest spans"
@@ -79,12 +86,16 @@ query below reads:
 A ready-made script lives at `scripts/analyze-trace.sh`. The most useful
 queries:
 
-### Reconstruct one operation (crawl / scrape) by trace_id
+### Reconstruct one run by top-level trace_id
 
 ```bash
-TRACE=01949e0e8b8e70008000000000000001
-jq -c "select(.trace_id == \"$TRACE\" or (.fields.trace_id? // \"\" | contains(\"$TRACE\")))" debug.jsonl
+ROOT=0000000000000001
+jq -c "select(.trace_id == \"$ROOT\")" debug.jsonl
 ```
+
+`$ROOT` is the 16-hex root span `Id` (top-level `trace_id`, EPHEMERAL to the
+run). It returns every page plus errors for that run. The same query is
+`scripts/analyze-trace.sh debug.jsonl trace $ROOT`.
 
 ### All errors, with full context
 
@@ -119,8 +130,11 @@ jq -c 'select(.fields.message? == "crawl completed")' debug.jsonl
 ### Count operations by span type
 
 ```bash
-jq -r '.span // "event"' debug.jsonl | sort | uniq -c | sort -rn
+jq -r 'select(.record != "span_close") | .span // "event"' debug.jsonl | sort | uniq -c | sort -rn
 ```
+
+`span_close` records share the same `.span` name, so they must be excluded
+when counting events (otherwise every span is double-counted).
 
 ### URLs that failed
 
@@ -150,8 +164,11 @@ and announces it with a `run identity` event (`correlation_id`, `trace_id`
 in `.fields`); `scrape_multiple_with_limit` does the same with a
 `scrape_multiple identity` event. So in a multi-page scrape:
 
-- `span_fields.trace_id` is the **shared run-root UUID** across all page
-  spans — the whole run is reconstructable by it.
+- Top-level `trace_id` is the **single logical run id**: the root span `Id`
+  (16-hex), EPHEMERAL to the run. Reconstruct the whole run offline with
+  `select(.trace_id == $ROOT)` — pages plus errors, no orphans.
+- `span_fields.trace_id` is the **shared run-root UUID** (`CorrelationId`,
+  durable across systems) across all page spans.
 - `span_fields.correlation_id` (full W3C traceparent) is **unique per
   page**; its trace part is the run-root UUID without dashes.
 
@@ -162,9 +179,13 @@ an exported document's `correlation_id` matches its page's
 `span_fields.correlation_id`:
 
 ```bash
-# Reconstruct an entire run by the shared run-root trace_id
-ROOT=01949e0e-8b8e-7000-8000-000000000001
-jq -c "select(.span_fields.trace_id == \"$ROOT\")" debug.jsonl
+# Reconstruct an entire run by the single top-level trace_id (root span Id)
+ROOT=0000000000000001
+jq -c "select(.trace_id == \"$ROOT\")" debug.jsonl
+
+# Same run by the durable run-root UUID (CorrelationId in span_fields)
+CUUID=01949e0e-8b8e-7000-8000-000000000001
+jq -c "select(.span_fields.trace_id == \"$CUUID\")" debug.jsonl
 
 # The run-root identity (the `run identity` event carries it in .fields)
 jq -c 'select(.message? == "run identity") | .fields' debug.jsonl

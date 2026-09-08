@@ -1,6 +1,7 @@
 //! Checkpoint persistence for crawl state — Application layer
 //!
-//! Saves and loads crawl state (visited URLs, queued URLs, pages crawled)
+//! Saves and loads crawl state (visited URLs, pages crawled, banned domains).
+//! The queued frontier is deliberately NOT persisted — see `CrawlCheckpoint`.
 //! using JSON serialization with CRC32 integrity checks and atomic writes.
 //!
 //! # Scope — PersistenceMode unification (persistencemode-5c / #980)
@@ -113,21 +114,44 @@ impl CheckpointPath {
 // CrawlCheckpoint — the serializable state
 // ---------------------------------------------------------------------------
 
+/// The checkpoint schema version this build writes and will resume from.
+///
+/// Version 2 dropped `queued` (#1234 / F-39): persisting the whole BFS frontier
+/// was unbounded, was never re-validated against the resumed run's `max_pages`,
+/// and made `--resume` drain a stale frontier from a different run.
+pub const CURRENT_CHECKPOINT_VERSION: u32 = 2;
+
 /// Default checkpoint version for forward-compatible schema evolution.
+///
+/// Applied when a payload omits `version` entirely, i.e. it predates version
+/// tracking. That is a superseded schema, so it is discarded like any other
+/// stale version rather than assumed current.
 fn default_version() -> u32 {
     1
 }
 
 /// Serializable crawl state for checkpoint persistence.
 ///
-/// Captures enough information to resume a crawl from where it left off.
+/// `visited`, the bounded frontier, the page counter, and the banned-domain
+/// list. The frontier is capped at the run's own `max_pages` (#1234 / F-39): a
+/// SIGINT on a link-dense page used to write ~4955 queued URLs against 49
+/// visited, and the next `--resume` drained that stale list first because
+/// `max_pages` was never part of the checkpoint.
 /// Fields use `#[serde(default)]` for forward-compatible schema evolution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CrawlCheckpoint {
     /// URLs already visited (fully processed).
     #[serde(default)]
     pub visited: HashSet<String>,
-    /// URLs queued for processing (not yet visited).
+    /// URLs discovered but not yet processed, truncated to the run's own
+    /// `max_pages` budget when written.
+    ///
+    /// An execution artefact, not a map of the site. Before #1234 this held the
+    /// entire BFS frontier: one SIGINT on a link-dense page wrote ~4955 queued
+    /// URLs against 49 visited, and the next `--resume` drained that stale list
+    /// first because `max_pages` was never part of the checkpoint. The bound is
+    /// the budget the run already set for itself, so nothing the crawl could
+    /// still reach is ever dropped.
     #[serde(default)]
     pub queued: Vec<String>,
     /// Number of pages successfully crawled.
@@ -150,7 +174,7 @@ impl CrawlCheckpoint {
             queued: Vec::new(),
             pages_crawled: 0,
             banned_domains: Vec::new(),
-            version: 1,
+            version: CURRENT_CHECKPOINT_VERSION,
         }
     }
 }
@@ -202,9 +226,11 @@ pub trait CheckpointStore: private::Sealed {
 
 /// Old checkpoint schema (pure JSON, no CRC32 header).
 ///
-/// Used for backward-compatible loading of checkpoints written by the
-/// previous infrastructure-layer implementation. `visited` was a `Vec<String>`
-/// in the old format; we convert to `HashSet` on load.
+/// Used for loading checkpoints written by the previous infrastructure-layer
+/// implementation. `visited` was a `Vec<String>` in the old format; we convert
+/// to `HashSet` on load. Such a file never carries the current `version`, so
+/// [`accept_version`] discards it — the shape is parsed only so the discard can
+/// name the counts it held.
 #[derive(Deserialize)]
 struct OldCheckpointSchema {
     visited: Vec<String>,
@@ -306,8 +332,14 @@ fn read_checkpoint_bytes(path: &Path) -> Option<Vec<u8>> {
     Some(data)
 }
 
-/// Verify the CRC32 header and deserialize the payload, falling back to the
-/// legacy pure-JSON schema when the checksum does not match.
+/// Verify the CRC32 header, deserialize the payload, and apply the schema version
+/// gate. Falls back to the legacy pure-JSON schema when the checksum does not
+/// match.
+///
+/// A payload whose `version` is not [`CURRENT_CHECKPOINT_VERSION`] is DISCARDED
+/// with an `info!` log — the Gate 0 discard+log contract `ExportState` already
+/// follows. Never resumed half-understood, never a crash. Before #1234 the
+/// `version` field was written and never read, so that contract was aspirational.
 fn verify_and_parse_checkpoint(data: &[u8], path: &Path) -> Option<CrawlCheckpoint> {
     let stored_checksum = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
     let payload = &data[4..];
@@ -324,7 +356,7 @@ fn verify_and_parse_checkpoint(data: &[u8], path: &Path) -> Option<CrawlCheckpoi
         return None;
     }
 
-    deserialize_checkpoint(payload, path)
+    deserialize_checkpoint(payload, path).and_then(accept_version)
 }
 
 /// Try to read a legacy pure-JSON checkpoint (no CRC32 header), returning
@@ -337,7 +369,25 @@ fn migrate_legacy_checkpoint(data: &[u8], path: &Path) -> Option<CrawlCheckpoint
         old.visited.len(),
         old.pages_crawled
     );
-    Some(old.into())
+    accept_version(old.into())
+}
+
+/// Gate 0 discard+log: accept only the current checkpoint schema version.
+///
+/// A stale version means the on-disk shape predates a schema change, so its
+/// fields cannot be interpreted. The run starts fresh; the file is left in place
+/// for inspection and the next save overwrites it.
+fn accept_version(state: CrawlCheckpoint) -> Option<CrawlCheckpoint> {
+    if state.version == CURRENT_CHECKPOINT_VERSION {
+        return Some(state);
+    }
+    info!(
+        found = state.version,
+        current = CURRENT_CHECKPOINT_VERSION,
+        visited = state.visited.len(),
+        "checkpoint discarded: superseded schema version, starting fresh"
+    );
+    None
 }
 
 /// Deserialize a CRC32-verified payload, logging a warning on failure.
@@ -428,7 +478,7 @@ mod tests {
             proptest::collection::vec(any::<String>(), 0..=20),
             any::<u64>(),
             proptest::collection::vec(arb_banned_domain(), 0..=20),
-            any::<u32>(),
+            proptest::strategy::Just(CURRENT_CHECKPOINT_VERSION),
         )
             .prop_map(
                 |(visited, queued, pages_crawled, banned_domains, version)| CrawlCheckpoint {
@@ -454,7 +504,7 @@ mod tests {
             ],
             pages_crawled: 42,
             banned_domains: Vec::new(),
-            version: 1,
+            version: CURRENT_CHECKPOINT_VERSION,
         }
     }
 
@@ -485,7 +535,6 @@ mod tests {
 
         assert_eq!(original, loaded);
         assert!(loaded.visited.is_empty());
-        assert!(loaded.queued.is_empty());
         assert_eq!(loaded.pages_crawled, 0);
     }
 
@@ -618,7 +667,10 @@ mod tests {
         let display = format!("{cp}");
         assert!(display.contains("pages=42"));
         assert!(display.contains("visited=2"));
-        assert!(display.contains("queued=2"));
+        assert!(
+            display.contains("queued=2"),
+            "the bounded frontier is part of the shape"
+        );
     }
 
     // ── Phase 1 RED: Tests for new behavior (types don't exist yet) ──────
@@ -681,44 +733,9 @@ mod tests {
         let store = BincodeCheckpoint::new();
         let loaded = store.load(&path);
 
-        assert!(loaded.is_some(), "old-format JSON should load successfully");
-        let cp = loaded.unwrap();
-        assert_eq!(cp.visited.len(), 2);
-        assert!(cp.visited.contains("https://a.com"));
-        assert!(cp.visited.contains("https://b.com"));
-        assert_eq!(cp.queued.len(), 1);
-        assert_eq!(cp.pages_crawled, 10);
-        assert_eq!(cp.banned_domains.len(), 1);
-        assert_eq!(cp.banned_domains[0].domain, "old.example.com");
-    }
-
-    #[test]
-    fn test_old_format_resaved_as_new() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        // Write old-format pure JSON
-        let old_json = r#"{"visited":["https://x.com"],"queued":[],"pages_crawled":5,"version":1}"#;
-        fs::write(&path, old_json).unwrap();
-
-        let store = BincodeCheckpoint::new();
-        let loaded = store.load(&path).unwrap();
-
-        // Re-save — should write new CRC32 format
-        store.save(&loaded, &path).unwrap();
-
-        // Verify first 4 bytes are a valid CRC32 header
-        let data = fs::read(&path).unwrap();
         assert!(
-            data.len() > 4,
-            "new format must have CRC32 header + payload"
-        );
-        let stored_checksum = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
-        let payload = &data[4..];
-        let computed_checksum = crc32fast::hash(payload);
-        assert_eq!(
-            stored_checksum, computed_checksum,
-            "re-saved file must have valid CRC32 header"
+            loaded.is_none(),
+            "a pre-v2 checkpoint must be discarded, not resumed (#1234)",
         );
     }
 

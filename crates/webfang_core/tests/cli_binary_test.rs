@@ -199,9 +199,13 @@ async fn test_single_page_custom_timeout_is_used_by_scrape_client() {
     let mock_server = MockServer::start().await;
     let output_dir = TempDir::new().expect("create temp output dir");
 
-    // Per-request timeout is the configured ceiling: it is terminal (not retried).
-    // Mid-body transients (ConnectionReset, UnexpectedEof) ARE retried (#649).
-    // This test verifies the timeout is respected and exits 69 after ONE attempt.
+    // Per-request timeout is the configured ceiling for EACH attempt.
+    // FIX-1 F-08 (#1231): timeouts are retriable, so the fetch runs 1
+    // initial attempt + `max_retries` (default 3) retries — each attempt
+    // still capped by the custom 1s timeout — then exits 69 with the
+    // last timeout. The 3 retry WARN lines in the stderr snapshot are
+    // the observability of that budget. (Mid-body transients also retry:
+    // #649.)
     Mock::given(method("GET"))
         .and(path("/slow"))
         .respond_with(
@@ -209,7 +213,7 @@ async fn test_single_page_custom_timeout_is_used_by_scrape_client() {
                 .set_body_string("slow response content")
                 .set_delay(Duration::from_secs(2)),
         )
-        .expect(1) // timeout is terminal → exactly 1 request
+        .expect(4) // 1 attempt + 3 retries (default max_retries)
         .named("single-page timeout request")
         .mount(&mock_server)
         .await;
