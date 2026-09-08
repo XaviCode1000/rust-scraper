@@ -138,6 +138,13 @@ const PARITY_CASES: &[ParityCase] = &[
         group: CRAWLER_GROUP,
         spec_id: "ignore_robots",
     },
+    // -- scrape_batch single_page (AUDIT-02 P6-4, CLI parity) -----------
+    ParityCase {
+        tool: "scrape_batch",
+        wire_name: "single_page",
+        group: CRAWLER_GROUP,
+        spec_id: "single_page",
+    },
     // -- get_accessibility_snapshot (issue #948 coverage gap, WU5) -----
     ParityCase {
         tool: "get_accessibility_snapshot",
