@@ -15,8 +15,9 @@ Generated: `2026-08-21`, updated `2026-09-07`. Linked to `COMPATIBILITY-MATRIX.m
 | WAF | 1 | `waf` / bare `#[ignore]` | #337 | Keep ignored; manual gauntlet |
 | Security residual | 1 | finding not yet fixed — test documents the gap | #1239 | Fix `CrawlOptions.url` hardening at the CLI boundary, then un-ignore |
 | Comments/docs | 5 | doc comment mentions `#[ignore]` | #386 | Not tests — count only |
+| Reproduction | 1 | race window too narrow to force from a fixture | #1230 | Keep ignored; the deterministic pin is the seam test |
 
-Total: 21+3+1+1+1+4 = **31**.
+Total: 21+3+1+1+5+1 = **32**.
 
 ## Sitemap correction
 
@@ -61,6 +62,7 @@ Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 | 29 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1475` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 30 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1530` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 31 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1559` | `requires cached ONNX model` | #433 | Sprint 1 |
+| 32 | `concurrent_resume_processes_lose_no_records` | `crates/webfang_core/tests/behavioral/cli/transactional_store_test.rs:221` | `asserts the no-loss invariant under real multi-process contention, but measured 8/8 runs against the unfixed code with zero records lost — the clobber window is microseconds wide and a fixture cannot force it. NOT a falsifier of #1230; the deterministic falsifier is tests/record_store_transaction_test.rs` | #1230 | Keep ignored; run by hand for stress evidence |
 
 > **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
 > the **count** against the `Total:` line above. The `File:Line` column is informational and has
