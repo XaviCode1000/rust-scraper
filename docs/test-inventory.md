@@ -77,6 +77,13 @@ Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 > the counts already disagree, so drift is invisible until an unrelated PR trips the budget. The
 > `:Line` values below are therefore **not** reliable anchors.
 
+> **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
+> the **count** against the `Total:` line above. The `File:Line` column is informational and has
+> silently drifted — e.g. `sitemap_parser.rs` is recorded at `:1218` but the live attribute is at
+> `:1404`, and `waf_gauntlet_test.rs` at `:126` vs live `:157`. The line-level diff only prints when
+> the counts already disagree, so drift is invisible until an unrelated PR trips the budget. The
+> `:Line` values below are therefore **not** reliable anchors.
+
 ## Generation
 
 ```bash

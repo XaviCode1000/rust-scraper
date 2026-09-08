@@ -6,13 +6,14 @@ use tracing::{error, info, instrument, warn};
 
 use crate::application::batch::{BatchManager, BatchManagerSummary};
 use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
-use crate::application::crawler::BoundedFileSink;
+use crate::application::crawler::CapturedPage;
+use crate::application::crawler::{BoundedFileSink, InMemoryContentSink};
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
 use crate::cli::export_flow::{run_export, save_files, ExportConfig};
 use crate::cli::parse::parse_asset_naming;
 use crate::cli::scrape_flow::{apply_resume_mode, scrape_urls};
-use crate::cli::url_discovery::{discover_urls, discover_urls_recursive};
+use crate::cli::url_discovery::{discover_urls, discover_urls_unified};
 use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::persistence::PersistenceMode;
@@ -201,6 +202,7 @@ pub async fn run(
         engine_ref,
         &root_correlation,
         &cancel,
+        &prepare.captured_pages,
     )
     .await
     {
@@ -453,10 +455,19 @@ async fn run_dry_run(opts: CrawlOptions) -> CliExit {
         return CliExit::Success;
     }
 
-    // Bug 4: honest dry-run - call real URL discovery
+    // F-14 (#1232 slice 1): dry-run shares the unified recursive discovery
+    // with the real DOM path, so `--max-depth` is honored in previews.
     info!("Dry-run: discovering URLs without scraping...");
-    let discovered = match crate::cli::url_discovery::discover_urls(&crawler_config, &opts).await {
-        Ok(urls) => urls,
+    let persistence_mode = resolve_persistence_mode(&opts);
+    let discovered = match crate::cli::url_discovery::discover_urls_unified(
+        crawler_config,
+        &opts,
+        &persistence_mode,
+        None,
+    )
+    .await
+    {
+        Ok(output) => output.urls,
         Err(e) => return CliExit::NetworkError(format!("URL discovery failed: {e}")),
     };
 
@@ -533,6 +544,9 @@ async fn prepare_phase(
     opts: &CrawlOptions,
     persistence_mode: &PersistenceMode,
 ) -> Result<PrepareResult, CliExit> {
+    // Discovery-captured bodies (F-05, #1229): filled by the DOM branch
+    // below, reused by the scrape phase instead of refetching.
+    let mut captured_pages: Vec<CapturedPage> = Vec::new();
     let urls_to_scrape = if opts.crawl.single_page {
         // F-35 (#1216): single-page mode never runs discovery, so the seed
         // pattern guard needs a patterns-only config — no TLS/sitemap
@@ -588,19 +602,10 @@ async fn prepare_phase(
             // Recursive BFS discovery respects max_depth/max_pages/robots/
             // patterns; the existing scrape_phase + export_phase still own
             // content extraction and on-disk output.
-            //
-            // The persistence_mode is forwarded to `discover_urls_recursive`,
-            // which applies `crawl_site_with_options` when the mode enables
-            // checkpointing and falls back to `crawl_site` otherwise — single
-            // call site, no orchestrator-level branching (slice 5c followup).
-            // F-35 (#1216): clone — the planning boundary below reuses this
-            // same config for the seed pattern guard in `plan_urls`.
-            match discover_urls_recursive(crawler_config.clone(), opts, persistence_mode).await {
-                Err(e) => {
-                    return Err(CliExit::NetworkError(format!("URL discovery failed: {e}")));
-                },
-                Ok(urls) => urls,
-            }
+            let (urls, pages) =
+                discover_dom_with_capture(&crawler_config, opts, persistence_mode).await?;
+            captured_pages = pages;
+            urls
         };
 
         plan_urls(
@@ -681,13 +686,42 @@ async fn prepare_phase(
         urls_to_scrape,
         scraper_config,
         shared_downloader,
+        captured_pages,
     })
+}
+
+/// Run unified DOM discovery with a bounded capture sink (F-05, #1229).
+///
+/// Returns the discovered URLs plus the bodies captured during discovery
+/// for the scrape phase to reuse instead of refetching — one HTTP request
+/// per page. Unified DOM discovery (F-14, #1232) runs the recursive Engine;
+/// F-35 (#1216): the config is cloned because `plan_urls` reuses it for
+/// the seed pattern guard.
+///
+/// # Errors
+///
+/// Returns [`CliExit::NetworkError`] when the Engine discovery fails.
+async fn discover_dom_with_capture(
+    crawler_config: &CrawlerConfig,
+    opts: &CrawlOptions,
+    persistence_mode: &PersistenceMode,
+) -> Result<(Vec<url::Url>, Vec<CapturedPage>), CliExit> {
+    let capture_sink = std::sync::Arc::new(InMemoryContentSink::new());
+    let cfg = crawler_config.clone();
+    match discover_urls_unified(cfg, opts, persistence_mode, Some(capture_sink)).await {
+        Err(e) => Err(CliExit::NetworkError(format!("URL discovery failed: {e}"))),
+        Ok(output) => Ok((output.urls, output.pages)),
+    }
 }
 
 struct PrepareResult {
     urls_to_scrape: Vec<url::Url>,
     scraper_config: ScraperConfig,
     shared_downloader: Option<std::sync::Arc<crate::adapters::downloader::Downloader>>,
+    /// Bodies captured during DOM discovery (F-05, #1229): the scrape phase
+    /// reuses them instead of refetching. Empty for single-page, sitemap,
+    /// and dry-run shapes.
+    captured_pages: Vec<CapturedPage>,
 }
 
 /// Run the scraping loop over all URLs with progress events.
@@ -707,6 +741,7 @@ async fn scrape_phase(
     engine: Option<&AdaptiveSelectorEngine>,
     root_correlation: &domain::CorrelationId,
     cancel: &tokio_util::sync::CancellationToken,
+    captured: &[CapturedPage],
 ) -> Result<
     (
         Vec<domain::ScrapedContent>,
@@ -724,6 +759,7 @@ async fn scrape_phase(
         engine,
         root_correlation,
         cancel,
+        captured,
     )
     .await
 }
