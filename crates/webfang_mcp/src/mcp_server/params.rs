@@ -662,6 +662,23 @@ impl IsInternalLinkParams {
     }
 }
 
+/// Parameters for the `list_waf_providers` tool (AUDIT-02 P5-3).
+///
+/// The tool takes no arguments; the empty `deny_unknown_fields` struct makes
+/// the deserialization boundary reject any unexpected key instead of
+/// silently accepting it.
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ListWafProvidersParams {}
+
+/// Parameters for the `get_scrape_metrics` tool (AUDIT-02 P5-3).
+///
+/// Same pattern as [`ListWafProvidersParams`]: zero fields plus
+/// `deny_unknown_fields` turns the tool call into a strict contract.
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct GetScrapeMetricsParams {}
+
 #[derive(Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DetectWafParams {
@@ -1121,6 +1138,38 @@ mod tests {
         );
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("foo"), "error must mention foo, got: {msg}");
+    }
+
+    /// AUDIT-02 P5-3: the two zero-argument tools enforce the same strict
+    /// boundary — any key at all is an unknown field.
+    #[test]
+    fn zero_arg_params_reject_any_unknown_field() {
+        let waf = serde_json::from_value::<ListWafProvidersParams>(serde_json::json!({
+            "unexpected": true
+        }));
+        assert!(
+            waf.is_err(),
+            "list_waf_providers must reject unknown fields, got: {waf:?}"
+        );
+        let msg = waf.unwrap_err().to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "error must mention the field, got: {msg}"
+        );
+
+        let metrics = serde_json::from_value::<GetScrapeMetricsParams>(serde_json::json!({
+            "unexpected": true
+        }));
+        assert!(
+            metrics.is_err(),
+            "get_scrape_metrics must reject unknown fields, got: {metrics:?}"
+        );
+
+        // The canonical empty arguments remain representable.
+        serde_json::from_value::<ListWafProvidersParams>(serde_json::json!({}))
+            .expect("empty arguments must deserialize");
+        serde_json::from_value::<GetScrapeMetricsParams>(serde_json::json!({}))
+            .expect("empty arguments must deserialize");
     }
 
     #[test]
