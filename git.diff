@@ -1,3 +1,0 @@
-diff --git a/crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs b/x
-+++ b/crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs
-+fn f(){}
