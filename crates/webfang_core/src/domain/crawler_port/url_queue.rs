@@ -41,6 +41,14 @@ pub trait UrlQueuePort: Send + Sync {
     /// Snapshot the URLs currently visible to the scheduler.
     fn snapshot_urls<'a>(&'a self) -> BoxFuture<'a, Vec<String>>;
 
+    /// The `n` highest-priority URLs, in the order the crawler would actually
+    /// take them.
+    ///
+    /// Truncating [`snapshot_urls`](Self::snapshot_urls) instead would drop an
+    /// arbitrary subset: the backing `BinaryHeap` iterates in array order, not
+    /// priority order. Used by the bounded checkpoint frontier (#1234 / F-39).
+    fn snapshot_urls_bounded<'a>(&'a self, n: usize) -> BoxFuture<'a, Vec<String>>;
+
     /// Drain the whole queue (leaves it empty), preserving priority order.
     fn drain_all<'a>(&'a self) -> BoxFuture<'a, VecDeque<DiscoveredUrl>>;
 

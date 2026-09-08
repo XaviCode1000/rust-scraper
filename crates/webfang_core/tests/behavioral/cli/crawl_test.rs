@@ -537,6 +537,12 @@ async fn crawl_js_strategy_respects_timeout_secs() {
                 .arg("static")
                 .arg("--timeout-secs")
                 .arg("2")
+                // F-08 (#1231): timeouts retry, so pin the budget to keep the
+                // measured contract the per-attempt timeout, not the retry
+                // backoff (default 3 retries × 2s + 1/2/4s backoff = exactly
+                // 15.0s — a dead heat with the 15s deadline below).
+                .arg("--max-retries")
+                .arg("1")
                 .arg("--max-depth")
                 .arg("0")
                 .arg("--output")
@@ -553,7 +559,7 @@ async fn crawl_js_strategy_respects_timeout_secs() {
     let elapsed = start.elapsed();
     assert!(
         elapsed < Duration::from_secs(10),
-        "JS strategy timeout test should complete in under 10s, took {elapsed:?}"
+        "JS strategy timeout test should exhaust 2 retries near 2s × 2 + backoff, took {elapsed:?}"
     );
     assert!(
         !output.status.success(),

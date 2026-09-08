@@ -54,7 +54,7 @@ Parsed using `clap` with derive macros.
 
 let args = Args::parse_from([ "webfang", "--url", "https://example.com", "--output", "./output", "--export-format", "jsonl", "--resume", ]);
 
-assert_eq!(args.crawler.url.as_deref(), Some("https://example.com")); ```
+assert_eq!( args.crawler.url.as_ref().map(webfang_core::domain::ValidUrl::as_str), Some("https://example.com") ); ```
 
 Usage: webfang [OPTIONS] [URL]
        webfang [OPTIONS] [URL] <COMMAND>
@@ -65,7 +65,7 @@ Commands:
 
 Arguments:
   [URL]
-          URL to scrape (positional shorthand — equivalent to --url)
+          URL to scrape (positional shorthand — equivalent to --url). Hardened through the SAME argv-boundary parser as `--url` (#1239): the shorthand cannot bypass the credential strip
 
 Options:
   -h, --help

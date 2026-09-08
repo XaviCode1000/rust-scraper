@@ -41,9 +41,6 @@ dirs = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
-# URL
-url = { workspace = true }
-
 
 [lints]
 workspace = true

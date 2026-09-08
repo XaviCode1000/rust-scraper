@@ -114,6 +114,17 @@ pub enum DownloadError {
     /// Acquisition cancelled by the engine's cancellation token.
     #[error("operation cancelled while waiting for resources")]
     Cancelled,
+
+    /// Response body exceeded the configured size cap while streaming
+    /// (FIX-1, #1231 F-12). The read is aborted mid-body, so memory stays
+    /// bounded at ~cap + one chunk regardless of what the server sends —
+    /// including decompression bombs announced with a tiny Content-Length.
+    /// User-facing text in Spanish per the error-stratification convention.
+    #[error("el cuerpo de la respuesta excede el límite de {limit} bytes")]
+    BodyTooLarge {
+        /// Configured cap in bytes (`--max-file-size`).
+        limit: u64,
+    },
 }
 
 impl Clone for DownloadError {
@@ -144,6 +155,7 @@ impl Clone for DownloadError {
             DownloadError::ResourceExhausted(s) => DownloadError::ResourceExhausted(s.clone()),
             DownloadError::FeatureGated(s) => DownloadError::FeatureGated(s.clone()),
             DownloadError::Cancelled => DownloadError::Cancelled,
+            DownloadError::BodyTooLarge { limit } => DownloadError::BodyTooLarge { limit: *limit },
         }
     }
 }
@@ -172,6 +184,7 @@ impl DownloadError {
             Self::ResourceExhausted(_) => ErrorClass::InternalFatal,
             Self::FeatureGated(_) => ErrorClass::PermanentFatal,
             Self::Cancelled => ErrorClass::InternalFatal,
+            Self::BodyTooLarge { .. } => ErrorClass::PermanentFatal,
         }
     }
 }

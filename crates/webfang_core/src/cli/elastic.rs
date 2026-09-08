@@ -106,7 +106,7 @@ pub(super) async fn build_elastic_ingestion(
     CliExit,
 > {
     let container = match crate::application::container::Container::new(
-        CrawlerConfig::new(opts.url.clone()),
+        CrawlerConfig::new(opts.url.as_url().clone()),
         ScraperConfig::default(),
     )
     .await

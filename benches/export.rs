@@ -15,9 +15,10 @@ fn sample_chunks(count: usize) -> Vec<ScrapedContent> {
                  Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris. \
                  Number: {i}."
             ),
-            url: ValidUrl::new(
+            url: ValidUrl::try_from_url(
                 url::Url::parse(&format!("https://example.com/article/{i}")).unwrap(),
-            ),
+            )
+            .expect("bench fixture is a plain https URL"),
             excerpt: Some(format!("Excerpt for article {i}")),
             author: Some("Jane Developer".to_string()),
             date: None,
