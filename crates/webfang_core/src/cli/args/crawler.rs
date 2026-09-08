@@ -1,6 +1,7 @@
 use crate::domain::config::ConcurrencyConfig;
 use crate::domain::options_spec::crawler as crawler_specs;
 use crate::domain::JsStrategy;
+use crate::domain::ValidUrl;
 use scraper::Selector;
 
 /// Validate `--download-concurrency`: must be >= 1. A value of 0 would make
@@ -22,12 +23,28 @@ pub(crate) fn parse_download_concurrency(s: &str) -> Result<usize, String> {
 /// Validate `--rate-limit-burst`: explicit rate-limiter burst override
 /// (`WEBFANG_RATE_LIMIT_BURST`, budget model decision Q1/D1).
 ///
-/// - Numeric values >= 1 are accepted (the derived default never produces 0,
-///   so neither may the operator).
+/// - Numeric values that fit `u32` and are >= 1 are accepted (the derived
+///   default never produces 0, so neither may the operator).
 /// - `0` is rejected with a Spanish usage error (same "Zero Silent Loss"
 ///   philosophy as `--download-concurrency`).
-/// - Non-numeric input warns and falls back to the hardware-derived default
-///   (consistent with the `ConcurrencyConfig` "auto" parser behavior).
+/// - A value spelled as an integer but OUT of `u32` range is rejected with a
+///   Spanish usage error (see below).
+/// - Genuinely non-numeric input warns and falls back to the hardware-derived
+///   default (consistent with the `ConcurrencyConfig` "auto" parser behavior).
+///
+/// # Why out-of-range is an error and not a warning
+///
+/// The two inputs share a `ParseIntError` but are not the same request. `auto`
+/// is a keyword asking for the derived default; `4294967296` is an explicit
+/// number that cannot be honoured. Collapsing both into warn-and-default made
+/// an operator's typed burst silently become the hardware tier — a different
+/// cadence, reported only in a log line. Rejecting it keeps the boundary
+/// honest, and the `Err(String)` already routes to `CliExit::ConfigError`
+/// (exit 78) at the preflight call site, so no new error type is needed.
+///
+/// Nothing ever overflowed `governor`: `s.parse::<u32>()` fails before the
+/// value reaches `Quota::allow_burst`, so this is a semantic fix, not a
+/// memory-safety one.
 #[allow(clippy::unnecessary_wraps)] // non-numeric deliberately warns instead of erroring
 pub(crate) fn parse_rate_limit_burst(s: &str) -> Result<Option<u32>, String> {
     let s = s.trim();
@@ -39,11 +56,28 @@ pub(crate) fn parse_rate_limit_burst(s: &str) -> Result<Option<u32>, String> {
             "--rate-limit-burst debe ser >= 1 (0 no permite ningún request en ráfaga)".to_string(),
         ),
         Ok(v) => Ok(Some(v)),
+        // Spelled as a whole number but too wide for u32: an explicit request
+        // we cannot honour, so fail rather than substitute a different value.
+        Err(_) if looks_like_integer(s) => Err(format!(
+            "--rate-limit-burst «{s}» está fuera del rango admitido (debe estar entre 1 y {})",
+            u32::MAX
+        )),
         Err(_) => {
             tracing::warn!(value = %s, "invalid rate-limit burst, using derived default");
             Ok(None)
         },
     }
+}
+
+/// True when `s` is spelled as a whole number — an optional sign followed by at
+/// least one ASCII digit — regardless of whether it fits any integer width.
+///
+/// Deliberately width-independent: the caller uses it to tell "the operator
+/// typed a number" apart from "the operator typed a keyword", and a 40-digit
+/// burst is still a number even though no integer type can hold it.
+fn looks_like_integer(s: &str) -> bool {
+    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Validate `--timeout-secs`: must be >= 1. A value of 0 makes wreq apply
@@ -58,6 +92,21 @@ pub(crate) fn parse_rate_limit_burst(s: &str) -> Result<Option<u32>, String> {
 pub(crate) fn parse_selector(s: &str) -> Result<String, String> {
     Selector::parse(s).map_err(|e| format!("selector CSS inválido «{s}»: {e}"))?;
     Ok(s.to_string())
+}
+
+/// Validate the seed URL (`--url` / positional URL) at the argv boundary
+/// (#1239). The value is parsed into a hardened [`ValidUrl`] — the #675-2
+/// http(s) scheme allow-list and the #675-5 credential strip apply HERE,
+/// before anything can reach `--trace-file` spans, logs, or exports.
+///
+/// Invalid input surfaces as a Spanish clap usage error (exit 64); valid input
+/// is stored already-sanitized, so downstream code can never observe
+/// credentials through `CrawlOptions::url`.
+pub(crate) fn parse_seed_url(s: &str) -> Result<ValidUrl, String> {
+    // The ScraperError display is already the Spanish user-facing message
+    // ("URL inválida: …") and clap names the offending value itself, so no
+    // extra prefix is added (which would duplicate "URL inválida").
+    ValidUrl::parse(s).map_err(|e| e.to_string())
 }
 
 pub(crate) fn parse_timeout_secs(s: &str) -> Result<u64, String> {
@@ -97,8 +146,9 @@ pub(crate) fn parse_max_depth(s: &str) -> Result<u8, String> {
 #[derive(Debug, Default)]
 pub struct CrawlerArgs {
     // ========== Target ==========
-    /// URL to scrape (required unless using a subcommand)
-    pub url: Option<String>,
+    /// URL to scrape (required unless using a subcommand), parsed into a
+    /// hardened [`ValidUrl`] at the argv boundary by `parse_seed_url` (#1239).
+    pub url: Option<ValidUrl>,
 
     /// CSS selector for content extraction
     pub selector: String,
@@ -405,6 +455,49 @@ mod tests {
         assert_eq!(parse_rate_limit_burst(""), Ok(None));
     }
 
+    /// #P4-4 item 6: an integer too wide for `u32` is an explicit request that
+    /// cannot be honoured, so it must fail — never silently become the derived
+    /// default. `u32::MAX + 1` is the exact value that used to warn and default.
+    #[test]
+    fn parse_rate_limit_burst_rejects_out_of_u32_range_with_spanish_error() {
+        for raw in [
+            "4294967296", // u32::MAX + 1
+            "99999999999",
+            "-1",                   // negative is a number too
+            "18446744073709551616", // u64::MAX + 1, wider than any int type
+        ] {
+            let err = parse_rate_limit_burst(raw)
+                .err()
+                .unwrap_or_else(|| panic!("{raw} must be rejected, not defaulted"));
+            assert!(
+                err.starts_with("--rate-limit-burst") && err.contains("fuera del rango admitido"),
+                "expected a Spanish range error for {raw}, got: {err}"
+            );
+        }
+    }
+
+    /// The new rejection must stay exclusive: `u32::MAX` itself is still
+    /// accepted and honoured verbatim, so only values that genuinely cannot be
+    /// represented are turned away.
+    #[test]
+    fn parse_rate_limit_burst_accepts_the_whole_u32_range() {
+        assert_eq!(parse_rate_limit_burst("4294967295"), Ok(Some(u32::MAX)));
+        assert_eq!(parse_rate_limit_burst("+9"), Ok(Some(9)));
+    }
+
+    #[test]
+    fn looks_like_integer_separates_numbers_from_keywords() {
+        assert!(looks_like_integer("4294967296"));
+        assert!(looks_like_integer("-1"));
+        assert!(looks_like_integer("+7"));
+        assert!(looks_like_integer("0"));
+        assert!(!looks_like_integer("auto"));
+        assert!(!looks_like_integer("abc"));
+        assert!(!looks_like_integer(""));
+        assert!(!looks_like_integer("1.5"));
+        assert!(!looks_like_integer("1_000"));
+    }
+
     #[test]
     fn rate_limit_burst_flag_parses_through_clap() {
         use clap::Parser as _;
@@ -622,7 +715,10 @@ mod spec_parity_tests {
         // Short forms in isolation (`--url` may only appear once per parse).
         let shorts =
             parse_args(&["-u", "https://example.org", "-s", "main"]).expect("shorts must parse");
-        assert_eq!(shorts.crawler.url.as_deref(), Some("https://example.org"));
+        assert_eq!(
+            shorts.crawler.url.as_ref().map(ValidUrl::as_str),
+            Some("https://example.org/")
+        );
         assert_eq!(shorts.crawler.selector, "main");
     }
 
@@ -655,7 +751,10 @@ mod spec_parity_tests {
         .expect("representative crawler flags must parse");
 
         let c = &parsed.crawler;
-        assert_eq!(c.url.as_deref(), Some("https://example.com"));
+        assert_eq!(
+            c.url.as_ref().map(ValidUrl::as_str),
+            Some("https://example.com/")
+        );
         assert_eq!(c.selector, "article p");
         assert_eq!(c.delay_ms, 250);
         assert_eq!(c.max_pages, 5);

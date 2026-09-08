@@ -1,9 +1,14 @@
 //! URL discovery logic extracted from orchestrator.
 
+use std::sync::Arc;
+
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use url::Url;
 
 use crate::application::crawl_options::CrawlOptions;
+use crate::application::crawler::content_sink::{
+    CapturedPage, CrawlContentSink, InMemoryContentSink,
+};
 use crate::application::crawler::crawl_site;
 use crate::application::crawler::engine::{crawl_site_with_options, EngineOptions};
 use crate::application::discover_urls_single_fetch;
@@ -67,6 +72,91 @@ pub async fn discover_urls(
     Ok(discovered_urls)
 }
 
+/// Unified discovery output (F-14, #1232 slice 1; capture in slice 2, #1229).
+///
+/// `urls` is the ordered discovery set consumed by dry-run previews and
+/// the `plan_urls` boundary. `pages` carries the bodies captured during
+/// discovery when a sink is wired (slice 2); with `sink=None` it stays empty.
+#[derive(Debug, Clone, Default)]
+pub struct DiscoveryOutput {
+    /// Ordered discovered URLs (seed handling stays in `plan_urls`).
+    pub urls: Vec<Url>,
+    /// Captured page bodies (empty while no sink is wired).
+    pub pages: Vec<CapturedPage>,
+}
+
+/// Single discovery entry behind both dry-run and the real DOM path.
+///
+/// Survivor is the recursive Engine path (`crawl_site` /
+/// `crawl_site_with_options`), so `max_depth`, `max_pages`, robots, and
+/// include/exclude patterns are honored identically in previews and crawls.
+/// The sitemap branch keeps using [`discover_urls`] (source of truth from
+/// XML); this function covers DOM mode only.
+///
+/// `persistence_mode` selects the checkpointing Engine entry exactly as the
+/// legacy recursive path did. `sink` (F-05, #1229 slice 2) carries the
+/// bounded in-memory capture: when `Some`, it travels as the
+/// `EngineOptions::content_sink` field — no new engine entry function — and
+/// the drained bodies are returned as `pages`, so the consumer reuses them
+/// instead of refetching. `None` (dry-run) behaves exactly as in slice 1:
+/// metadata-only discovery, empty `pages`.
+///
+/// Returns [`DiscoveryOutput`] with `pages` populated only while a sink is wired.
+///
+/// # Errors
+///
+/// Returns [`crate::error::ScraperError`] on network/timeout errors from the
+/// Engine, exactly as the metadata-only path does.
+pub async fn discover_urls_unified(
+    crawler_config: CrawlerConfig,
+    opts: &CrawlOptions,
+    persistence_mode: &PersistenceMode,
+    sink: Option<Arc<InMemoryContentSink>>,
+) -> ScraperResult<DiscoveryOutput> {
+    let discovery_pb = build_discovery_progress_bar(opts, "Discovering URLs (recursive)...");
+
+    // F-05 (#1229 slice 2): the sink travels as an `EngineOptions` field.
+    // Checkpoint-only, capture-only, and both all flow through the SAME
+    // `crawl_site_with_options` path; only the plain metadata-only crawl
+    // without checkpointing keeps `crawl_site`. The robots preference rides
+    // on the options too: `EngineOptions::ignore_robots` defaults to false,
+    // so without this propagation every capture-only crawl would issue an
+    // extra robots.txt fetch per run (and break the one-request-per-page
+    // contract the request-count test pins).
+    let checkpoint = persistence_mode.checkpoint_cfg();
+    let result = if sink.is_some() || checkpoint.is_some() {
+        let mut options = EngineOptions {
+            ignore_robots: crawler_config.ignore_robots,
+            content_sink: sink
+                .clone()
+                .map(|concrete| concrete as Arc<dyn CrawlContentSink>),
+            downloader_factory: Some(
+                crate::application::container::Container::downloader_factory(),
+            ),
+            ..EngineOptions::default()
+        };
+        if let Some(cfg) = checkpoint {
+            options.checkpoint_path = Some(cfg.dir.clone());
+            options.checkpoint_interval = cfg.interval;
+        }
+        crawl_site_with_options(crawler_config, options).await?
+    } else {
+        crawl_site(crawler_config).await?
+    };
+
+    let urls: Vec<Url> = result.urls.into_iter().map(|d| d.url).collect();
+    let count = urls.len();
+    let pages: Vec<CapturedPage> = sink
+        .map(|concrete| concrete.take_pages())
+        .unwrap_or_default();
+
+    if let Some(pb) = discovery_pb {
+        pb.finish_with_message(format!("Found {count} URLs").to_owned());
+    }
+
+    Ok(DiscoveryOutput { urls, pages })
+}
+
 /// Recursively discover URLs by running the real crawl Engine (BFS).
 ///
 /// The default (non-interactive, non-sitemap) DOM crawl path previously called
@@ -89,43 +179,16 @@ pub async fn discover_urls(
 /// `crawl_checkpoint_<seed-hash>.json`
 /// is created and the interval flows from the mode (not hardcoded).
 /// `Disabled` and `Resume` fall back to `crawl_site` — the no-checkpoint path.
+///
+/// Compatibility shim over [`discover_urls_unified`] (F-14, #1232): keeps the
+/// `Vec<Url>` call shape while the orchestrator migrates to the unified output.
 pub async fn discover_urls_recursive(
     crawler_config: CrawlerConfig,
     opts: &CrawlOptions,
     persistence_mode: &PersistenceMode,
 ) -> ScraperResult<Vec<Url>> {
-    let discovery_pb = build_discovery_progress_bar(opts, "Discovering URLs (recursive)...");
-
-    // The Engine itself respects max_depth etc.; map its error to the same
-    // error type `discover_urls` used to surface.
-    let result = if let Some(checkpoint) = persistence_mode.checkpoint_cfg() {
-        let options = EngineOptions {
-            checkpoint_path: Some(checkpoint.dir.clone()),
-            checkpoint_interval: checkpoint.interval,
-            // This is the only production path that reaches
-            // `Engine::with_js_strategy`, and the engine no longer builds a
-            // downloader on its own (ADR-0012 sub-slice 3.B-1b). Without the
-            // factory injected, `--js-strategy hybrid|full` would silently
-            // degrade to static fetching. Single graph (#1149): the factory
-            // comes from the `Container`, not from naming the infrastructure
-            // concrete here.
-            downloader_factory: Some(
-                crate::application::container::Container::downloader_factory(),
-            ),
-            ..EngineOptions::default()
-        };
-        crawl_site_with_options(crawler_config, options).await?
-    } else {
-        crawl_site(crawler_config).await?
-    };
-
-    let discovered_urls: Vec<Url> = result.urls.into_iter().map(|d| d.url).collect();
-
-    if let Some(pb) = discovery_pb {
-        pb.finish_with_message(format!("Found {} URLs", discovered_urls.len()).to_owned());
-    }
-
-    Ok(discovered_urls)
+    let output = discover_urls_unified(crawler_config, opts, persistence_mode, None).await?;
+    Ok(output.urls)
 }
 
 #[cfg(test)]
@@ -142,7 +205,7 @@ mod tests {
         let seed_url = url::Url::parse("https://localhost:1").unwrap();
         let config = CrawlerConfig::builder(seed_url).build();
         let opts = CrawlOptions {
-            url: url::Url::parse("https://localhost:1").unwrap(),
+            url: crate::domain::ValidUrl::parse("https://localhost:1").unwrap(),
             ..Default::default()
         };
 
@@ -220,8 +283,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let seed_url = url::Url::parse(&format!("{}/", server.uri())).unwrap();
-        let config = CrawlerConfig::builder(seed_url.clone())
+        let seed_url = crate::domain::ValidUrl::parse(&format!("{}/", server.uri())).unwrap();
+        let config = CrawlerConfig::builder(seed_url.as_url().clone())
             .max_depth(1)
             .max_pages(10)
             .concurrency(std::num::NonZeroUsize::new(16).expect("16 is non-zero")) // configured value must be beaten by the override
@@ -238,7 +301,6 @@ mod tests {
             ..Default::default()
         };
         opts.export.quiet = true;
-
         let discovered = discover_urls_recursive(config, &opts, &PersistenceMode::Disabled)
             .await
             .expect("six-node discovery must succeed");

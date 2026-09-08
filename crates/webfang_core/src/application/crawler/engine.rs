@@ -31,6 +31,7 @@ use wreq_util::Profile;
 
 use super::checkpoint::{
     BannedDomain, BincodeCheckpoint, CheckpointPath, CheckpointStore, CrawlCheckpoint,
+    CURRENT_CHECKPOINT_VERSION,
 };
 use super::collector::ResultsCollector;
 use super::concurrency_level::{ConcurrencyLevel, SharedConcurrencyLevel};
@@ -438,6 +439,12 @@ impl Engine {
                         backoff_base_ms,
                         backoff_max_ms,
                         obscura_binary,
+                        // FIX-1 (#1231 F-12): the historical 50 MiB cap.
+                        // Plumbing an engine-side operator flag for it is a
+                        // follow-up (CrawlerConfig change, gate3-pinned).
+                        max_page_bytes: Some(
+                            crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+                        ),
                     },
                     // #509: the Full strategy's governor shares the engine token
                     // so permit waits abort on shutdown.
@@ -551,10 +558,18 @@ impl Engine {
             .unwrap_or_default();
         CrawlCheckpoint {
             visited: visited_set,
-            queued: self.scheduler.snapshot_pending().await,
+            // Bounded by the run's own budget (#1234 / F-39). The frontier is an
+            // execution artefact, not a site map: a crawl never visits more than
+            // max_pages, so anything past that is dead weight by definition, and an
+            // unbounded frontier made every later --resume drain a stale list first
+            // because max_pages was never part of the checkpoint.
+            queued: self
+                .scheduler
+                .snapshot_pending_bounded(self.config.max_pages)
+                .await,
             pages_crawled: pages,
             banned_domains: banned,
-            version: 1,
+            version: CURRENT_CHECKPOINT_VERSION,
         }
     }
 
@@ -756,7 +771,10 @@ impl Engine {
         }
     }
 
-    /// Restore the pending queue from a checkpoint.
+    /// Restore the pending frontier from a checkpoint.
+    ///
+    /// The list was truncated to the run's `max_pages` when it was written
+    /// (#1234), so this can never re-inject an unbounded frontier.
     fn restore_queued(scheduler: &mut CrawlScheduler, queued: &[String]) {
         if !queued.is_empty() {
             scheduler.restore_pending(queued);
@@ -1112,6 +1130,13 @@ pub struct EngineOptions {
     /// so wiring it is a `cli`/composition-root responsibility (`cli` is
     /// exempt from the ADR-0010 direction gate).
     pub downloader_factory: Option<Arc<dyn DownloaderFactory>>,
+    /// Optional sink capturing every fetched page body (F-05, #1229).
+    ///
+    /// `None` (the default) keeps the metadata-only crawl: bodies are
+    /// discarded after link extraction. `Some` wires the sink through the
+    /// SAME engine path — checkpoint-only, capture-only, and both all
+    /// converge in [`crawl_site_with_options`]; no second entry function.
+    pub content_sink: Option<Arc<dyn CrawlContentSink>>,
 }
 
 impl Default for EngineOptions {
@@ -1132,6 +1157,7 @@ impl Default for EngineOptions {
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
             downloader_factory: None,
+            content_sink: None,
         }
     }
 }
@@ -1305,7 +1331,8 @@ pub async fn crawl_site_with_options(
         max_pages = config.max_pages,
         checkpoint_enabled = options.checkpoint_path.is_some(),
         session_pool = options.session_pool_enabled,
-        ignore_robots = options.ignore_robots
+        ignore_robots = options.ignore_robots,
+        capture_enabled = options.content_sink.is_some()
     )
 )]
 async fn crawl_site_with_options_inner(
@@ -1351,6 +1378,15 @@ async fn crawl_site_with_options_inner(
     // is where the factory is invoked, and it has no built-in fallback.
     if let Some(factory) = options.downloader_factory.clone() {
         engine = engine.with_downloader_factory(factory);
+    }
+
+    // F-05 (#1229 slice 2): wire the capture sink through the SAME engine
+    // path — checkpoint-only, capture-only, and both all converge here, so
+    // discovery content arrives without a second HTTP round-trip. Placed
+    // away from the checkpoint/restore block above (peer FIX-2 owns
+    // `queued` there) to minimize rebase conflict.
+    if let Some(sink) = options.content_sink.clone() {
+        engine = engine.with_content_sink(sink);
     }
 
     // Apply JS strategy

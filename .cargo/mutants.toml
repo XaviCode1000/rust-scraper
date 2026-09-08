@@ -10,14 +10,42 @@
 #
 # Scope decision (2026-08): only the 6 gated hot paths, ~600 mutants.
 # The whole crate is ~3182 mutants — too slow for any CI budget.
+#
+# Scope decision (2026-09, #1235 / AUDIT-01 F-40): the 2026-08 scope
+# excluded every file where AUDIT-01 found a defect and where F-47's
+# hand-applied mutants survived (13/18, clustered in the product's
+# spine). Those files are gated BELOW. This file is now the SINGLE
+# source of the mutation-scope policy: `.github/workflows/mutants.yml`
+# derives its hot-path detector from `examine_globs` instead of keeping
+# a second, hand-maintained copy that had already drifted.
+#
+# CI budget: the extension roughly triples the weekly full baseline
+# (~600 → ~2000 mutants), so the weekly shard count grows 16 → 32 to
+# keep per-shard load inside the 90-minute timeout. The required PR-diff
+# job mutates only in-diff functions, so typical PR cost is unchanged.
 
 examine_globs = [
+  # 2026-08 scope: the original 6 gated hot paths.
   "crates/webfang_core/src/application/crawler/**",
   "crates/webfang_core/src/application/pipeline/**",
   "crates/webfang_core/src/extractor/**",
   "crates/webfang_core/src/infrastructure/network/**",
   "crates/webfang_core/src/infrastructure/http/waf_engine.rs",
   "crates/webfang_core/src/infrastructure/bridge.rs",
+  # 2026-09 scope (#1235): defect files from AUDIT-01 F-47's surviving
+  # mutants — persistence, URL hardening, planning, discovery, export,
+  # and the downloader stack. Keep entries quote-free-comment-safe: the
+  # workflow derives its regex by extracting quoted strings from this
+  # array, so comments inside the array must not contain double quotes.
+  "crates/webfang_core/src/domain/persistence.rs",
+  "crates/webfang_core/src/domain/value_objects.rs",
+  "crates/webfang_core/src/application/url_filter.rs",
+  "crates/webfang_core/src/cli/orchestrator.rs",
+  "crates/webfang_core/src/cli/url_discovery.rs",
+  "crates/webfang_core/src/infrastructure/converter/wikilinks.rs",
+  "crates/webfang_core/src/infrastructure/export/state_store.rs",
+  "crates/webfang_core/src/infrastructure/crawler/checkpoint.rs",
+  "crates/webfang_core/src/infrastructure/downloader/**",
 ]
 
 # Re-exports and module glue add no mutation signal.
