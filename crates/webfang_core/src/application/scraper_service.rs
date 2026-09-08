@@ -556,7 +556,7 @@ async fn build_scraped_content(
                     url,
                 ),
                 content: article.text_content,
-                url: ValidUrl::new(url.clone()),
+                url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: article.excerpt.as_deref().map(|e| {
                     crate::domain::excerpt_repair::repair_empty_byline(e, author.as_deref())
                 }),
@@ -605,7 +605,7 @@ async fn build_scraped_content(
                     url,
                 ),
                 content: fallback_content,
-                url: ValidUrl::new(url.clone()),
+                url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: None,
                 author: None,
                 date: None,
