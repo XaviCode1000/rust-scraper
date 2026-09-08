@@ -232,6 +232,26 @@ impl UrlQueue {
         queue.iter().map(|p| p.url.url.to_string()).collect()
     }
 
+    /// The `n` highest-priority URLs currently queued, in the order the crawler
+    /// would actually take them.
+    ///
+    /// `BinaryHeap::iter()` yields in internal array order, NOT priority order,
+    /// so truncating a plain snapshot would discard an arbitrary subset of the
+    /// frontier. This pops from a clone: `BinaryHeap::pop` is exactly the
+    /// priority order the crawl itself follows. Used by the bounded checkpoint
+    /// frontier (#1234 / F-39).
+    pub async fn snapshot_urls_bounded(&self, n: usize) -> Vec<String> {
+        let mut heap = self.queue.lock().await.clone();
+        let mut urls = Vec::with_capacity(n.min(heap.len()));
+        while urls.len() < n {
+            match heap.pop() {
+                Some(priority) => urls.push(priority.url.url.to_string()),
+                None => break,
+            }
+        }
+        urls
+    }
+
     /// Get the current queue length
     ///
     /// # Returns
@@ -315,6 +335,13 @@ impl UrlQueuePort for UrlQueue {
 
     fn snapshot_urls<'a>(&'a self) -> futures::future::BoxFuture<'a, Vec<String>> {
         Box::pin(UrlQueue::snapshot_urls(self))
+    }
+
+    fn snapshot_urls_bounded<'a>(
+        &'a self,
+        n: usize,
+    ) -> futures::future::BoxFuture<'a, Vec<String>> {
+        Box::pin(UrlQueue::snapshot_urls_bounded(self, n))
     }
 
     fn drain_all<'a>(

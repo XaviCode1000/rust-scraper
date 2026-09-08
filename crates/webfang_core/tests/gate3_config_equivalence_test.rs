@@ -42,6 +42,7 @@ use webfang_core::cli::config::ConfigDefaults;
 use webfang_core::cli::error::EXIT_CONFIG;
 use webfang_core::cli::preflight::{normalize, ArgSources, NormalizedConfig};
 use webfang_core::domain::config_value::ConfigSource;
+use webfang_core::domain::ValidUrl;
 use webfang_core::{Args, CliExit};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
@@ -452,12 +453,20 @@ fn target_url_flag_and_env_deliver_same_args_outcome() {
     // Direct argv construction: `--url` is single-use, so the mandatory
     // `parse_base` base cannot coexist with a second `--url` here.
     let via_flag = Args::parse_from(["webfang", "--url", url]);
-    // Env delivery: clap resolves WEBFANG_URL into the same field.
+    // Env delivery: clap resolves WEBFANG_URL into the same field. The
+    // env value passes through the same argv-boundary `parse_seed_url`
+    // parser (#1239), so both paths hold a hardened ValidUrl.
     let mut via_env = Args::parse_from(["webfang"]);
-    via_env.crawler.url = Some(url.to_string());
+    via_env.crawler.url = Some(ValidUrl::parse(url).unwrap());
 
-    assert_eq!(via_flag.crawler.url.as_deref(), Some(url));
-    assert_eq!(via_env.crawler.url.as_deref(), Some(url));
+    assert_eq!(
+        via_flag.crawler.url.as_ref().map(ValidUrl::as_str),
+        Some(url)
+    );
+    assert_eq!(
+        via_env.crawler.url.as_ref().map(ValidUrl::as_str),
+        Some(url)
+    );
 }
 
 #[test]

@@ -142,7 +142,7 @@ mod tests {
         let seed_url = url::Url::parse("https://localhost:1").unwrap();
         let config = CrawlerConfig::builder(seed_url).build();
         let opts = CrawlOptions {
-            url: url::Url::parse("https://localhost:1").unwrap(),
+            url: crate::domain::ValidUrl::parse("https://localhost:1").unwrap(),
             ..Default::default()
         };
 
@@ -220,8 +220,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let seed_url = url::Url::parse(&format!("{}/", server.uri())).unwrap();
-        let config = CrawlerConfig::builder(seed_url.clone())
+        let seed_url = crate::domain::ValidUrl::parse(&format!("{}/", server.uri())).unwrap();
+        let config = CrawlerConfig::builder(seed_url.as_url().clone())
             .max_depth(1)
             .max_pages(10)
             .concurrency(std::num::NonZeroUsize::new(16).expect("16 is non-zero")) // configured value must be beaten by the override
@@ -238,7 +238,6 @@ mod tests {
             ..Default::default()
         };
         opts.export.quiet = true;
-
         let discovered = discover_urls_recursive(config, &opts, &PersistenceMode::Disabled)
             .await
             .expect("six-node discovery must succeed");

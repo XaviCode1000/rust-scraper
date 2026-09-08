@@ -29,7 +29,9 @@ use tracing::{info, warn};
 use crate::application::resume::{canonical_key, load_preserving, RunId};
 use crate::domain::crawler_port::filename::confine_filename_component;
 use crate::domain::page_state::{PageStatus, Stateful};
-use crate::domain::persistence::{DomainRecords, LastError, RawRecord, RecordStorePort};
+use crate::domain::persistence::{
+    DomainRecords, LastError, RawRecord, RecordStoreError, RecordStorePort,
+};
 use crate::domain::record_transition;
 use crate::domain::{entities::ExportFormat, exporter::ExporterError, Exporter, ExporterConfig};
 
@@ -395,9 +397,36 @@ impl<'a> CommitSession<'a> {
         }
     }
 
+    /// Commit this session's working set through the store's own
+    /// transaction (#1230 / F-07).
+    ///
+    /// `self.records` was loaded once in [`CommitSession::open`]; writing it
+    /// back with `save` would replace whatever a concurrent `--resume`
+    /// process committed in the meantime. `update` re-reads under the store
+    /// lock, so the merge happens against durable truth.
+    ///
+    /// Conflict rule: **per-URL last-writer-wins**. A record another writer
+    /// advanced after our `open()` carries a later `updated_at` and
+    /// survives; ours wins otherwise. Ties go to ours, because we are the
+    /// writer that just observed the transition.
+    fn merge_persist(&self, ctx: &ResumeContext<'_>) -> Result<(), RecordStoreError> {
+        let mine = &self.records;
+        ctx.store.update(&mut |current| {
+            for (key, record) in mine {
+                let newer_already_wins = current
+                    .get(key)
+                    .is_some_and(|existing| existing.updated_at > record.updated_at);
+                if !newer_already_wins {
+                    current.insert(key.clone(), record.clone());
+                }
+            }
+            Ok(())
+        })
+    }
+
     fn save_and_notify(&self, observer: Option<&dyn Fn(PageStatus)>, status: PageStatus) {
         let Some(ctx) = self.ctx else { return };
-        match ctx.store.save(&self.records) {
+        match self.merge_persist(ctx) {
             Ok(()) => {
                 if let Some(f) = observer.or(ctx.persist_observer) {
                     f(status);
@@ -411,7 +440,7 @@ impl<'a> CommitSession<'a> {
     /// one final save persists any remaining honest state before exit.
     pub(crate) fn final_persist(&self) {
         let Some(ctx) = self.ctx else { return };
-        if let Err(e) = ctx.store.save(&self.records) {
+        if let Err(e) = self.merge_persist(ctx) {
             tracing::error!(error = %e, "final record-store persist failed");
         }
     }
@@ -425,7 +454,7 @@ impl<'a> CommitSession<'a> {
     /// item did not advance; the observer tracks lifecycle transitions only).
     fn save_quiet(&self) {
         if let Some(ctx) = self.ctx {
-            if let Err(e) = ctx.store.save(&self.records) {
+            if let Err(e) = self.merge_persist(ctx) {
                 tracing::error!(error = %e, "record-store save failed");
             }
         }
