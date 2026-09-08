@@ -38,8 +38,8 @@ const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 /// use webfang_core::infrastructure::downloader::wreq_downloader::WreqDownloader;
 /// use webfang_core::infrastructure::downloader::Downloader;
 ///
-/// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000,
 /// let downloader = WreqDownloader::new(30, 10, wreq_util::Profile::Chrome145, None, Vec::new(), None, None, 3, 1000, 10000, 50_000_000).unwrap();
+/// let page = downloader.fetch(&"https://example.com".parse().unwrap()).await.unwrap();
 /// assert_eq!(page.status, 200);
 /// ```
 pub struct WreqDownloader {
