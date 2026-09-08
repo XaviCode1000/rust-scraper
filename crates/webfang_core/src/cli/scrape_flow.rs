@@ -21,6 +21,7 @@ use crate::domain::config::ScraperConfig;
 use crate::domain::crawler_port::RobotsPort;
 use crate::domain::entities::progress::{ScrapeError, ScrapeStatus};
 use crate::domain::persistence::PersistenceMode;
+use crate::domain::persistence::RecordStoreError;
 use crate::domain::persistence::StateStorePort;
 use crate::domain::{CorrelationId, ScrapedContent};
 use crate::infrastructure::downloader::Downloader;
@@ -89,6 +90,7 @@ pub async fn apply_resume_mode(
     let filtered = match (state_store.as_ref(), mode.is_resume()) {
         (Some(store), true) => {
             let record_store = record_store_bridge(store.as_ref());
+            warn_unreadable_state(&record_store);
             filter_committed(urls_to_scrape, &record_store).0
         },
         _ => urls_to_scrape,
@@ -97,6 +99,50 @@ pub async fn apply_resume_mode(
     crate::cli::crash_points::hit(crate::cli::crash_points::PRE_FIRST_PERSIST);
 
     Ok((filtered, state_store))
+}
+
+/// P8-3 — tell the user, in Spanish, when the resume state file cannot be
+/// read, BEFORE the resume gate treats it as empty.
+///
+/// The fresh-start policy itself is deliberate and pinned by
+/// `resume_test::corrupt_state_falls_back_to_full_scrape`; what was missing is
+/// that the only signal was an English `tracing::WARN`, so a user watched the
+/// tool silently discard their persisted state and re-do all the work. AGENTS.md
+/// reserves English for internal logs: user-facing text is Spanish.
+///
+/// Never fails and never changes the run's outcome; the original bytes stay on
+/// disk (`load_or_init` preserves them) and the message names the path so the
+/// user can inspect them.
+fn warn_unreadable_state(store: &RecordStore) {
+    let problem = match store.load() {
+        Ok(_) => return,
+        Err(RecordStoreError::Corrupt { path }) => format!(
+            "el archivo de estado {} está corrupto o no es JSON válido",
+            path.display(),
+        ),
+        Err(RecordStoreError::UnsupportedVersion { path, found }) => format!(
+            "el archivo de estado {} pertenece a una versión no soportada ({found})",
+            path.display(),
+        ),
+        Err(err @ (RecordStoreError::Io { .. } | RecordStoreError::Backup { .. })) => {
+            // Internal detail stays in the log; the user gets the plain fact.
+            warn!(error = %err, "resume state file unreadable");
+            format!(
+                "no se pudo leer el archivo de estado {}",
+                store.state_path().display(),
+            )
+        },
+        // Writer-side rejection: not reachable from a read, matched so a new
+        // error variant can never fall through into silence (fail-closed).
+        Err(err @ RecordStoreError::InvalidRecord { .. }) => {
+            warn!(error = %err, "resume state file rejected");
+            format!(
+                "el archivo de estado {} fue rechazado por inválido",
+                store.state_path().display(),
+            )
+        },
+    };
+    eprintln!("Advertencia: {problem}. Se reanuda desde cero; el archivo original se conserva para inspección.");
 }
 
 /// Bridge a state-store port handle onto the v2 `RecordStore` seam:

@@ -259,3 +259,7 @@ path = "tests/security_bombs_test.rs"
 [[test]]
 name = "wreq_probe_test"
 path = "tests/wreq_probe_test.rs"
+
+[[test]]
+name = "parser_property_test"
+path = "tests/parser_property_test.rs"

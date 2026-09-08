@@ -18,5 +18,6 @@ mod single_page_test;
 mod sitemap_exit_code_test;
 mod sitemap_test;
 mod trace_correlation_test;
+mod transactional_store_test;
 mod user_agent_test;
 mod waf_gauntlet_test;

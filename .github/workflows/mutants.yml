@@ -82,7 +82,30 @@ jobs:
       - name: Check for hot-path changes
         id: hotpath
         run: |
-          if grep -qE "^(crates/webfang_core/src/application/crawler/|crates/webfang_core/src/application/pipeline/|crates/webfang_core/src/extractor/|crates/webfang_core/src/infrastructure/bridge\.rs$|crates/webfang_core/src/infrastructure/http/waf_engine\.rs$|crates/webfang_core/src/infrastructure/network/)" git.diff; then
+          # The detector is DERIVED from `.cargo/mutants.toml` `examine_globs`
+          # (#1235, F-40): that file is the single source of the scope policy,
+          # and the previous hand-written regex had drifted from it AND was
+          # anchored to `^crates/` — a pattern that matches nothing in `git
+          # diff` output (real path lines are `+++ b/crates/...`), so the
+          # required check reported SUCCESS for EVERY PR, including ones
+          # touching the gated scope. The derivation extracts each glob,
+          # strips the src/ prefix (the in-diff path form), escapes dots,
+          # and anchors each alternative to `^+++ b/`. `**` tails become `.*`.
+          SCOPE=$(sed -n '/^examine_globs/,/^]/p' .cargo/mutants.toml \
+            | grep -oE '"[^"]+"' | tr -d '"')
+          if [ -z "$SCOPE" ]; then
+            echo "::error::could not derive hot-path scope from .cargo/mutants.toml examine_globs"
+            exit 1
+          fi
+          PATTERN=$(printf '%s\n' "$SCOPE" \
+            | sed -e 's|^crates/webfang_core/src/||' \
+                  -e 's|\.|\\.|g' \
+            | sed -e 's|\*\*$|.*|' \
+                  -e 's|^|\\+\\+\\+ b/crates/webfang_core/src/|' \
+                  -e '/[.][*]$/!s/$/$/' \
+            | paste -sd '|' -)
+          echo "Hot-path detector pattern: $PATTERN"
+          if grep -qE "$PATTERN" git.diff; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -139,7 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
     steps:
       - uses: actions/checkout@v5
 
@@ -170,7 +193,7 @@ jobs:
         run: |
           cargo mutants -p webfang_core \
             --no-shuffle \
-            --shard ${{ matrix.shard }}/16 \
+            --shard ${{ matrix.shard }}/32 \
             --baseline=skip \
             --timeout=300 \
             --in-place \
@@ -180,7 +203,7 @@ jobs:
         if: always()
         run: |
           if grep -q "MISSED" mutants-output.txt; then
-            echo "::warning::Surviving mutants detected in shard ${{ matrix.shard }}/16"
+            echo "::warning::Surviving mutants detected in shard ${{ matrix.shard }}/32"
             grep "MISSED" mutants-output.txt
           fi
 
