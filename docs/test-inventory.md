@@ -16,7 +16,7 @@ Generated: `2026-08-21`, updated `2026-09-07`. Linked to `COMPATIBILITY-MATRIX.m
 | Security residual | 1 | finding not yet fixed — test documents the gap | #1239 | Fix `CrawlOptions.url` hardening at the CLI boundary, then un-ignore |
 | Comments/docs | 5 | doc comment mentions `#[ignore]` | #386 | Not tests — count only |
 
-Total: 21+3+1+1+1+5 = **32**.
+Total: 21+3+1+1+1+4 = **31**.
 
 ## Sitemap correction
 
@@ -61,7 +61,6 @@ Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
 | 29 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1475` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 30 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1530` | `requires cached ONNX model` | #433 | Sprint 1 |
 | 31 | `mcp behavioral` | `crates/webfang_mcp/tests/mcp_behavioral_test.rs:1559` | `requires cached ONNX model` | #433 | Sprint 1 |
-| 32 | `trace_file_never_leaks_url_credentials` | `crates/webfang_core/tests/behavioral/cli/export_test.rs:161` | `F-31 residual: --trace-file records the raw CLI seed URL; needs the credential strip at cli/args` | #1239 | Harden `CrawlOptions.url` at the CLI boundary, then un-ignore |
 
 > **Known weakness in this guard (found 2026-09-07, #1240):** `check_ignored_guard.sh` compares only
 > the **count** against the `Total:` line above. The `File:Line` column is informational and has
