@@ -12,7 +12,7 @@ use webfang_core::domain::JsStrategy;
 use webfang_core::infrastructure::downloader::fetch_router::DefaultDownloaderFactory;
 use webfang_core::{
     crawl_site_with_options, BincodeCheckpoint, CheckpointPath, CheckpointStore, CrawlCheckpoint,
-    CrawlerConfig,
+    CrawlerConfig, CURRENT_CHECKPOINT_VERSION,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -127,8 +127,8 @@ async fn test_engine_resume_from_checkpoint() {
     std::fs::create_dir_all(&checkpoint_dir).unwrap();
 
     // Pre-create a checkpoint that marks the seed as visited but keeps
-    // /page2.html pending in the queue — exactly what a mid-crawl
-    // save_checkpoint leaves behind.
+    // /page2.html pending in the (now budget-bounded) queue — exactly what a
+    // mid-crawl save_checkpoint leaves behind (#1234).
     let seed_url = format!("{}/index.html", server.uri());
     let page2_url = format!("{}/page2.html", server.uri());
     let mut visited = std::collections::HashSet::new();
@@ -138,7 +138,7 @@ async fn test_engine_resume_from_checkpoint() {
         queued: vec![page2_url],
         pages_crawled: 1,
         banned_domains: Vec::new(),
-        version: 1,
+        version: CURRENT_CHECKPOINT_VERSION,
     };
 
     let store = BincodeCheckpoint::new();

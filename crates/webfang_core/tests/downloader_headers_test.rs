@@ -41,6 +41,7 @@ async fn wreq_downloader_populates_response_headers() {
             3,
             1000,
             10000,
+            50_000_000,
         )
         .expect("downloader builds"),
     );
@@ -96,6 +97,7 @@ async fn wreq_downloader_headers_keys_are_lowercased() {
             3,
             1000,
             10000,
+            50_000_000,
         )
         .expect("downloader builds"),
     );

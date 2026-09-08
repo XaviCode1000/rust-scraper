@@ -11,8 +11,7 @@
 //! - **own-borrow-over-clone**: Accepts references where possible
 
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::domain::crawler_port::filename::confine_filename_component;
 use crate::domain::entities::StateVersion;
@@ -20,67 +19,7 @@ use crate::domain::exporter::StateStorePort;
 use crate::domain::ExportState;
 use crate::error::ScraperError;
 use dirs::cache_dir;
-use fs2::FileExt;
 use tracing::{debug, info};
-
-/// RAII wrapper around a state-file lock. While alive it holds the lock;
-/// on drop it releases the lock **and deletes the lock file** so no `.lock`
-/// orphan is left behind (#761 — same pattern as `jsonl_exporter::FileLock`,
-/// #582).
-///
-/// `#[must_use]` warns if a caller acquires the lock but lets it drop
-/// immediately (a likely bug — the lock would be released before any I/O).
-#[must_use]
-struct StateLock {
-    handle: fs::File,
-    lock_path: PathBuf,
-}
-
-impl StateLock {
-    /// Acquire a lock at `<path>.json.lock`. `exclusive` selects write mode
-    /// (exclusive) vs read mode (shared).
-    fn acquire(path: &Path, exclusive: bool) -> crate::error::Result<Self> {
-        let lock_path = path.with_extension("json.lock");
-        // M1 FIX: Write PID metadata to lock file for debugging
-        let mut lock_file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&lock_path)
-            .map_err(ScraperError::Io)?;
-        let op = if exclusive {
-            "exclusive_write"
-        } else {
-            "shared_read"
-        };
-        let _ = writeln!(lock_file, "pid={} op={op}", std::process::id());
-        let locked = if exclusive {
-            lock_file.lock_exclusive()
-        } else {
-            FileExt::lock_shared(&lock_file)
-        };
-        locked.map_err(|e| {
-            ScraperError::Io(std::io::Error::other(format!(
-                "failed to acquire state lock: {e}"
-            )))
-        })?;
-        Ok(Self {
-            handle: lock_file,
-            lock_path,
-        })
-    }
-}
-
-impl Drop for StateLock {
-    fn drop(&mut self) {
-        // Release the OS-level lock, then delete the lock file. Both
-        // best-effort: a failure here must not mask the real result (#761).
-        // Fully qualified syntax: avoids unstable_name_collisions with future
-        // std::fs::File::unlock (rust-lang/rust#48919).
-        let _ = FileExt::unlock(&self.handle);
-        let _ = fs::remove_file(&self.lock_path);
-    }
-}
 
 /// StateStore manages persistence of export state for a specific domain
 ///
@@ -194,9 +133,12 @@ impl StateStore {
             return Err(ScraperError::Io(err));
         }
 
-        // Acquire shared lock to prevent reading during concurrent write.
-        // The guard releases the lock AND removes the lock file on drop (#761).
-        let _lock = StateLock::acquire(&path, false)?;
+        // No lock on the read. The previous shared `StateLock` used the same
+        // unlink-on-drop pattern removed from `record_store::StoreLock` in #1230:
+        // `flock(2)` guards an inode, so deleting the sentinel makes the lock
+        // unenforceable anyway. An unlocked read is still correct because every
+        // writer replaces the file with `rename(2)` — a reader sees either the
+        // old or the new bytes, never a torn file.
 
         // Read and parse JSON file
         let content = fs::read_to_string(&path).map_err(ScraperError::Io)?; // IO error when reading file
@@ -211,67 +153,6 @@ impl StateStore {
         );
 
         Ok(state)
-    }
-
-    /// Save export state to disk
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - ExportState to save
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - State saved successfully
-    /// * `Err(ScraperError)` - If directory creation or writing fails
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use webfang_core::infrastructure::export::StateStore;
-    /// use webfang_core::domain::ExportState;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let store = StateStore::new("example.com");
-    /// let mut state = ExportState::new("example.com")?;
-    /// state.mark_processed("https://example.com/page1");
-    /// store.save(&state)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn save(&self, state: &ExportState) -> crate::error::Result<()> {
-        let path = self.get_state_path();
-
-        // Ensure directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(ScraperError::Io)?; // IO error when creating directories
-        }
-
-        // Acquire exclusive file lock to prevent concurrent writes.
-        // The guard releases the lock AND removes the lock file on drop (#761).
-        let _lock = StateLock::acquire(&path, true)?;
-
-        // Serialize to JSON
-        let json = serde_json::to_string_pretty(state).map_err(ScraperError::Serialization)?; // Serialization error
-
-        // Write to file atomically
-        // Following **mem-with-capacity**: Pre-allocate file
-        let mut temp_path = path.clone();
-        temp_path.set_extension("tmp");
-
-        let mut file = fs::File::create(&temp_path).map_err(ScraperError::Io)?; // IO error when creating file
-
-        file.write_all(json.as_bytes()).map_err(ScraperError::Io)?; // IO error when writing to file
-
-        // Atomic rename
-        fs::rename(&temp_path, &path).map_err(ScraperError::Io)?; // IO error when moving file
-
-        debug!(
-            "Saved state for domain {}: {} URLs processed",
-            self.domain,
-            state.processed_urls.len()
-        );
-
-        Ok(())
     }
 
     /// Load existing state or create a new one if it doesn't exist    ///
@@ -342,10 +223,6 @@ impl StateStorePort for StateStore {
         StateStore::load(self)
     }
 
-    fn save(&self, state: &ExportState) -> crate::error::Result<()> {
-        StateStore::save(self, state)
-    }
-
     fn load_or_default(&self) -> crate::error::Result<ExportState> {
         StateStore::load_or_default(self)
     }
@@ -409,65 +286,6 @@ mod tests {
     }
 
     #[test]
-    fn test_save_and_load_state() {
-        let dir = tempdir().unwrap();
-        let mut cache_dir = dir.path().to_path_buf();
-        cache_dir.push("webfang/state");
-
-        // Create a store with custom cache dir
-        let mut store = StateStore::new("test.com");
-        store.cache_dir = cache_dir.clone();
-
-        // Create and save state
-        let mut state = ExportState::new("test.com").expect("valid domain");
-        state.mark_processed("https://test.com/page1");
-        state.mark_processed("https://test.com/page2");
-
-        let save_result = store.save(&state);
-        assert!(save_result.is_ok());
-
-        // Load state
-        let loaded_state = store.load();
-        assert!(loaded_state.is_ok());
-        let loaded_state = loaded_state.unwrap();
-
-        assert_eq!(loaded_state.domain(), "test.com");
-        assert_eq!(loaded_state.processed_urls.len(), 2);
-        assert!(loaded_state.is_processed("https://test.com/page1"));
-        assert!(loaded_state.is_processed("https://test.com/page2"));
-    }
-
-    /// #761: after save and load complete, no `.json.lock` orphan may
-    /// remain on disk — the RAII guard removes it on drop.
-    #[test]
-    fn test_lockfile_removed_after_save_and_load() {
-        let dir = tempdir().unwrap();
-        let mut cache_dir = dir.path().to_path_buf();
-        cache_dir.push("webfang/state");
-
-        let mut store = StateStore::new("lockfile.test");
-        store.cache_dir = cache_dir;
-
-        let mut state = ExportState::new("lockfile.test").expect("valid domain");
-        state.mark_processed("https://lockfile.test/page1");
-        store.save(&state).expect("save must succeed");
-
-        let lock_path = store.get_state_path().with_extension("json.lock");
-        assert!(
-            !lock_path.exists(),
-            "lockfile must be removed after save, found: {}",
-            lock_path.display()
-        );
-
-        let _ = store.load().expect("load must succeed");
-        assert!(
-            !lock_path.exists(),
-            "lockfile must be removed after load, found: {}",
-            lock_path.display()
-        );
-    }
-
-    #[test]
     fn test_load_or_default_existing() {
         let dir = tempdir().unwrap();
         let mut cache_dir = dir.path().to_path_buf();
@@ -507,31 +325,6 @@ mod tests {
         let state = store.load_or_default().unwrap();
         assert_eq!(state.domain(), "new.com");
         assert_eq!(state.processed_urls.len(), 0);
-    }
-
-    #[test]
-    fn test_atomic_save() {
-        let dir = tempdir().unwrap();
-        let mut cache_dir = dir.path().to_path_buf();
-        cache_dir.push("webfang/state");
-
-        let mut store = StateStore::new("atomic.com");
-        store.cache_dir = cache_dir.clone();
-
-        let state = ExportState::new("atomic.com").expect("valid domain");
-
-        // Save should succeed
-        let result = store.save(&state);
-        assert!(result.is_ok());
-
-        // Verify final file exists
-        let final_path = store.get_state_path();
-        assert!(final_path.exists());
-
-        // Verify no temp file remains
-        let mut temp_path = final_path.clone();
-        temp_path.set_extension("tmp");
-        assert!(!temp_path.exists());
     }
 
     // --- Sprint 0 Gate 0: version gate RED tests ---
