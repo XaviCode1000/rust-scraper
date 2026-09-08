@@ -43,6 +43,11 @@ tokio-util = { workspace = true }
 wreq = { workspace = true }
 wreq-util = { workspace = true }
 bytes = { workspace = true }
+# Charset detection for the bounded body reader (#1231 F-12): mirrors what
+# wreq's text_with_charset does, so the capped decode keeps the same
+# non-UTF-8 behavior. Version pinned to the one already resolved in
+# Cargo.lock (no new code compiled).
+encoding_rs = "0.8"
 
 # Content Extraction
 legible = { workspace = true }
@@ -250,6 +255,10 @@ path = "tests/security_traversal_test.rs"
 name = "security_bombs_test"
 path = "tests/security_bombs_test.rs"
 
+
+[[test]]
+name = "wreq_probe_test"
+path = "tests/wreq_probe_test.rs"
 
 [[test]]
 name = "parser_property_test"

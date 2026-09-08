@@ -240,6 +240,8 @@ fn ram_proxy(strategy: JsStrategy) -> Result<usize> {
             max_retries: 3,
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
+            // #1231: the benchmark RAM proxy mirrors the production cap.
+            max_page_bytes: Some(webfang_core::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES),
             obscura_binary: "obscura".to_string(),
         },
         cookie_bridge,
