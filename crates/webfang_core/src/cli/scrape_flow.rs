@@ -13,6 +13,7 @@ use crate::application::container::Container;
 use crate::application::crawl_options::CrawlOptions;
 use crate::application::export_factory;
 use crate::application::progress_observer::ProgressObserver;
+use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use crate::application::resume::filter_committed;
 use crate::application::scrape_single_url;
 use crate::cli::error::CliExit;
@@ -192,6 +193,7 @@ pub async fn scrape_urls(
         engine,
         robots_fetcher: robots_fetcher.as_ref(),
         fingerprint_repo: build_fingerprint_repo(opts).await,
+        rate_limiter: build_scrape_rate_limiter(opts),
     };
 
     // Concurrency bound (#653): the previous sequential loop made concurrency a
@@ -217,6 +219,15 @@ pub async fn scrape_urls(
                     // the export phase.
                     if cancel.is_cancelled() {
                         return (index, None);
+                    }
+                    // #P4-4: take a token BEFORE any socket opens for this
+                    // URL. Governor consumes the permit at grant time, so
+                    // waiting after the fetch would space nothing. A wait
+                    // abandoned by shutdown is a skip, not a failure (#509).
+                    if let Some(limiter) = ctx.rate_limiter.as_ref() {
+                        if limiter.until_ready_or_cancel(cancel).await.is_err() {
+                            return (index, None);
+                        }
                     }
                     // Per-page identity: child of the run root — shared trace_id, fresh
                     // span_id (#501).
@@ -282,6 +293,12 @@ struct ScrapeContext<'a> {
     /// `--extraction-fingerprint` is off — recording is opt-in.
     fingerprint_repo:
         Option<std::sync::Arc<dyn crate::domain::fingerprint_repository::FingerprintRepository>>,
+    /// Token bucket gating every scrape-phase fetch (#P4-4).
+    ///
+    /// `None` means "no `--delay-ms` was asked for": no bucket is built and
+    /// the per-URL path performs no await at all, so the unthrottled run
+    /// keeps its exact pre-fix cost and cadence.
+    rate_limiter: Option<SharedRateLimiter>,
 }
 
 /// Apply the `max_pages` cap to the URL list when configured.
@@ -297,6 +314,51 @@ fn scrape_concurrency(
     // Single budget point (#1149): the CLI scrape bound reads the same
     // Operation.crawl tier the Engine tiers derive from.
     Container::scrape_concurrency(opts, detector)
+}
+
+/// Build the token bucket that gates the scrape phase (#P4-4).
+///
+/// `--delay-ms` reached the crawl Engine's discovery limiter but never the
+/// scrape path, so a direct scrape ignored it entirely and a crawl's
+/// scrape-phase re-fetches ran free. The bucket is built from the SAME two
+/// inputs `Engine::run` uses — `delay_ms` as the refill period and the
+/// budget model's independent burst tier (`rate_limiter_config`,
+/// engine.rs:152) — so discovery and scrape share one cadence policy.
+///
+/// `delay_ms == 0` returns `None`: no bucket is allocated and the per-URL
+/// path performs no await, which keeps an unthrottled run identical to the
+/// pre-fix behavior (zero overhead, zero drift in the existing suites).
+///
+/// A construction failure degrades to `None` with a WARN, mirroring the
+/// `Container` precedent (`container.rs:608`). It is unreachable in
+/// practice: `SharedRateLimiter::new` rejects only a zero period (clamped
+/// to 1 ms) or zero burst (`BurstPermits` is `NonZeroU32`).
+fn build_scrape_rate_limiter(opts: &CrawlOptions) -> Option<SharedRateLimiter> {
+    if opts.network.delay_ms == 0 {
+        return None;
+    }
+    let budget = crate::domain::budget::BudgetModel::build(
+        opts.budget_overrides,
+        &crate::domain::budget::detector::SystemDetector,
+    );
+    let burst = budget.burst().get();
+    match SharedRateLimiter::new(&RateLimiterConfig::new(opts.network.delay_ms, burst)) {
+        Ok(limiter) => {
+            info!(
+                delay_ms = opts.network.delay_ms,
+                burst, "scrape rate limiter wired"
+            );
+            Some(limiter)
+        },
+        Err(e) => {
+            warn!(
+            error = %e,
+            delay_ms = opts.network.delay_ms,
+            "scrape rate limiter unavailable — continuing unthrottled"
+            );
+            None
+        },
+    }
 }
 
 fn apply_max_pages_limit(urls: &[Url], scraper_config: &ScraperConfig) -> Vec<Url> {
