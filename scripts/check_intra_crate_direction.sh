@@ -619,7 +619,7 @@ while read -r file; do
   while IFS= read -r line; do
     lineno=$((lineno + 1))
     (( lineno > first_test_line )) && break
-    stripped="$(echo "$line" | sed -e 's/^[[:space:]]*//')"
+    stripped="${line#"${line%%[![:space:]]*}"}"
     [[ "$stripped" == //* ]] && continue
     if [[ "$line" =~ \.dns_resolver\(|ValidatingResolver::\.new\(|\.redirect\( ]]; then
       violations=$((violations + 1))
