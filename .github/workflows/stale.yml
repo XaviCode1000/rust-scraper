@@ -1,0 +1,53 @@
+# Stale automation (Phase 5) — SHIPS DORMANT.
+#
+# This file only takes effect when the workflow is enabled on the default
+# branch via a merged PR; landing it here enables nothing by itself. No
+# remote enablement, no label changes, and no closes happen from this commit.
+# Tuning knobs live in `env` below so thresholds change without touching
+# the job logic.
+#
+# Convention: repo pins actions by tag (e.g. actions/checkout@v5), so this
+# file follows tags, not SHAs.
+
+name: Stale
+
+env:
+  DAYS_BEFORE_ISSUE_STALE: "60"
+  DAYS_BEFORE_PR_STALE: "45"
+  DAYS_BEFORE_CLOSE: "14"
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark and close stale issues/PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: ${{ env.DAYS_BEFORE_ISSUE_STALE }}
+          days-before-pr-stale: ${{ env.DAYS_BEFORE_PR_STALE }}
+          days-before-close: ${{ env.DAYS_BEFORE_CLOSE }}
+          exempt-issue-labels: security,regression,release-blocker,good-first-issue,pinned,dependencies
+          exempt-pr-labels: security,regression,release-blocker,good-first-issue,pinned,dependencies
+          stale-issue-message: >
+            This issue has been automatically marked as stale after 60 days
+            of inactivity. It will be closed in 14 days unless there is
+            further activity. Comment or remove the stale label to keep it open.
+          stale-pr-message: >
+            This PR has been automatically marked as stale after 45 days of
+            inactivity. It will be closed in 14 days unless there is further
+            activity. Comment, push, or remove the stale label to keep it open.
+          close-issue-message: >
+            Closing as stale after 14 more days of inactivity. Reopen with a
+            comment if this is still relevant.
+          close-pr-message: >
+            Closing as stale after 14 more days of inactivity. Reopen or
+            re-push if this is still wanted.
