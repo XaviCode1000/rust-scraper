@@ -104,6 +104,10 @@ core_changed=false
 crawler_changed=false
 downloader_changed=false
 ai_changed=false
+# Pre-initialised so shellcheck (SC2154) sees a real assignment: the loop
+# below only writes it via `printf -v "$key"` (github key `all`), which
+# static analysis cannot follow. `all_flag` is the local alias used after.
+all=false
 all_flag=false
 needs_mutation_hotpath=false
 if $CLASS_OK; then
