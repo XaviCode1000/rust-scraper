@@ -117,6 +117,8 @@ jobs:
   # Downstream code jobs gate on `needs.change-scope.outputs.run_code_jobs
   # == 'true'`; the affected-area lanes gate test-ai on needs_ai and the
   # mcp smoke job on needs_mcp (both advisory, never in `gate` needs);
+  # needs_mutation_hotpath is exposed as an output only (Phase 4 advisory —
+  # no job gates on it in this phase, to keep the change non-breaking);
   # snapshot baselines are test expectations and keep test coverage
   # applicable. The `gate` job explicitly allows skipped non-applicable
   # producers only from here.
@@ -129,6 +131,7 @@ jobs:
       run_code_jobs: ${{ steps.scope.outputs.run_code_jobs }}
       needs_ai: ${{ steps.scope.outputs.needs_ai }}
       needs_mcp: ${{ steps.scope.outputs.needs_mcp }}
+      needs_mutation_hotpath: ${{ steps.scope.outputs.needs_mutation_hotpath }}
       snapshot_changed: ${{ steps.scope.outputs.snapshot_changed }}
     steps:
       - uses: actions/checkout@v5
@@ -152,9 +155,10 @@ jobs:
               echo "run_code_jobs=true"
               echo "needs_ai=true"
               echo "needs_mcp=true"
+              echo "needs_mutation_hotpath=true"
               echo "snapshot_changed=true"
             } >> "$GITHUB_OUTPUT"
-            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true, needs_ai=true, needs_mcp=true, snapshot_changed=true)"
+            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true, needs_ai=true, needs_mcp=true, needs_mutation_hotpath=true, snapshot_changed=true)"
           fi
 
   # ============================================================================

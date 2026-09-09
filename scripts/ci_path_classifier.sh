@@ -21,13 +21,13 @@
 #                                     (--base is an alias of --base-ref.)
 #   --head-ref <ref> / --head <ref>   head for `git diff` (default: HEAD).
 #                                     (--head is an alias of --head-ref.)
-#   --format human|github  human (default): full 16-key output to
+#   --format human|github  human (default): full 17-key output to
 #                          $GITHUB_OUTPUT (or --github-output) else stdout,
 #                          plus a stderr summary. github: only deterministic
 #                          `key=value` lines to stdout (caller appends to
 #                          $GITHUB_OUTPUT), including docs_only, ci_only, code,
 #                          all, affected, run_code_jobs, needs_ai, needs_mcp,
-#                          snapshot_changed. An explicit
+#                          needs_mutation_hotpath, snapshot_changed. An explicit
 #                          --github-output <path> with --format github writes
 #                          there instead of stdout.
 #   --github-output <path> override for $GITHUB_OUTPUT (CI writes here).
@@ -39,7 +39,17 @@
 #   docs_only, ci_only, code_changed, ai_changed, mcp_changed, cli_changed,
 #   core_changed, crawler_changed, downloader_changed, tests_changed,
 #   release_changed, lock_changed, all,
-#   needs_ai, needs_mcp, snapshot_changed
+#   needs_ai, needs_mcp, needs_mutation_hotpath, snapshot_changed
+#
+# Mutation hotpath (Phase 4, advisory output only — no gating use yet).
+#   needs_mutation_hotpath = true when ANY hot-path area changed OR all=true.
+#   Hot-path areas (conservative, filename-only): `core`, `crawler`,
+#   `downloader` (fetch guard-chain), and `ai` (model/ranking behavior).
+#   Pure `cli`/`mcp`/`docs`/`ci`/`tests`/`release`/`lock` changes alone do
+#   NOT set it. Rationale: mutation budget is spent where a surviving
+#   mutant changes scraping behavior (engine, guard order, extraction,
+#   ranking), not on CLI/MCP surface, docs, or CI plumbing. Unknown/empty
+#   scope (all=true) fails closed to true.
 #
 # Destination: $GITHUB_OUTPUT (or --github-output) when set, else stdout.
 # A human-readable summary always goes to stderr for the job log.
@@ -131,6 +141,13 @@ set -euo pipefail
 #   needs_mcp
 #     Derived: true when mcp_changed=true OR all=true. Drives the `mcp`
 #     smoke lane after test-full without widening the required gate.
+#
+#   needs_mutation_hotpath
+#     Derived (Phase 4, advisory only): true when core/crawler/downloader/ai
+#     changed OR all=true. Pure cli/mcp/docs/ci/tests/release/lock changes
+#     alone leave it false. Unknown/empty scope fails closed to true.
+#     Exposed from the `change-scope` job as an output (full-scope default
+#     true for non-PR events). No job gates on it in this phase.
 #
 #   snapshot_changed
 #     Conservative test-expectation files ONLY (never source .rs):
@@ -296,7 +313,7 @@ classify() {
   local mcp_changed=false cli_changed=false core_changed=false
   local crawler_changed=false downloader_changed=false tests_changed=false
   local release_changed=false lock_changed=false all=false
-  local needs_ai=false needs_mcp=false snapshot_changed=false
+  local needs_ai=false needs_mcp=false needs_mutation_hotpath=false snapshot_changed=false
 
   if ! $diff_ok || [[ ${#files[@]} -eq 0 ]]; then
     # Conservative: no evidence of narrow scope -> run everything.
@@ -381,6 +398,8 @@ classify() {
   #   run_code_jobs = true when code=true OR all=true; otherwise false.
   #   needs_ai      = true when ai_changed=true OR all=true.
   #   needs_mcp     = true when mcp_changed=true OR all=true.
+  #   needs_mutation_hotpath = true when core/crawler/downloader/ai=true
+  #                   OR all=true (Phase 4, advisory only — no gating use).
   #   affected      = sorted CSV of true areas among
   #                   docs,ci,code,ai,mcp,cli,core,crawler,downloader,tests,
   #                   release,lock,snapshot,all — or "none" when nothing
@@ -391,6 +410,9 @@ classify() {
   fi
   if [[ "$mcp_changed" == "true" || "$all" == "true" ]]; then
     needs_mcp=true
+  fi
+  if [[ "$core_changed" == "true" || "$crawler_changed" == "true" || "$downloader_changed" == "true" || "$ai_changed" == "true" || "$all" == "true" ]]; then
+    needs_mutation_hotpath=true
   fi
   local code="$code_changed"
   local run_code_jobs=false
@@ -435,6 +457,7 @@ classify() {
         echo "run_code_jobs=$run_code_jobs"
         echo "needs_ai=$needs_ai"
         echo "needs_mcp=$needs_mcp"
+        echo "needs_mutation_hotpath=$needs_mutation_hotpath"
         echo "snapshot_changed=$snapshot_changed"
       } >> "$OUTPUT_OVERRIDE"
     else
@@ -446,9 +469,10 @@ classify() {
       echo "run_code_jobs=$run_code_jobs"
       echo "needs_ai=$needs_ai"
       echo "needs_mcp=$needs_mcp"
+      echo "needs_mutation_hotpath=$needs_mutation_hotpath"
       echo "snapshot_changed=$snapshot_changed"
     fi
-    echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all affected=$affected run_code_jobs=$run_code_jobs needs_ai=$needs_ai needs_mcp=$needs_mcp" >&2
+    echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all affected=$affected run_code_jobs=$run_code_jobs needs_ai=$needs_ai needs_mcp=$needs_mcp needs_mutation_hotpath=$needs_mutation_hotpath" >&2
     return 0
   fi
 
@@ -472,6 +496,7 @@ classify() {
       echo "all=$all"
       echo "needs_ai=$needs_ai"
       echo "needs_mcp=$needs_mcp"
+      echo "needs_mutation_hotpath=$needs_mutation_hotpath"
       echo "snapshot_changed=$snapshot_changed"
     } >> "$dest"
   else
@@ -490,12 +515,13 @@ classify() {
     echo "all=$all"
     echo "needs_ai=$needs_ai"
     echo "needs_mcp=$needs_mcp"
+    echo "needs_mutation_hotpath=$needs_mutation_hotpath"
     echo "snapshot_changed=$snapshot_changed"
   fi
 
   # Human summary for the job log (stderr so it never pollutes $GITHUB_OUTPUT
   # parsing or stdout key=value consumers).
-  echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all needs_ai=$needs_ai needs_mcp=$needs_mcp" >&2
+  echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all needs_ai=$needs_ai needs_mcp=$needs_mcp needs_mutation_hotpath=$needs_mutation_hotpath" >&2
 }
 
 # --- CLI -----------------------------------------------------------------------
