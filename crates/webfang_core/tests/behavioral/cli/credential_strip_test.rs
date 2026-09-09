@@ -110,3 +110,80 @@ fn non_http_schemes_rejected_uniformly() {
         );
     }
 }
+
+/// A batch file line carrying `user:SECRETPASS@` userinfo must scrape
+/// successfully (wiremock matches on path only) while the secret never
+/// lands in any file written under --output (asterxml exports, markdown,
+/// trace, state). This test mirrors credential_userinfo_never_persists_in_outputs
+/// but uses the --batch-file flag.
+#[tokio::test]
+async fn credential_batch_file_userinfo_never_persists() {
+    // --- Arrange ---
+    let t = BehavioralTest::new().await;
+
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(SEED_HTML))
+        .mount(&t.server)
+        .await;
+
+    // Inject userinfo into the mock-server URI. Wiremock routes on path, so
+    // the mock keeps responding while the binary receives a credentialed URL.
+    let host_port = t
+        .server
+        .uri()
+        .strip_prefix("http://")
+        .expect("mock server uri is http")
+        .to_owned();
+    let cred_url = format!("http://user:SECRETPASS@{host_port}/page");
+
+    // Write the credentialed URL to a temp batch file OUTSIDE --output:
+    // the walkdir assertion sweeps every file under --output, and the batch
+    // file itself legitimately contains the credentialed line pre-scrape.
+    let batch_dir = tempfile::tempdir().expect("batch temp dir");
+    let batch_file = batch_dir.path().join("batch.txt");
+    std::fs::write(&batch_file, &cred_url).expect("failed to write batch file");
+
+    let trace_path = t.out.path().join("trace.jsonl");
+
+    // --- Act ---
+    cmd()
+        .arg("--batch-file")
+        .arg(&batch_file)
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--single-page")
+        .arg("--trace-file")
+        .arg(&trace_path)
+        .arg("--quiet")
+        .assert()
+        .success();
+
+    // --- Assert ---
+    assert!(
+        trace_path.is_file(),
+        "trace file must exist at {}",
+        trace_path.display()
+    );
+
+    let mut checked = 0usize;
+    for entry in WalkDir::new(t.out.path())
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let bytes = std::fs::read(entry.path())
+            .unwrap_or_else(|e| panic!("read {}: {e}", entry.path().display()));
+        let contents = String::from_utf8_lossy(&bytes);
+        assert!(
+            !contents.contains("SECRETPASS"),
+            "file {} leaks credentials",
+            entry.path().display()
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "expected at least the scraped .md plus trace.jsonl under output, got {checked}"
+    );
+}
