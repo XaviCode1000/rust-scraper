@@ -328,6 +328,8 @@ cargo build                                        # fast: reuses shared target 
 ```
 
 > ⚠️ **`.envrc` + `direnv allow` is mandatory per worktree.** It points `CARGO_TARGET_DIR` at the shared build cache (`~/.cache/cargo-target/webfang`), so BoringSSL and all dependencies compile once, not per worktree. Without it the worktree silently builds into its own `target/` (~3-5 min cold). direnv is installed via mise; the Fish hook lives in `~/.config/fish/conf.d/03-direnv.fish`.
+>
+> ⚠️ **Concurrent agent builds must NOT share that cache (#1267).** Two worktrees building the same binary profile concurrently overwrite each other's `debug/webfang` (same `-C metadata` hash ⇒ same output filename), so E2E runs silently execute the other tree's binary — stale links report as fresh, failures misattribute. The shared cache is for SEQUENTIAL human builds only. Any session building while another builds uses an isolated dir instead: `export CARGO_TARGET_DIR=/tmp/cargo-target/<worktree>` (tmpfs, survives the session; a full target dir starves sccache, so prefer `/tmp` over `$HOME`). The orchestrator assigns the isolated path per gate; workers never invent their own.
 
 > ⚠️ **Without both indexes, the agent is BLIND in the worktree.** Intelligence tools silently resolve to the main checkout or return empty results. Check that `.codegraph/` and `codedb.snapshot` exist.
 
