@@ -153,6 +153,28 @@ Dual wrapping pattern: infra errors wrap into domain errors via `From` impls. Ne
 
 **ALWAYS `wreq`**, never `reqwest` — TLS fingerprint impersonation for WAF evasion. This is non-negotiable. An agent suggesting `reqwest` as an alternative is wrong.
 
+### Fetch guard-chain (MANDATORY order)
+
+Every fetch path — CLI, engine, MCP tool, benchmark, future adapter — must wire the protections in this exact order. Each stage assumes the previous one filtered: deviating from the order is a **bug, not a style choice** (e.g. pacing *after* a doomed request burns rate budget on something SSRF would have rejected; classifying retries *after* reading the body wastes a full read on a response that will never be accepted).
+
+```text
+ValidUrl (entry) → rate limit (pre-fetch pacing) → per-attempt request:
+    timeout → redirect policy → SSRF at socket dial (every hop)
+→ retry classification → body read
+```
+
+| Stage | Reference implementation | Rationale |
+| :--- | :--- | :--- |
+| 1. Entry validation | `ValidUrl` (`domain/value_objects.rs`), built via `try_from_url` at the argv boundary (#1240, P0) | Untrusted URL text becomes a validated domain type before entering any flow. Never accept a raw `Url`/`String` as a fetch target. |
+| 2. Rate limit (pacing) | Scrape path: token bucket in `scrape_urls` (`cli/scrape_flow.rs` — lands with PR #1249, tracking #1255: cancel-aware `until_ready_or_cancel`, zero overhead at `delay_ms = 0`). Crawl path: `rate_limiter_config` (`crawler/engine.rs:152`) from `delay_ms` + budget-tier burst. | The wait happens BEFORE the network is touched — a cancelled wait counts as skipped (#509), never as a blocked fetch. |
+| 3a. Timeout | `Client` builder (`downloader/wreq_downloader.rs:169-170`): request timeout + connect timeout (connect is clamped) | Per-request ceiling; see stage 4 for why a timeout is terminal, not retriable. |
+| 3b. Redirect policy | `redirect_policy` (`domain/ssrf_guard.rs`): 10-hop limit + synchronous stop on redirects whose target is a literal forbidden IP | Every redirect hop re-enters the chain — it is a new dial, not a free pass. |
+| 3c. SSRF at socket dial | `ssrf_guard()` wrapping the `Client` (`wreq_downloader.rs:180`, `domain/ssrf_guard.rs`): resolver-level check on EVERY connection — private/link-local/loopback ranges rejected before the socket exists | Nothing may connect to a forbidden address, including via DNS names and redirect hops (E2E-proven: `tests/ssrf_rfc1918_e2e_test.rs`, PR #1251 — pre-socket rejection of RFC1918/CGNAT/NAT64/mapped targets, exit 69, zero outbound packets). |
+| 4. Retry classification | `fetch_inner` retry loop (`wreq_downloader.rs`): mid-body transients (`ConnectionReset`/`UnexpectedEof`) retry (#649); 429 → `max(Retry-After, exponential backoff)`; 5xx → exponential; 403 → one rotated-UA retry ONLY with unpinned UA (#503), capturing the rotated status; **timeouts are retried** (F-08: recovery can be served after a transient timeout — pinned by `timeout_is_retried_and_recovery_is_served`, #1249); terminal 4xx and builder errors (F-09) reported as-is; retries exhausted report the LAST observed status, never a hardcoded one; WARN only when there actually is a retry | Classification decides spend: whether to sleep, rotate, or fail. It runs BEFORE any body is read. |
+| 5. Body read | `read_body_capped` (`wreq_downloader.rs:426`, #1249): streaming read capped at `DEFAULT_MAX_PAGE_BYTES` = 50 MiB (`downloader_factory.rs:69`), error `BodyTooLarge` beyond the cap | The read is bounded so a huge page or gzip bomb cannot balloon memory (pinned by tests). No fetch path may read an unbounded body. |
+
+**Convention for new fetch paths:** replicate stages 1→4 before stage 5, citing this table in review. If a new path cannot reuse `WreqDownloader`/`FetchRouter`, the guard order must still hold — a path that connects before validating, or paces after dialing, is rejected in review regardless of its tests passing.
+
 ### Async rules
 
 - Tokio multi-threaded runtime.
