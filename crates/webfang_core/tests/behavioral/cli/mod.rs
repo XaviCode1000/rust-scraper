@@ -22,3 +22,4 @@ mod trace_correlation_test;
 mod transactional_store_test;
 mod user_agent_test;
 mod waf_gauntlet_test;
+mod determinism_and_parity_test;

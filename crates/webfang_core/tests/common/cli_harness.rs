@@ -28,6 +28,7 @@
 use assert_cmd::Command;
 use regex::Regex;
 use std::path::Path;
+use insta::assert_snapshot;
 use wiremock::matchers::{method, path as wm_path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -370,4 +371,20 @@ pub(crate) fn redact_nondeterministic(dir: &Path, text: &str) -> String {
     // so moving a function between files does not break snapshots (#462).
     let file_path = Regex::new(r"(at\s+)\S+\.rs").unwrap();
     file_path.replace_all(&text, "$1<FILE>.rs").into_owned()
+}
+pub(crate) fn assert_snapshot_redacted(name: &str, dir: &Path, value: impl Into<String>) {
+    let redacted = redact_nondeterministic(dir, &value.into());
+    let mut settings = insta::Settings::clone_current();
+    settings.add_filter(r"date: \d{4}-\d{2}-\d{2}", "date: [DATE]");
+    settings.bind(|| {
+        assert_snapshot!(name, redacted);
+    });
+}
+
+pub(crate) fn assert_snapshot_plain(name: &str, value: impl Into<String>) {
+    let mut settings = insta::Settings::clone_current();
+    settings.add_filter(r"(?m)^Parsed using .+$", "Parsed using [REDACTED]");
+    settings.bind(|| {
+        assert_snapshot!(name, value.into());
+    });
 }
