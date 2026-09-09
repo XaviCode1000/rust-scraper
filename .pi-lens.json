@@ -14,6 +14,15 @@
     "line-length": { "disable": ["line-length"] },
     "high-complexity": { "threshold": 30 }
   },
+  "lsp": {
+    "serverOverrides": {
+      "rust": {
+        "initializationOptions": {
+          "cargo": { "features": "all" }
+        }
+      }
+    }
+  },
   "trivy": {
     "enabled": true
   }
