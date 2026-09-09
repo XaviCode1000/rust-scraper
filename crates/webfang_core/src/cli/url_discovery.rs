@@ -125,16 +125,12 @@ pub async fn discover_urls_unified(
     // contract the request-count test pins).
     let checkpoint = persistence_mode.checkpoint_cfg();
     let result = if sink.is_some() || checkpoint.is_some() {
-        let mut options = EngineOptions {
-            ignore_robots: crawler_config.ignore_robots,
-            content_sink: sink
-                .clone()
+        let mut options = build_discovery_engine_options(
+            opts,
+            crawler_config.ignore_robots,
+            sink.clone()
                 .map(|concrete| concrete as Arc<dyn CrawlContentSink>),
-            downloader_factory: Some(
-                crate::application::container::Container::downloader_factory(),
-            ),
-            ..EngineOptions::default()
-        };
+        );
         if let Some(cfg) = checkpoint {
             options.checkpoint_path = Some(cfg.dir.clone());
             options.checkpoint_interval = cfg.interval;
@@ -155,6 +151,33 @@ pub async fn discover_urls_unified(
     }
 
     Ok(DiscoveryOutput { urls, pages })
+}
+
+/// Build the [`EngineOptions`] for the recursive discovery/crawl run.
+///
+/// Extracted from [`discover_urls_unified`] so the propagation is unit-testable
+/// (F-52 follow-up). The field this helper exists to protect is
+/// [`EngineOptions::js_strategy`]: it used to come from
+/// `EngineOptions::default()` (`JsStrategy::Static`), so `--js-strategy
+/// full`/`hybrid` silently degraded every crawl to static rendering while the
+/// scrape path (`cli/scrape_flow.rs`, which builds its router straight from
+/// `CrawlOptions`) honoured them. `Engine::with_js_strategy` only *records* a
+/// strategy when it cannot build a router for it, so the drop was invisible —
+/// same shape as the `ignore_robots` propagation gap #1229 already fixed.
+fn build_discovery_engine_options(
+    opts: &CrawlOptions,
+    ignore_robots: bool,
+    content_sink: Option<Arc<dyn CrawlContentSink>>,
+) -> EngineOptions {
+    EngineOptions {
+        ignore_robots,
+        js_strategy: opts.network.js_strategy,
+        content_sink,
+        // Without the factory `with_js_strategy` records the strategy but builds
+        // no router, so the strategy still degrades to static (#1229 note above).
+        downloader_factory: Some(crate::application::container::Container::downloader_factory()),
+        ..EngineOptions::default()
+    }
 }
 
 /// Recursively discover URLs by running the real crawl Engine (BFS).
@@ -194,6 +217,44 @@ pub async fn discover_urls_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::domain::JsStrategy;
+
+    /// F-52 follow-up: the recursive crawl path must carry the operator's
+    /// `--js-strategy` onto the Engine. Before the fix `js_strategy` came from
+    /// `EngineOptions::default()` (Static), so `--js-strategy full` rendered
+    /// nothing on crawls while the scrape path honoured it — and
+    /// `Engine::with_js_strategy` only *records* an unbuilt strategy, so the
+    /// drop produced no warning and no non-zero exit.
+    #[test]
+    fn discovery_engine_options_propagate_js_strategy() {
+        for strategy in [JsStrategy::Static, JsStrategy::Hybrid, JsStrategy::Full] {
+            let mut opts = CrawlOptions::default();
+            opts.network.js_strategy = strategy;
+            let built = build_discovery_engine_options(&opts, true, None);
+            assert_eq!(
+                built.js_strategy, strategy,
+                "--js-strategy {strategy} must reach EngineOptions"
+            );
+            // The router is only built when a factory is present; without it a
+            // propagated strategy still degrades to static.
+            assert!(
+                built.downloader_factory.is_some(),
+                "--js-strategy {strategy} needs a downloader factory to render"
+            );
+        }
+    }
+
+    /// The robots preference (#1229) must survive the F-52 extraction.
+    #[test]
+    fn discovery_engine_options_propagate_ignore_robots_and_sink() {
+        let opts = CrawlOptions::default();
+        let sink = Arc::new(InMemoryContentSink::default());
+        let built =
+            build_discovery_engine_options(&opts, true, Some(sink as Arc<dyn CrawlContentSink>));
+        assert!(built.ignore_robots);
+        assert!(built.content_sink.is_some());
+    }
 
     // T-2.1: discover_urls returns Result (compile-time + runtime verification)
     #[cfg_attr(
