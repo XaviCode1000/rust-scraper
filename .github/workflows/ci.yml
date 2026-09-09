@@ -15,7 +15,7 @@
 #   guards + actionlint/shellcheck lint; gate still blocks merge on it.
 #   test-core runs: unit tests (--lib) then integration/behavioral tests (--test '*')
 #   test-full runs: all features enabled (full workspace compile + test, NO AI inference)
-#   test-ai (ADVISORY in PR, REQUIRED ONLY IN HEAVY TIER): AI integration tests with ONNX model.
+#   test-ai (ADVISORY, path-gated on needs_ai): AI integration tests with ONNX model.
 #     This tier keeps model inference out of CI Gate to avoid making every PR pay
 #     the 20 min AI cold-build path. It runs on PRs for signal, but merge confidence
 #     for AI-heavy changes should come from path-gated PR checks + main/queue runs.
@@ -23,7 +23,7 @@
 #     is no longer the fast PR contract; keep that decision explicit and short-lived.
 #   security runs in parallel with tests (no Rust compile)
 #   feature-matrix runs after clippy (cargo-hack --each-feature, catches broken feature combos)
-#   mcp smoke runs after test-full
+#   mcp smoke runs after test-full, path-gated on needs_mcp (advisory, never in gate)
 #   coverage runs on PRs + dispatch (llvm-cov + Codecov) and remains non-gating
 #   release runs after all gates pass (main only)
 #   miri runs on schedule/dispatch only
@@ -113,9 +113,13 @@ jobs:
   # Classifies the changed files via scripts/ci_path_classifier.sh so
   # docs-only/CI-only PRs skip the expensive compile/test entry points
   # (fmt, clippy, test-core, test-full). push/merge_group/schedule/dispatch
-  # always default to full scope (run_code_jobs=true). Downstream code jobs
-  # gate on `needs.change-scope.outputs.run_code_jobs == 'true'`; the `gate`
-  # job explicitly allows skipped non-applicable producers only from here.
+  # always default to full scope (run_code_jobs=true + every lane true).
+  # Downstream code jobs gate on `needs.change-scope.outputs.run_code_jobs
+  # == 'true'`; the affected-area lanes gate test-ai on needs_ai and the
+  # mcp smoke job on needs_mcp (both advisory, never in `gate` needs);
+  # snapshot baselines are test expectations and keep test coverage
+  # applicable. The `gate` job explicitly allows skipped non-applicable
+  # producers only from here.
   # ============================================================================
   change-scope:
     name: Change scope
@@ -123,6 +127,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       run_code_jobs: ${{ steps.scope.outputs.run_code_jobs }}
+      needs_ai: ${{ steps.scope.outputs.needs_ai }}
+      needs_mcp: ${{ steps.scope.outputs.needs_mcp }}
+      snapshot_changed: ${{ steps.scope.outputs.snapshot_changed }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -143,8 +150,11 @@ jobs:
               echo "all=true"
               echo "affected=all"
               echo "run_code_jobs=true"
+              echo "needs_ai=true"
+              echo "needs_mcp=true"
+              echo "snapshot_changed=true"
             } >> "$GITHUB_OUTPUT"
-            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true)"
+            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true, needs_ai=true, needs_mcp=true, snapshot_changed=true)"
           fi
 
   # ============================================================================
@@ -402,13 +412,16 @@ jobs:
   # These tests load a 372MB ONNX model and run real inference. They remain on PRs
   # as signal, but CI Gate no longer depends on `test-ai`: the 20 min AI path was
   # the biggest known merge-latency cost when model-heavy changes were unrelated.
+  # Path-gated: runs only when run_code_jobs=true AND needs_ai=true
+  # (AI/model inputs changed or full scope). Advisory only — never in `gate` needs.
   # Run after clippy to avoid spending model download/compute on compile failures.
   # If AI changes must become merge-blocking again, do it through branch protection
   # explicitly or re-add them to the gate after measuring the wall-clock effect.
   # ============================================================================
   test-ai:
     name: Tests (AI integration)
-    needs: [clippy]
+    needs: [clippy, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_ai == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -618,10 +631,15 @@ jobs:
   # ============================================================================
   # MCP SMOKE: After full tests pass
   # Separate job so MCP failure doesn't block test results.
+  # Path-gated: runs only when test-full ran AND run_code_jobs=true AND
+  # needs_mcp=true (MCP/server inputs changed or full scope). Advisory only —
+  # never in `gate` needs. On main full scope needs_mcp=true so the existing
+  # release chain (needs test-full, security, mcp) is unchanged.
   # ============================================================================
   mcp:
     name: MCP handshake
-    needs: [test-full]
+    needs: [test-full, change-scope]
+    if: ${{ needs.test-full.result == 'success' && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_mcp == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

@@ -21,12 +21,13 @@
 #                                     (--base is an alias of --base-ref.)
 #   --head-ref <ref> / --head <ref>   head for `git diff` (default: HEAD).
 #                                     (--head is an alias of --head-ref.)
-#   --format human|github  human (default): full 13-key output to
+#   --format human|github  human (default): full 16-key output to
 #                          $GITHUB_OUTPUT (or --github-output) else stdout,
 #                          plus a stderr summary. github: only deterministic
 #                          `key=value` lines to stdout (caller appends to
 #                          $GITHUB_OUTPUT), including docs_only, ci_only, code,
-#                          all, affected, run_code_jobs. An explicit
+#                          all, affected, run_code_jobs, needs_ai, needs_mcp,
+#                          snapshot_changed. An explicit
 #                          --github-output <path> with --format github writes
 #                          there instead of stdout.
 #   --github-output <path> override for $GITHUB_OUTPUT (CI writes here).
@@ -37,7 +38,8 @@
 # Outputs (one `key=value` line each, `true`/`false`):
 #   docs_only, ci_only, code_changed, ai_changed, mcp_changed, cli_changed,
 #   core_changed, crawler_changed, downloader_changed, tests_changed,
-#   release_changed, lock_changed, all
+#   release_changed, lock_changed, all,
+#   needs_ai, needs_mcp, snapshot_changed
 #
 # Destination: $GITHUB_OUTPUT (or --github-output) when set, else stdout.
 # A human-readable summary always goes to stderr for the job log.
@@ -119,6 +121,27 @@ set -euo pipefail
 #     narrow scope from), or when ANY file matches none of the docs/ci/code
 #     buckets (unknown surface — e.g. .envrc, editor configs, new top-level
 #     tooling). Downstream must then run the FULL local gate, never skip.
+#     Derived lane outputs (needs_ai, needs_mcp) follow `all=true` so an
+#     unknown surface fails closed to every lane running.
+#
+#   needs_ai
+#     Derived: true when ai_changed=true OR all=true. Drives the advisory
+#     `test-ai` lane (ONNX inference) without widening the required gate.
+#
+#   needs_mcp
+#     Derived: true when mcp_changed=true OR all=true. Drives the `mcp`
+#     smoke lane after test-full without widening the required gate.
+#
+#   snapshot_changed
+#     Conservative test-expectation files ONLY (never source .rs):
+#     *.snap, *.snap.new, and snapshot directories (*/snapshots/*,
+#     */snapshot/*, */__snapshots__/*). Covers the real insta baselines:
+#     crates/*/tests/snapshots/**, crates/*/tests/behavioral/snapshots/**,
+#     crates/*/tests/behavioral/cli/snapshots/**,
+#     crates/*/src/**/snapshots/**. Snapshots are test expectations, so a
+#     match also sets tests_changed=true and forces code relevance
+#     (run_code_jobs) — snapshot-only changes must keep test coverage, never
+#     classify as docs-only/CI-only.
 # ---------------------------------------------------------------------------
 
 BASE_REF="origin/main"
@@ -147,6 +170,11 @@ usage() {
 
 is_docs_file() {
   local f="$1"
+  # Snapshots are test expectations, never docs — even under docs/.
+  case "$f" in
+    *.snap | *.snap.new | */snapshots/* | */snapshot/* | */__snapshots__/*)
+      return 1 ;;
+  esac
   case "$f" in
     .github/* | scripts/* | crates/* | tests/* | benches/* | examples/* | fuzz/*)
       return 1 ;;
@@ -183,6 +211,16 @@ is_code_file() {
       *Cargo.toml | *Cargo.lock | \
       clippy.toml | rustfmt.toml | rust-toolchain.toml | deny.toml | \
       nextest.toml | .cargo/* | Dockerfile* | *.dockerfile | docker-compose*)
+      return 0 ;;
+  esac
+  return 1
+}
+
+# Conservative test-expectation files ONLY. Never matches source .rs.
+is_snapshot_file() {
+  local f="$1"
+  case "$f" in
+    *.snap | *.snap.new | */snapshots/* | */snapshot/* | */__snapshots__/*)
       return 0 ;;
   esac
   return 1
@@ -258,6 +296,7 @@ classify() {
   local mcp_changed=false cli_changed=false core_changed=false
   local crawler_changed=false downloader_changed=false tests_changed=false
   local release_changed=false lock_changed=false all=false
+  local needs_ai=false needs_mcp=false snapshot_changed=false
 
   if ! $diff_ok || [[ ${#files[@]} -eq 0 ]]; then
     # Conservative: no evidence of narrow scope -> run everything.
@@ -303,6 +342,12 @@ classify() {
           nextest.toml | *test-inventory* | *test_inventory* | fixtures/*)
           tests_changed=true ;;
       esac
+      # Snapshot baselines are test expectations: flag them separately and
+      # keep test coverage applicable (never docs-only/CI-only skips).
+      if is_snapshot_file "$f"; then
+        snapshot_changed=true
+        tests_changed=true
+      fi
       case "$f" in
         *Cargo.lock | release-plz.toml | cliff.toml | CHANGELOG* | \
           .github/workflows/release.yml | scripts/*release* | \
@@ -324,14 +369,29 @@ classify() {
     if $all_ci; then ci_only=true; fi
     # Unknown surface anywhere -> widen to everything.
     if ! $known; then all=true; fi
+    # Snapshots are test expectations: a snapshot-only change must keep
+    # test coverage applicable, never skip via a narrow lane.
+    if $snapshot_changed; then
+      code_changed=true
+    fi
   fi
 
-  # Derived scope signals for --format github (deterministic, filename-only).
+  # Derived scope signals (deterministic, filename-only).
   #   code          = alias of code_changed (any Rust build input).
   #   run_code_jobs = true when code=true OR all=true; otherwise false.
+  #   needs_ai      = true when ai_changed=true OR all=true.
+  #   needs_mcp     = true when mcp_changed=true OR all=true.
   #   affected      = sorted CSV of true areas among
   #                   docs,ci,code,ai,mcp,cli,core,crawler,downloader,tests,
-  #                   release,lock,all — or "none" when nothing matched.
+  #                   release,lock,snapshot,all — or "none" when nothing
+  #                   matched.
+  # Unknown/empty scope (all=true) fails closed: derived lanes run.
+  if [[ "$ai_changed" == "true" || "$all" == "true" ]]; then
+    needs_ai=true
+  fi
+  if [[ "$mcp_changed" == "true" || "$all" == "true" ]]; then
+    needs_mcp=true
+  fi
   local code="$code_changed"
   local run_code_jobs=false
   if [[ "$code_changed" == "true" || "$all" == "true" ]]; then
@@ -352,6 +412,7 @@ classify() {
     [[ "$tests_changed" == "true" ]] && parts+=(tests)
     [[ "$release_changed" == "true" ]] && parts+=(release)
     [[ "$lock_changed" == "true" ]] && parts+=(lock)
+    [[ "$snapshot_changed" == "true" ]] && parts+=(snapshot)
     [[ "$all" == "true" ]] && parts+=(all)
     if [[ ${#parts[@]} -gt 0 ]]; then
       affected="$(IFS=,; echo "${parts[*]}")"
@@ -372,6 +433,9 @@ classify() {
         echo "all=$all"
         echo "affected=$affected"
         echo "run_code_jobs=$run_code_jobs"
+        echo "needs_ai=$needs_ai"
+        echo "needs_mcp=$needs_mcp"
+        echo "snapshot_changed=$snapshot_changed"
       } >> "$OUTPUT_OVERRIDE"
     else
       echo "docs_only=$docs_only"
@@ -380,8 +444,11 @@ classify() {
       echo "all=$all"
       echo "affected=$affected"
       echo "run_code_jobs=$run_code_jobs"
+      echo "needs_ai=$needs_ai"
+      echo "needs_mcp=$needs_mcp"
+      echo "snapshot_changed=$snapshot_changed"
     fi
-    echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed all=$all affected=$affected run_code_jobs=$run_code_jobs" >&2
+    echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all affected=$affected run_code_jobs=$run_code_jobs needs_ai=$needs_ai needs_mcp=$needs_mcp" >&2
     return 0
   fi
 
@@ -403,6 +470,9 @@ classify() {
       echo "release_changed=$release_changed"
       echo "lock_changed=$lock_changed"
       echo "all=$all"
+      echo "needs_ai=$needs_ai"
+      echo "needs_mcp=$needs_mcp"
+      echo "snapshot_changed=$snapshot_changed"
     } >> "$dest"
   else
     echo "docs_only=$docs_only"
@@ -418,11 +488,14 @@ classify() {
     echo "release_changed=$release_changed"
     echo "lock_changed=$lock_changed"
     echo "all=$all"
+    echo "needs_ai=$needs_ai"
+    echo "needs_mcp=$needs_mcp"
+    echo "snapshot_changed=$snapshot_changed"
   fi
 
   # Human summary for the job log (stderr so it never pollutes $GITHUB_OUTPUT
   # parsing or stdout key=value consumers).
-  echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed all=$all" >&2
+  echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed snapshot=$snapshot_changed all=$all needs_ai=$needs_ai needs_mcp=$needs_mcp" >&2
 }
 
 # --- CLI -----------------------------------------------------------------------
