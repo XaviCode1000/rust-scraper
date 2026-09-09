@@ -9,10 +9,10 @@
 #   scripts/ci_metrics.sh [--days N] [--workflow ci.yml] [--branch main]
 #   scripts/ci_metrics.sh -h | --help
 #
-# Behaviour: read-only. Collects up to 200 runs of the given workflow on the
-# given branch via `gh run list` + per-run `gh run view
-# --json conclusion,createdAt,updatedAt,headBranch,event`, keeps runs whose
-# createdAt is within the last N days, and prints a markdown SLO snapshot to
+# Behaviour: read-only. Fetches up to 200 runs of the given workflow on the
+# given branch with ONE `gh run list --json` call (all needed fields come
+# back in bulk — never one API call per run, which stalls on slow networks),
+# keeps runs whose createdAt is within the last N days, and prints a markdown SLO snapshot to
 # stdout: required checks (list + count), run stats (count, pass rate,
 # median/p90 wall-clock minutes, breakdown by event), and a comparison table
 # against the SLO targets in docs/ci-slo.md (PASS/WARN when data suffices,
@@ -25,7 +25,7 @@
 #      no fallback: fabricating required checks would be worse than failing.
 #
 # Scope notes:
-#   - Read-only: only `gh run list`, `gh run view`, `gh repo view`, and
+#   - Read-only: only `gh run list`, `gh repo view`, and
 #     `gh api .../protection` queries. Never triggers, cancels, merges, or
 #     mutates anything. No CI gating or required-check changes.
 #   - Wall-clock per run is updatedAt minus createdAt (queue + execution).
@@ -36,8 +36,8 @@
 #     an even sample averages the two middle values); p90 rank is
 #     ceil(0.9*n), minimum rank 1.
 #   - Needs `gh` (authenticated for private repos / high rate limits) and
-#     `jq`. Per-run `gh run view` calls make large windows slow; the 200-run
-#     cap bounds that cost.
+#     `jq`. All run data arrives in a single bulk `gh run list --json` call
+#     (200-run cap), so runtime is bounded by ~3 API calls total.
 set -euo pipefail
 
 DAYS=14
@@ -105,7 +105,7 @@ fi
 NOW_EPOCH="$(date -u +%s)"
 CUTOFF_EPOCH=$((NOW_EPOCH - DAYS * 86400))
 
-RUN_LIST="$(gh run list --workflow "$WORKFLOW" --branch "$BRANCH" --limit 200 --json databaseId,createdAt 2>/dev/null || true)"
+RUN_LIST="$(gh run list --workflow "$WORKFLOW" --branch "$BRANCH" --limit 200 --json databaseId,conclusion,createdAt,updatedAt,headBranch,event 2>/dev/null || true)"
 
 TMPDIR_METRICS="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_METRICS"' EXIT
@@ -124,14 +124,12 @@ to_epoch() {
 }
 
 if [[ -n "$RUN_LIST" ]] && printf '%s' "$RUN_LIST" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  IDS="$(printf '%s' "$RUN_LIST" | jq -r '.[:200][].databaseId' 2>/dev/null || true)"
-  if [[ -n "$IDS" ]]; then
-    RUNS_OK=true
-    while IFS= read -r run_id; do
-      [[ -z "$run_id" ]] && continue
-      detail="$(gh run view "$run_id" --json conclusion,createdAt,updatedAt,headBranch,event 2>/dev/null || true)"
-      [[ -z "$detail" ]] && continue
-      created="$(printf '%s' "$detail" | jq -r '.createdAt // empty' 2>/dev/null || true)"
+  RUNS_OK=true
+  # Single bulk pass over the already-fetched runs: no per-run API calls.
+  while IFS= read -r run_json; do
+    [[ -z "$run_json" ]] && continue
+    detail="$run_json"
+    created="$(printf '%s' "$detail" | jq -r '.createdAt // empty' 2>/dev/null || true)"
       updated="$(printf '%s' "$detail" | jq -r '.updatedAt // empty' 2>/dev/null || true)"
       conclusion="$(printf '%s' "$detail" | jq -r '.conclusion // empty' 2>/dev/null || true)"
       event="$(printf '%s' "$detail" | jq -r '.event // empty' 2>/dev/null || true)"
@@ -165,8 +163,7 @@ if [[ -n "$RUN_LIST" ]] && printf '%s' "$RUN_LIST" | jq -e 'type == "array"' >/d
       if [[ "$duration_secs" -ge 0 ]]; then
         printf '%s\n' "$duration_secs" >> "$DURATIONS_FILE"
       fi
-    done <<< "$IDS"
-  fi
+    done < <(printf '%s' "$RUN_LIST" | jq -c '.[:200][]' 2>/dev/null || true)
 fi
 
 PASS_RATE="unknown"
