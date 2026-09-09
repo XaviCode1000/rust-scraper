@@ -40,6 +40,22 @@ fn honest_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(message.into())])
 }
 
+/// Unavailable-AI message that distinguishes build-time from runtime state.
+/// With the `ai` feature compiled in, a missing port means the server was
+/// started without `--enable-ai` or the model is still warming up — telling
+/// the operator to rebuild is wrong in both cases (Mode D evidence #1271).
+fn ai_unavailable(feature: &str) -> String {
+    if cfg!(feature = "ai") {
+        format!(
+            "funcionalidad no disponible: {feature}. El binario tiene IA compilada pero no activa: reinicia el servidor con --enable-ai, o si ya lo hiciste espera a que termine la carga del modelo y reintenta."
+        )
+    } else {
+        format!(
+            "funcionalidad no disponible: {feature}. Reconstruye con --features ai para habilitarla."
+        )
+    }
+}
+
 /// Success envelope for `semantic_cleaner` (REQ-01).
 ///
 /// Embeddings are inline and full — each chunk carries its vector (truncating
@@ -109,9 +125,7 @@ impl McpHandler {
 
         // REQ-02: absent cleaner (ai feature off) -> honest Spanish error.
         let Some(cleaner) = self.state.container.cleaner() else {
-            return Ok(honest_error(
-                "funcionalidad no disponible: limpieza semántica con IA. Reconstruye con --features ai para habilitarla.",
-            ));
+            return Ok(honest_error(ai_unavailable("limpieza semántica con IA")));
         };
 
         // REQ-01: fetch the page via the existing HTTP port, then clean it.
@@ -174,9 +188,9 @@ impl McpHandler {
 
         // Check all three required ports are available.
         let Some(embedding) = self.state.container.embedding_port() else {
-            return Ok(honest_error(
-                "funcionalidad no disponible: búsqueda semántica en Obsidian. Reconstruye con --features ai para habilitarla.",
-            ));
+            return Ok(honest_error(ai_unavailable(
+                "búsqueda semántica en Obsidian",
+            )));
         };
         let Some(repo) = self.state.container.note_repository() else {
             return Ok(honest_error(
@@ -184,9 +198,7 @@ impl McpHandler {
             ));
         };
         let Some(chunker) = self.state.container.text_chunker() else {
-            return Ok(honest_error(
-                "funcionalidad no disponible: no hay chunker de texto configurado. Reconstruye con --features ai.",
-            ));
+            return Ok(honest_error(ai_unavailable("chunker de texto")));
         };
 
         // Vault reader: prefer the Container-injected port; fall back to the
@@ -408,7 +420,8 @@ mod tests {
         );
         let text = result_text(&res);
         assert!(
-            text.contains("--features ai") && text.contains("limpieza semántica"),
+            text.contains("limpieza semántica")
+                && (text.contains("--features ai") || text.contains("--enable-ai")),
             "Spanish feature-gated message expected, got: {text}"
         );
     }
@@ -484,7 +497,8 @@ mod tests {
         );
         let text = result_text(&res);
         assert!(
-            text.contains("--features ai") && text.contains("búsqueda semántica"),
+            text.contains("búsqueda semántica")
+                && (text.contains("--features ai") || text.contains("--enable-ai")),
             "Spanish feature-gated message expected, got: {text}"
         );
     }

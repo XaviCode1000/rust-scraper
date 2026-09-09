@@ -6,7 +6,6 @@
 use super::McpHandler;
 use crate::mcp_server::metrics::{domain_of, Outcome};
 use crate::mcp_server::params::*;
-use crate::mcp_server::selector_service;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
@@ -82,8 +81,21 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                let content = serde_json::to_string_pretty(&results)
-                    .unwrap_or_else(|_| "failed to serialize".into());
+                // P6-1 slice: emit the same CLI record shape (WebfangMetadata JSONL,
+                // checksum + timestamp + word_count + metadata_version) instead of
+                // the simplified DTO, so CLI and MCP outputs share one contract.
+                let jsonl_lines: Result<Vec<String>, McpError> = results
+                        .iter()
+                        .map(|scraped| {
+                            let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
+                                .validate()
+                                .map_err(|e| McpError::internal_error(format!("chunk validation failed: {e}"), None))?;
+                            let metadata = webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata)
+                                .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
+                        })
+                        .collect();
+                let content = jsonl_lines?.join("\n");
                 Ok(CallToolResult::success(vec![Content::text(content)]))
             },
             Err(e) => {
@@ -171,13 +183,20 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                let response = selector_service::build_scrape_response(
-                    outcome.results,
-                    &outcome.extract_result,
-                    &params.selector,
-                );
-                let content = serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|_| "failed to serialize".into());
+                // P6-1 slice: same shared record shape as scrape_url above — one
+                // contract for CLI and MCP instead of the simplified DTO.
+                let jsonl_lines: Result<Vec<String>, McpError> = outcome.results
+                        .iter()
+                        .map(|scraped| {
+                            let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
+                                .validate()
+                                .map_err(|e| McpError::internal_error(format!("chunk validation failed: {e}"), None))?;
+                            let metadata = webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata)
+                                .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
+                        })
+                        .collect();
+                let content = jsonl_lines?.join("\n");
                 Ok(CallToolResult::success(vec![Content::text(content)]))
             },
             Err(e) => {
