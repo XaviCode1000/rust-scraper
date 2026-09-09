@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>F52 User-Agent Proof Fixture</title></head>
+<body><main><article>
+<h1>F52 User-Agent Proof Fixture</h1>
+<p>This paragraph is present in the raw HTML response and carries prose signal
+for the readability extractor to select this article as primary content.</p>
+<p>A second static paragraph reinforces the extraction signal so the article
+node remains unambiguous for every downloader layer under test right here.</p>
+<div id="ua"><p>RAW_SERVER_RESPONSE_HAS_NO_USER_AGENT_STRING</p></div>
+</article></main>
+<script>
+  document.getElementById('ua').innerHTML =
+    '<p>UA=' + navigator.userAgent + ' PLATFORM=' + navigator.platform +
+    ' VENDOR=' + navigator.vendor + ' VIEWPORT=' + window.innerWidth + 'x' + window.innerHeight + '</p>';
+</script>
+</body></html>

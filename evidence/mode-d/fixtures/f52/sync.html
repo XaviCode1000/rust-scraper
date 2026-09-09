@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>F52 Sync JS Fixture</title></head>
+<body><main><article>
+<h1>F52 Sync JS Fixture</h1>
+<p>This paragraph is present in the raw HTML response and must appear in the
+markdown for both the static and the full JS strategy. It carries enough
+prose signal for the readability extractor to select this article element as
+the primary content region of the document under test.</p>
+<p>A second static paragraph reinforces the extraction signal so the article
+node is unambiguous regardless of which downloader layer produced the HTML.</p>
+<div id="slot"><p>PLACEHOLDER_INNER_HTML_STATIC_TEXT</p></div>
+</article></main>
+<script>
+  document.getElementById('slot').innerHTML =
+    '<p>ZELDA_RENDERED_MARKER_SYNC_7Q4 content injected by JavaScript only, ' +
+    'never present in the raw HTTP response body.</p>';
+</script>
+</body></html>
