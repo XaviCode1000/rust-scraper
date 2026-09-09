@@ -394,6 +394,9 @@ impl Container {
             backoff_base_ms: http_config.backoff_base_ms,
             backoff_max_ms: http_config.backoff_max_ms,
             obscura_binary: opts.network.obscura_binary.clone(),
+            // F-52-c (#1278): the gate-certified Chrome binary (or None =
+            // launcher auto-detection on paths that never ran the gate).
+            chrome_binary: opts.network.chrome_binary.clone(),
             // FIX-1 (#1231 F-12): the operator's --max-file-size now also caps PAGE
             // bodies (it only bounded assets before).
             max_page_bytes: Some(

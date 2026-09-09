@@ -42,6 +42,7 @@
 //! until then, do not read a green gate as "the domain layer is framework-free".
 
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
@@ -108,6 +109,16 @@ pub struct DownloaderSpec {
     pub backoff_max_ms: u64,
     /// Hybrid Layer 2 (Obscura) binary name or path (#787).
     pub obscura_binary: String,
+    /// Preflight-resolved Chrome/Chromium binary for the chromium render path
+    /// (F-52-c, #1278).
+    ///
+    /// `Some(path)` pins the launcher to the exact binary the gate certified
+    /// (passed to the chromiumoxide builder's `chrome_executable`), bypassing
+    /// its auto-detection (whose lookup omits bare `google-chrome` and accepts
+    /// the `/opt/google/chrome` *directory* via `exists()`). `None` keeps
+    /// historical auto-detection (MCP/benchmark paths, which never run the CLI
+    /// preflight gate).
+    pub chrome_binary: Option<PathBuf>,
     /// Cap on the decompressed response body of a PAGE fetch, in bytes
     /// (FIX-1, #1231 F-12). The Wreq layer aborts the read mid-body when the
     /// streamed (already decompressed) byte count exceeds this value, so a

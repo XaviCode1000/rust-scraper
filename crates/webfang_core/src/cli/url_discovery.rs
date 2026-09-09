@@ -173,6 +173,9 @@ fn build_discovery_engine_options(
         ignore_robots,
         js_strategy: opts.network.js_strategy,
         content_sink,
+        // F-52-c: carry the gate-certified Chrome binary into the engine
+        // path (same as --obscura-binary above).
+        chrome_binary: opts.network.chrome_binary.clone(),
         // Without the factory `with_js_strategy` records the strategy but builds
         // no router, so the strategy still degrades to static (#1229 note above).
         downloader_factory: Some(crate::application::container::Container::downloader_factory()),

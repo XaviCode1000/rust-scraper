@@ -4,7 +4,7 @@
 //! used before the main scraping orchestrator begins.
 #![allow(missing_docs)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::warn;
 
@@ -803,6 +803,57 @@ const DEFAULT_CHROME_CANDIDATES: [&str; 4] = [
     "chromium",
 ];
 
+/// Resolve the Chrome/Chromium binary the gate certified (F-52-c, #1278).
+///
+/// Returns the first candidate (in order) that resolves to an existing
+/// *file* and whose `--version` probe exits successfully. Bare names are
+/// resolved through the injected `PATH` exactly like the OS would
+/// ([`resolve_executable_in_path`]); explicit paths must exist as files.
+/// The `is_file` requirement (not `exists`) excludes the
+/// `/opt/google/chrome` *directory* trap that chromiumoxide's own
+/// `get_by_path` falls into via `exists()`.
+///
+/// Pure and injectable like the rest of the gate (#787): tests pass
+/// controlled candidates + `PATH` instead of touching process-global env.
+pub(crate) fn resolve_chrome_binary_with(candidates: &[&str], path_value: &str) -> Option<PathBuf> {
+    candidates.iter().find_map(|binary| {
+        let resolved = if has_path_separator(binary) {
+            let path = PathBuf::from(binary);
+            path.is_file().then_some(path)
+        } else {
+            resolve_executable_in_path(binary, path_value)
+        };
+        resolved.filter(|path| binary_path_reports_version(path))
+    })
+}
+
+/// Process-PATH entry point for [`resolve_chrome_binary_with`]: the
+/// production resolution over [`DEFAULT_CHROME_CANDIDATES`]. Called once
+/// after the gate passes (`main.rs` 6c); the result travels in
+/// `CrawlOptions.network.chrome_binary` so the launcher runs exactly the
+/// certified binary.
+pub fn resolve_chrome_binary() -> Option<PathBuf> {
+    let path_value =
+        std::env::var_os("PATH").map_or_else(String::new, |v| v.to_string_lossy().into_owned());
+    resolve_chrome_binary_with(&DEFAULT_CHROME_CANDIDATES, &path_value)
+}
+
+/// Silent `--version` probe against an already-resolved file path.
+///
+/// Unlike spawning a bare name through the process `PATH`, this probes the exact file the launcher will execute,
+/// so gate-certified and launched are the same binary by construction.
+/// Output is discarded — only the exit status matters.
+fn binary_path_reports_version(path: &Path) -> bool {
+    matches!(
+    std::process::Command::new(path)
+    .arg("--version")
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .status(),
+    Ok(status) if status.success()
+        )
+}
+
 /// Preflight: verify the local environment can satisfy the configured JS
 /// strategy before any crawl starts (#685, #758, #787).
 ///
@@ -861,8 +912,8 @@ pub fn check_js_dependencies(opts: &CrawlOptions) -> Result<(), CliExit> {
 }
 
 /// Candidate-, feature-, and PATH-injectable core of
-/// [`check_js_dependencies`] — tests probe binaries that exist
-/// deterministically in CI (e.g. `true`) instead of the real Chrome names,
+/// [`check_js_dependencies`] — Full/Chrome tests use fake executables in a
+/// controlled PATH dir (F-52-c), Hybrid tests do the same for obscura.
 /// inject the feature flag because `cfg!` cannot be toggled per test, and
 /// inject the `PATH` value so the Hybrid Obscura lookup never races with
 /// concurrent tests over the process-global environment (#787).
@@ -879,13 +930,19 @@ fn check_js_dependencies_with(
         // missing instead of letting Layer 2 fail in the middle of the crawl
         // (#787).
         JsStrategy::Hybrid => check_obscura_binary(&opts.network.obscura_binary, path_value),
-        JsStrategy::Full => check_chrome_binary(candidates, chromium_enabled),
+        JsStrategy::Full => check_chrome_binary(candidates, chromium_enabled, path_value),
     }
 }
 
-/// Full-strategy check (#685, #758): `chromium` feature + a Chrome/Chromium
-/// candidate that reports a version.
-fn check_chrome_binary(candidates: &[&str], chromium_enabled: bool) -> Result<(), CliExit> {
+/// Full-strategy check (#685, #758, F-52-c #1278): `chromium` feature + a
+/// Chrome/Chromium candidate that reports a version. The gate now resolves
+/// through [`resolve_chrome_binary_with`] — the same resolution the launcher
+/// will use — so a green gate means the certified binary is launchable.
+fn check_chrome_binary(
+    candidates: &[&str],
+    chromium_enabled: bool,
+    path_value: &str,
+) -> Result<(), CliExit> {
     if !chromium_enabled {
         return Err(CliExit::ConfigError(
             "--js-strategy full requiere un binario compilado con la feature `chromium`; \
@@ -894,9 +951,7 @@ fn check_chrome_binary(candidates: &[&str], chromium_enabled: bool) -> Result<()
         ));
     }
 
-    let chrome_present = candidates
-        .iter()
-        .any(|binary| matches!(binary_reports_version(binary), Ok(s) if s.success()));
+    let chrome_present = resolve_chrome_binary_with(candidates, path_value).is_some();
     if chrome_present {
         tracing::info!(strategy = "full", "chrome_dependency_checked");
         return Ok(());
@@ -1012,7 +1067,7 @@ fn assess_obscura_version(parsed: Option<(u64, u64, u64)>) -> VersionVerdict {
 ///
 /// Returns `None` when the probe cannot run, exits non-zero, or prints no
 /// semver-like token on stdout or stderr. Blocking spawn: acceptable once,
-/// pre-crawl (same pattern as [`binary_reports_version`] for Full).
+/// pre-crawl (same silent-probe shape the Full gate uses per resolved file).
 fn probe_obscura_version(resolved: &std::path::Path) -> Option<(u64, u64, u64)> {
     let output = Command::new(resolved).arg("--version").output().ok()?;
     if !output.status.success() {
@@ -1187,19 +1242,6 @@ fn check_export_format_vector_with(ai_enabled: bool, opts: &CrawlOptions) -> Res
     Err(CliExit::ConfigError(
         "Se requiere compilar con '--features ai' para usar --export-format vector".to_string(),
     ))
-}
-
-/// Spawn `<binary> --version` once and report its exit status.
-///
-/// A missing or non-executable binary surfaces as an `io::Error`, which the
-/// caller treats as "not installed". Output is discarded — only the exit
-/// status matters, and the probe must stay silent on the terminal.
-fn binary_reports_version(binary: &str) -> std::io::Result<std::process::ExitStatus> {
-    std::process::Command::new(binary)
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
 }
 
 // ============================================================================
@@ -1682,20 +1724,96 @@ mod tests {
         }
     }
 
-    /// `Full` strategy with a present, exit-0 binary (`true` exists in CI)
-    /// passes the preflight check.
+    /// `Full` strategy with a present, exit-0 binary passes the preflight
+    /// check. Hermetic: a fake `google-chrome` executable in a controlled
+    /// PATH dir (same pattern as the obscura fakes), so the test never
+    /// depends on the real process environment.
     // Miri cannot emulate posix_spawn (Command::status), so both tests that
     // actually probe a candidate binary are skipped there (#775). The
     // short-circuit tests (static/hybrid/feature-gate) above stay active.
     #[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
+    #[cfg(unix)]
     #[test]
     fn full_strategy_ok_when_binary_reports_version() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_chrome_like(tmp.path(), "google-chrome", 0);
+        let path_value = tmp.path().to_string_lossy().into_owned();
+
         let mut opts = CrawlOptions::default();
         opts.network.js_strategy = JsStrategy::Full;
         assert!(
-            check_js_dependencies_with(&["true"], true, "", &opts).is_ok(),
+            check_js_dependencies_with(&["google-chrome"], true, &path_value, &opts).is_ok(),
             "a candidate that exits 0 must satisfy the Full-strategy check"
         );
+    }
+
+    /// F-52-c (#1278): the resolver returns the first candidate (in order)
+    /// that exists as a file AND reports a version — gate-certified is
+    /// exactly what the launcher will execute.
+    #[cfg_attr(miri, ignore)] // Command::spawn unsupported by Miri (#775)
+    #[cfg(unix)]
+    #[test]
+    fn resolve_chrome_binary_prefers_first_working_candidate() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_chrome_like(tmp.path(), "google-chrome", 0);
+        write_chrome_like(tmp.path(), "chromium", 0);
+        let path_value = tmp.path().to_string_lossy().into_owned();
+
+        let resolved = resolve_chrome_binary_with(&["google-chrome", "chromium"], &path_value)
+            .expect("a working candidate must resolve");
+        assert_eq!(resolved, tmp.path().join("google-chrome"));
+    }
+
+    /// F-52-c (#1278): a *directory* named like a candidate must be skipped
+    /// (`is_file`, not `exists`) — this is the `/opt/google/chrome` trap
+    /// where chromiumoxide's `get_by_path` accepted a directory and the
+    /// launch died with permission denied.
+    #[cfg_attr(miri, ignore)] // Command::spawn unsupported by Miri (#775)
+    #[cfg(unix)]
+    #[test]
+    fn resolve_chrome_binary_skips_directories() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::fs::create_dir(tmp.path().join("google-chrome")).expect("fake chrome directory");
+        write_chrome_like(tmp.path(), "chromium", 0);
+        let path_value = tmp.path().to_string_lossy().into_owned();
+
+        let resolved = resolve_chrome_binary_with(&["google-chrome", "chromium"], &path_value)
+            .expect("the working fallback must resolve");
+        assert_eq!(resolved, tmp.path().join("chromium"));
+    }
+
+    /// F-52-c (#1278): a candidate whose `--version` probe fails is skipped,
+    /// and no resolvable candidate is `None` (gate goes red downstream).
+    #[cfg_attr(miri, ignore)] // Command::spawn unsupported by Miri (#775)
+    #[cfg(unix)]
+    #[test]
+    fn resolve_chrome_binary_skips_failing_version_probe() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        write_chrome_like(tmp.path(), "google-chrome", 1);
+        let path_value = tmp.path().to_string_lossy().into_owned();
+
+        assert!(
+            resolve_chrome_binary_with(&["google-chrome"], &path_value).is_none(),
+            "a candidate that fails --version must not resolve"
+        );
+        assert!(
+            resolve_chrome_binary_with(&["definitely-not-installed-9x4k"], &path_value).is_none(),
+            "a missing candidate must not resolve"
+        );
+    }
+
+    /// Write a fake Chrome-like executable: exits `code` on `--version`.
+    /// Mirrors `write_obscura_with_version` (#793 pattern).
+    #[cfg(unix)]
+    fn write_chrome_like(dir: &std::path::Path, name: &str, code: i32) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_path = dir.join(name);
+        std::fs::write(&bin_path, format!("#!/bin/sh\nexit {code}\n"))
+            .expect("write fake chrome binary");
+        std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod +x fake chrome binary");
+        bin_path
     }
 
     /// `Full` strategy with no working candidate yields a config error whose
