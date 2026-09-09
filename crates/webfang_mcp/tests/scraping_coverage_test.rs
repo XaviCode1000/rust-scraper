@@ -803,6 +803,80 @@ async fn test_scrape_batch_partial_results_on_failure() {
     );
 }
 
+/// G2 (RC-1 slice 4): `delay_ms` paces request starts through the shared
+/// token bucket (engine cadence, no second limiter) and the record shape is
+/// unchanged. 16 URLs with a 60 ms refill: the burst tier is capped at 8
+/// (auto table + budget clamp), so at least 7 full refill gaps are guaranteed
+/// on ANY hardware — a plain burst would finish near zero wall time.
+#[tokio::test]
+async fn test_scrape_batch_delay_ms_spaces_fetches() {
+    let _guard = ssrf_guards_off().await;
+    let mock = MockServer::start().await;
+    for i in 0..16 {
+        Mock::given(method("GET"))
+            .and(path(format!("/{i}")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(ARTICLE_HTML))
+            .mount(&mock)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&mock)
+        .await;
+
+    let (base_url, _handle) = start_test_server().await;
+    let client = Client::new();
+    let session_id = init_session(&client, &base_url).await;
+
+    let start = std::time::Instant::now();
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "scrape_batch",
+        json!({
+            "urls": (0..16)
+                .map(|i| format!("{}/{}", mock.uri(), i))
+                .collect::<Vec<_>>(),
+            "concurrency": 16,
+            "delay_ms": 60
+        }),
+    )
+    .await;
+    let elapsed = start.elapsed();
+
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        !is_tool_error(&result),
+        "paced batch must succeed: {}",
+        tool_text(&result)
+    );
+
+    let text = tool_text(&result);
+    let (successes, failures) = parse_batch_records(&text);
+    assert_eq!(successes.len(), 16, "all 16 URLs scraped: {text}");
+    assert!(failures.is_empty(), "no URL may fail: {text}");
+
+    // The handler derives the burst from the SAME budget model — mirror it
+    // for the exact lower bound: the last request can start no earlier than
+    // (N - 1 - burst) refill periods.
+    let burst = webfang_core::domain::budget::BudgetModel::build(
+        webfang_core::domain::budget::BudgetOverrides::default(),
+        &webfang_core::domain::budget::detector::SystemDetector,
+    )
+    .burst()
+    .get() as u64;
+    let floor_ms = (16_u64.saturating_sub(1 + burst.min(16))) * 60;
+    assert!(
+        elapsed >= std::time::Duration::from_millis(floor_ms),
+        "paced batch must spend at least (N-1-burst)*delay waiting (burst={burst}), took {elapsed:?}"
+    );
+}
+
 // ============================================================================
 // crawl_site
 // ============================================================================

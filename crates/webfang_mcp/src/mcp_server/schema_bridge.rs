@@ -98,10 +98,13 @@ pub const PROCESS_EXPORT_PIPELINE_PROPERTIES: &[SpecProperty] = &[
 /// (issue #948 coverage gap — the tool was registered in WU3 without
 /// a bridge table). Other params (`urls`, `concurrency`) are MCP-only
 /// and stay on the schemars derive. `single_page` overlaps the spec too
-/// (AUDIT-02 P6-4 CLI `--single-page` parity).
+/// (AUDIT-02 P6-4 CLI `--single-page` parity). `delay_ms` overlaps the
+/// spec too (RC-1 slice 4, G2 pacing parity — the SAME token-bucket
+/// cadence the CLI `--delay-ms` drives).
 pub const SCRAPE_BATCH_PROPERTIES: &[SpecProperty] = &[
     prop("ignore_robots", &crawler::IGNORE_ROBOTS),
     prop("single_page", &crawler::SINGLE_PAGE),
+    prop("delay_ms", &crawler::DELAY_MS),
 ];
 
 /// `get_accessibility_snapshot`: the `selector` field overlaps
@@ -152,6 +155,11 @@ pub fn default_overrides_for_tool(tool: &str) -> Vec<(&'static str, DefaultOverr
         // `scrape_with_options`: an absent `max_pages` is forwarded as `None`,
         // leaving the decision to the engine — advertise no default at all.
         "scrape_with_options" => vec![("max_pages", DefaultOverride::Unset)],
+        // `scrape_batch` (RC-1 slice 4): the CLI/spec `--delay-ms` default
+        // is 1000 ms, but the tool's runtime default is UNSHROTTLED (an
+        // absent `delay_ms` builds no bucket). Schema truth outranks spec
+        // propagation: advertise 0 — what the tool actually does.
+        "scrape_batch" => vec![("delay_ms", DefaultOverride::Set(json!(0)))],
         _ => Vec::new(),
     }
 }

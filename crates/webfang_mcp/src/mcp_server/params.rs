@@ -377,6 +377,16 @@ pub struct ScrapeBatchParams {
     /// parity; there is no crawl-expansion mode to disable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub single_page: Option<bool>,
+    /// Pre-fetch pacing in milliseconds between request STARTS (RC-1 slice 4,
+    /// G2 parity with the CLI `--delay-ms` and the crawl engine).
+    ///
+    /// When set to a value > 0, every URL waits for a token from the SAME
+    /// token-bucket implementation the engine uses (`SharedRateLimiter`,
+    /// burst from the shared `BudgetModel`) BEFORE its fetch — guard-chain
+    /// stage 2. Default (`None`/0) keeps the unthrottled behavior with zero
+    /// overhead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
 }
 
 impl ScrapeBatchParams {
@@ -1197,6 +1207,24 @@ mod tests {
         }))
         .expect("absent single_page must deserialize");
         assert_eq!(without.single_page, None);
+    }
+
+    /// G2 (RC-1 slice 4): `delay_ms` is an optional pacing knob — accepted
+    /// when present, `None` (unthrottled) when absent.
+    #[test]
+    fn scrape_batch_params_accept_delay_ms() {
+        let paced: ScrapeBatchParams = serde_json::from_value(serde_json::json!({
+            "urls": ["https://example.com"],
+            "delay_ms": 250
+        }))
+        .expect("delay_ms must deserialize");
+        assert_eq!(paced.delay_ms, Some(250));
+
+        let unpaced: ScrapeBatchParams = serde_json::from_value(serde_json::json!({
+            "urls": ["https://example.com"]
+        }))
+        .expect("absent delay_ms must deserialize");
+        assert_eq!(unpaced.delay_ms, None);
 
         let unknown = serde_json::from_value::<ScrapeBatchParams>(serde_json::json!({
             "urls": ["https://example.com"],

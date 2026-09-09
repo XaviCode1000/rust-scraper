@@ -145,6 +145,13 @@ const PARITY_CASES: &[ParityCase] = &[
         group: CRAWLER_GROUP,
         spec_id: "single_page",
     },
+    // -- scrape_batch delay_ms (RC-1 slice 4, G2 pacing parity) ---------
+    ParityCase {
+        tool: "scrape_batch",
+        wire_name: "delay_ms",
+        group: CRAWLER_GROUP,
+        spec_id: "delay_ms",
+    },
     // -- get_accessibility_snapshot (issue #948 coverage gap, WU5) -----
     ParityCase {
         tool: "get_accessibility_snapshot",

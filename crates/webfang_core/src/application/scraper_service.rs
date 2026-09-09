@@ -13,6 +13,7 @@
 
 use crate::application::error_mapping::scraper_error_from_http;
 use crate::application::http_client::HttpClientPort;
+use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::config::ScraperConfig;
 use crate::domain::crawler_port::RobotsPort;
 use crate::domain::html_cleaner::clean_html;
@@ -658,6 +659,71 @@ pub async fn scrape_multiple_with_limit(
     robots: Option<&dyn RobotsPort>,
     ignore_robots: bool,
 ) -> Result<ScrapeBatchOutcome> {
+    scrape_multiple_inner(
+        client,
+        urls,
+        config,
+        downloader,
+        robots,
+        ignore_robots,
+        None,
+    )
+    .await
+}
+
+/// Same as [`scrape_multiple_with_limit`] with optional pre-fetch pacing
+/// (RC-1 slice 4, G2): when `pacing` is `Some`, every URL waits for a token
+/// from the shared bucket BEFORE its fetch — guard-chain stage 2, the same
+/// cadence policy the crawl engine and the CLI scrape phase use (no second
+/// limiter implementation).
+///
+/// # Arguments
+/// Additional to [`scrape_multiple_with_limit`]:
+/// * `pacing` - Shared token bucket gating each fetch; `None` keeps the
+///   unthrottled behavior (zero overhead).
+#[instrument(
+    name = "scrape_multiple_with_limit_paced",
+    skip(client, urls, config, downloader, robots, pacing),
+    fields(
+        urls = urls.len(),
+        concurrency = config.scraper_concurrency,
+        paced = pacing.is_some()
+    )
+)]
+pub async fn scrape_multiple_with_limit_paced(
+    client: &dyn HttpClientPort,
+    urls: &[url::Url],
+    config: &ScraperConfig,
+    downloader: Option<&dyn crate::domain::ports::AssetDownloaderPort>,
+    robots: Option<&dyn RobotsPort>,
+    ignore_robots: bool,
+    pacing: Option<&SharedRateLimiter>,
+) -> Result<ScrapeBatchOutcome> {
+    scrape_multiple_inner(
+        client,
+        urls,
+        config,
+        downloader,
+        robots,
+        ignore_robots,
+        pacing,
+    )
+    .await
+}
+
+/// Shared body of both batch entries: collect per-URL outcomes with bounded
+/// concurrency, optionally gating every fetch behind the shared token bucket
+/// BEFORE its dial (guard-chain stage 2, RC-1 slice 4).
+#[allow(clippy::too_many_lines)]
+async fn scrape_multiple_inner(
+    client: &dyn HttpClientPort,
+    urls: &[url::Url],
+    config: &ScraperConfig,
+    downloader: Option<&dyn crate::domain::ports::AssetDownloaderPort>,
+    robots: Option<&dyn RobotsPort>,
+    ignore_robots: bool,
+    pacing: Option<&SharedRateLimiter>,
+) -> Result<ScrapeBatchOutcome> {
     if urls.is_empty() {
         return Ok(ScrapeBatchOutcome {
             results: Vec::new(),
@@ -688,6 +754,13 @@ pub async fn scrape_multiple_with_limit(
             let config = config.clone();
             let root = root_correlation.clone();
             async move {
+                // G2 (RC-1 slice 4): pre-fetch pacing — the wait happens
+                // BEFORE the network is touched, mirroring the crawl engine
+                // and the CLI scrape phase (one shared cadence policy, no
+                // second limiter implementation).
+                if let Some(limiter) = pacing {
+                    limiter.until_ready().await;
+                }
                 let result = scrape_with_config(
                     client,
                     &url,
@@ -707,6 +780,19 @@ pub async fn scrape_multiple_with_limit(
         .collect()
         .await;
 
+    let outcome = collect_batch_outcome(results);
+
+    info!(
+        "✅ Scraped {} pages from {} URLs ({} failed)",
+        outcome.results.len(),
+        urls.len(),
+        outcome.failed.len()
+    );
+    Ok(outcome)
+}
+
+/// Split collected per-URL outcomes into successes and #591 failure records.
+fn collect_batch_outcome(results: Vec<(url::Url, Result<ScrapeOutcome>)>) -> ScrapeBatchOutcome {
     let mut all_content = Vec::new();
     let mut failed = Vec::new();
     for (url, result) in results {
@@ -723,15 +809,8 @@ pub async fn scrape_multiple_with_limit(
             },
         }
     }
-
-    info!(
-        "✅ Scraped {} pages from {} URLs ({} failed)",
-        all_content.len(),
-        urls.len(),
-        failed.len()
-    );
-    Ok(ScrapeBatchOutcome {
+    ScrapeBatchOutcome {
         results: all_content,
         failed,
-    })
+    }
 }

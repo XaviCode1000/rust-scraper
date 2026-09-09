@@ -215,7 +215,7 @@ impl McpHandler {
 
     /// Scrape multiple URLs with concurrency control
     #[tool(
-        description = "Scrape multiple URLs with concurrency control. Failed URLs are logged but don't stop the batch."
+        description = "Scrape multiple URLs with concurrency control. Failed URLs are logged but don't stop the batch. Optional delay_ms (milliseconds) paces request starts through the shared token bucket — the same cadence the crawl engine uses; 0/absent runs unthrottled."
     )]
     #[instrument(skip(self), name = "mcp.scrape_batch", fields(url_count = params.urls.len()))]
     async fn scrape_batch(
@@ -257,6 +257,53 @@ impl McpHandler {
             config.scraper_concurrency = c;
         }
 
+        // G2 (RC-1 slice 4): optional pre-fetch pacing through the SAME
+        // shared token-bucket implementation the crawl engine and the CLI
+        // scrape phase use — `SharedRateLimiter` built from the same two
+        // inputs `rate_limiter_config` (engine.rs:152) consumes: the
+        // caller's `delay_ms` as refill period and the budget model's
+        // independent burst tier. No second limiter implementation.
+        // `None`/0 → unthrottled: no bucket, zero overhead (the default,
+        // mirroring the CLI `--delay-ms` semantics).
+        let pacing = match params.delay_ms.unwrap_or(0) {
+            0 => None,
+            delay_ms => {
+                let budget = webfang_core::domain::budget::BudgetModel::build(
+                    webfang_core::domain::budget::BudgetOverrides::default(),
+                    &webfang_core::domain::budget::detector::SystemDetector,
+                );
+                match webfang_core::application::rate_limiter::SharedRateLimiter::new(
+                    &webfang_core::application::rate_limiter::RateLimiterConfig::new(
+                        delay_ms,
+                        budget.burst().get(),
+                    ),
+                ) {
+                    Ok(limiter) => {
+                        tracing::info!(
+                            delay_ms,
+                            burst = budget.burst().get(),
+                            url_count = count,
+                            "batch pre-fetch pacing wired"
+                        );
+                        Some(limiter)
+                    },
+                    Err(e) => {
+                        // Degrade to unthrottled with a WARN — the
+                        // container precedent (container.rs:608).
+                        // Unreachable in practice: the bucket rejects
+                        // only a zero period (clamped to 1 ms) or zero
+                        // burst.
+                        tracing::warn!(
+                            error = %e,
+                            delay_ms,
+                            "batch pacing unavailable — continuing unthrottled"
+                        );
+                        None
+                    },
+                }
+            },
+        };
+
         let client = self.state.container.http_client().as_ref();
         let dl = self
             .state
@@ -267,13 +314,14 @@ impl McpHandler {
         // tool-level opt-out is `params.ignore_robots`.
         let robots = self.state.robots_fetcher.as_deref();
         let ignore_robots = params.ignore_robots.unwrap_or(false);
-        match webfang_core::application::scraper_service::scrape_multiple_with_limit(
+        match webfang_core::application::scraper_service::scrape_multiple_with_limit_paced(
             client,
             &urls,
             &config,
             dl,
             robots,
             ignore_robots,
+            pacing.as_ref(),
         )
         .await
         {
@@ -1151,6 +1199,7 @@ mod tests {
                 concurrency: Some(2),
                 ignore_robots: None,
                 single_page: None,
+                delay_ms: None,
             }))
             .await;
         assert_ssrf_rejected(res);
@@ -1179,6 +1228,7 @@ mod tests {
             concurrency: Some(0),
             ignore_robots: None,
             single_page: None,
+            delay_ms: None,
         }
         .validate();
         assert!(batch.is_err(), "concurrency 0 must be rejected: {batch:?}");
