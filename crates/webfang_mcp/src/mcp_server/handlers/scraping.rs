@@ -397,11 +397,22 @@ impl McpHandler {
 
         // The explicit sitemap URL arrives boundary-validated (`McpUrl`
         // wraps a parsed+hardened `ValidUrl`): rewrap without re-parsing
-        // and enter through the resolved entry (#1190).
+        // and enter through the resolved entry (#1190). F-31 (#1233) made
+        // the wrap fallible, so the re-validation is explicit here: the
+        // `McpUrl` boundary already applied this exact policy, so the Err
+        // arm is unreachable in practice but is never swallowed.
         let explicit = params
             .sitemap_url
             .as_ref()
-            .map(|s| webfang_core::domain::ValidUrl::new(s.as_url().clone()));
+            .map(|s| {
+                webfang_core::domain::ValidUrl::try_from_url(s.as_url().clone()).map_err(|e| {
+                    McpError::invalid_params(
+                        format!("URL de sitemap no soportada '{}': {e}", s.as_str()),
+                        Some(serde_json::Value::String("sitemap_url".to_string())),
+                    )
+                })
+            })
+            .transpose()?;
 
         match webfang_core::application::crawler::sitemap_discovery::crawl_with_sitemap_resolved(
             params.url.as_str(),
@@ -1068,6 +1079,7 @@ mod tests {
                 urls: vec![vu("http://127.0.0.1/")],
                 concurrency: Some(2),
                 ignore_robots: None,
+                single_page: None,
             }))
             .await;
         assert_ssrf_rejected(res);
@@ -1095,6 +1107,7 @@ mod tests {
             urls: vec![vu("https://example.com")],
             concurrency: Some(0),
             ignore_robots: None,
+            single_page: None,
         }
         .validate();
         assert!(batch.is_err(), "concurrency 0 must be rejected: {batch:?}");
@@ -1428,7 +1441,10 @@ mod tests {
         webfang_core::domain::entities::content::ScrapedContent {
             title: "t".into(),
             content: "c".into(),
-            url: webfang_core::domain::ValidUrl::new(url::Url::parse(url).expect("valid url")),
+            url: webfang_core::domain::ValidUrl::try_from_url(
+                url::Url::parse(url).expect("valid url"),
+            )
+            .expect("test fixture URL must be a plain http(s) URL"),
             excerpt: None,
             author: None,
             date: None,

@@ -153,6 +153,28 @@ Dual wrapping pattern: infra errors wrap into domain errors via `From` impls. Ne
 
 **ALWAYS `wreq`**, never `reqwest` — TLS fingerprint impersonation for WAF evasion. This is non-negotiable. An agent suggesting `reqwest` as an alternative is wrong.
 
+### Fetch guard-chain (MANDATORY order)
+
+Every fetch path — CLI, engine, MCP tool, benchmark, future adapter — must wire the protections in this exact order. Each stage assumes the previous one filtered: deviating from the order is a **bug, not a style choice** (e.g. pacing *after* a doomed request burns rate budget on something SSRF would have rejected; classifying retries *after* reading the body wastes a full read on a response that will never be accepted).
+
+```text
+ValidUrl (entry) → rate limit (pre-fetch pacing) → per-attempt request:
+    timeout → redirect policy → SSRF at socket dial (every hop)
+→ retry classification → body read
+```
+
+| Stage | Reference implementation | Rationale |
+| :--- | :--- | :--- |
+| 1. Entry validation | `ValidUrl` (`domain/value_objects.rs`), built via `try_from_url` at the argv boundary (#1240, P0) | Untrusted URL text becomes a validated domain type before entering any flow. Never accept a raw `Url`/`String` as a fetch target. |
+| 2. Rate limit (pacing) | Scrape path: token bucket in `scrape_urls` (`cli/scrape_flow.rs` — lands with PR #1249, tracking #1255: cancel-aware `until_ready_or_cancel`, zero overhead at `delay_ms = 0`). Crawl path: `rate_limiter_config` (`crawler/engine.rs:152`) from `delay_ms` + budget-tier burst. | The wait happens BEFORE the network is touched — a cancelled wait counts as skipped (#509), never as a blocked fetch. |
+| 3a. Timeout | `Client` builder (`downloader/wreq_downloader.rs:169-170`): request timeout + connect timeout (connect is clamped) | Per-request ceiling; see stage 4 for why a timeout is terminal, not retriable. |
+| 3b. Redirect policy | `redirect_policy` (`domain/ssrf_guard.rs`): 10-hop limit + synchronous stop on redirects whose target is a literal forbidden IP | Every redirect hop re-enters the chain — it is a new dial, not a free pass. |
+| 3c. SSRF at socket dial | `ssrf_guard()` wrapping the `Client` (`wreq_downloader.rs:180`, `domain/ssrf_guard.rs`): resolver-level check on EVERY connection — private/link-local/loopback ranges rejected before the socket exists | Nothing may connect to a forbidden address, including via DNS names and redirect hops (E2E-proven: `tests/ssrf_rfc1918_e2e_test.rs`, PR #1251 — pre-socket rejection of RFC1918/CGNAT/NAT64/mapped targets, exit 69, zero outbound packets). |
+| 4. Retry classification | `fetch_inner` retry loop (`wreq_downloader.rs`): mid-body transients (`ConnectionReset`/`UnexpectedEof`) retry (#649); 429 → `max(Retry-After, exponential backoff)`; 5xx → exponential; 403 → one rotated-UA retry ONLY with unpinned UA (#503), capturing the rotated status; **timeouts are retried** (F-08: recovery can be served after a transient timeout — pinned by `timeout_is_retried_and_recovery_is_served`, #1249); terminal 4xx and builder errors (F-09) reported as-is; retries exhausted report the LAST observed status, never a hardcoded one; WARN only when there actually is a retry | Classification decides spend: whether to sleep, rotate, or fail. It runs BEFORE any body is read. |
+| 5. Body read | `read_body_capped` (`wreq_downloader.rs:426`, #1249): streaming read capped at `DEFAULT_MAX_PAGE_BYTES` = 50 MiB (`downloader_factory.rs:69`), error `BodyTooLarge` beyond the cap | The read is bounded so a huge page or gzip bomb cannot balloon memory (pinned by tests). No fetch path may read an unbounded body. |
+
+**Convention for new fetch paths:** replicate stages 1→4 before stage 5, citing this table in review. If a new path cannot reuse `WreqDownloader`/`FetchRouter`, the guard order must still hold — a path that connects before validating, or paces after dialing, is rejected in review regardless of its tests passing.
+
 ### Async rules
 
 - Tokio multi-threaded runtime.
@@ -249,12 +271,12 @@ If the Arrange phase is complex, fix the production design, not the test.
 ### Conventions
 
 - **Structured fields, not string soup:** `tracing::info!(pages = n, url = %url, "msg")` — never `format!` data into the message.
-- **Correlation:** every event/span carries its `trace_id`, so a whole operation is reconstructable with `jq 'select(.fields.trace_id == "...")'`.
+- **Correlation:** every event/span carries a top-level `trace_id` equal to the root span Id (16-hex, **ephemeral identity-within-run** — do not persist it or join across runs; the durable cross-run identity is the `CorrelationId` UUID). Reconstruct a whole run with `ROOT=<16-hex root>; jq -c 'select(.trace_id == "$ROOT")' <file>` (top-level, NOT `.fields.trace_id` — that inner field is only populated on the error path). Note `span_close` records share `.span` names, so counts/stage queries must exclude `.record == "span_close"`.
 - **User-facing errors in Spanish; tracing fields/logs in English.**
 - **No new metrics backends:** do not reintroduce OpenTelemetry or any external collector. Emit a structured tracing event and query it from the JSONL.
 - **Snapshots stay deterministic:** `correlation_id`/`trace_id` are internal and `#[serde(skip)]` on scraped output; redact via `redact_nondeterministic()`.
 
-See `docs/debugging.md` and `scripts/analyze-trace.sh` for the full query cookbook. The observability module lives in `crates/webfang_core/src/infrastructure/observability/`.
+See `docs/src/debugging.md` and `scripts/analyze-trace.sh` for the full query cookbook. The observability module lives in `crates/webfang_core/src/infrastructure/observability/`.
 
 ---
 
@@ -849,25 +871,29 @@ Notes for agents: `ddiff`/`dshow`/`dlog` require `difft` (Difftastic) on PATH. `
 
 ---
 
-## 🚧 Sprint 0 Gate 0 — Freeze + StateStore (sdd/stabilization-sprint0-baseline)
+## 🚧 Sprint 0 — StateStore resume contract (sdd/stabilization-sprint0-baseline)
 
-### Freeze policy
+### Gate 0 freeze — RETIRED (2026-09-07, #1241)
 
-- `FREEZE_FEATURES=true` in `.github/workflows/pr-validation.yml` (workflow `env`). When frozen, `type:feature` and `type:breaking-change` are **blocked** with `::error::Gate 0 freeze … Ver sdd/stabilization-sprint0-baseline`.
-- Bypass only with **both** `freeze-exception` label **and** CODEOWNER approval via `gh api repos/$REPO/pulls/$PR/reviews` (`APPROVED` count >0). Fail-closed when `gh` empty or non-numeric. **In this single-maintainer repo the bypass is unreachable** (GitHub forbids self-approval) — verified empirically with PR #814.
-- `enforce_admins:true` (branch protection, `strict:true`) guarantees admins also blocked. Documented here and in `pr-validation.yml` comment.
+The `FREEZE_FEATURES` gate that blocked `type:feature` / `type:breaking-change` PRs has been removed
+from `.github/workflows/pr-validation.yml`, together with `FREEZE_DRAIN_UNTIL`, the drain contract, and
+`scripts/test_freeze_gate.sh`. The Sprint 0 stabilization baseline it protected is complete: all six
+gates ratified and the ADR-0012 intra-crate allowlist at its terminal state (19 entries → 2, both
+declared permanent).
 
-### Drain contract (opening the freeze)
+Two facts from that regime stay in force as general knowledge, because they outlive the gate:
 
-Setting `FREEZE_FEATURES="false"` is NOT a bare toggle. It REQUIRES all three, in the same batch:
+- **A freeze bypass is unreachable in this single-maintainer repo.** Any future gate that requires a
+  CODEOWNER *approval* (`gh api repos/$REPO/pulls/$PR/reviews`, `APPROVED` count > 0) cannot be
+  satisfied by this maintainer — GitHub forbids self-approval. Verified empirically with PR #814.
+  Design future gates on labels or artifact checks, not on approvals nobody can grant.
+- **For `pull_request` events, GitHub evaluates the workflow file from the PR's own merge ref, not
+  `main`'s.** A PR that changes a gate can therefore pass its own new (or relaxed) validation. This is
+  not a freeze-specific quirk — it applies to every `pr-validation.yml` edit, and it is why policy
+  changes need review of the *diff*, not just of the resulting check status.
 
-1. **Linked issue** documenting why the drain is open and what it drains.
-2. **Hard deadline**: set `FREEZE_DRAIN_UNTIL` (ISO date `YYYY-MM-DD`) in the workflow `env`. Empty = no active drain.
-3. **Closing revert PR** restoring `"true"`, created before or with the drain-opening commit.
-
-Enforcement is fail-closed (#820/#821): once today's UTC date passes `FREEZE_DRAIN_UNTIL`, **every** PR fails `Validate PR metadata` until the flag is restored or the deadline is deliberately extended in a new commit. A forgotten drain cannot silently disable Gate 0.
-
-> ⚠️ **Gotcha:** for `pull_request` events GitHub evaluates the workflow file from the PR's own merge ref, not main's. A batch PR that *contains* `FREEZE_FEATURES="false"` passes its own Gate 0 validation even with a `type:feature` label. This is how drain batches merge — and why the closing revert must exist as its own tracked step.
+To reinstate a freeze for a future stabilization sprint: `git revert` the retirement PR (#1241) and
+re-read that issue's rationale for why the parked machinery was deleted rather than left switched off.
 
 ### StateStore resume contract
 

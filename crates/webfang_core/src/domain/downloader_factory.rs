@@ -63,6 +63,11 @@ use crate::domain::JsStrategy;
 /// constant so its historical public path still resolves.
 pub const DEFAULT_OBSCURA_BINARY: &str = "obscura";
 
+/// Historical default cap for the decompressed response body of a page
+/// fetch (FIX-1, #1231 F-12): 50 MiB, matching the documented
+/// `--max-file-size` default for asset downloads.
+pub const DEFAULT_MAX_PAGE_BYTES: u64 = 50 * 1024 * 1024;
+
 /// Domain-shaped inputs for building a fetch downloader.
 ///
 /// Pure configuration — see the [module docs](self) for why the cookie bridge
@@ -103,6 +108,12 @@ pub struct DownloaderSpec {
     pub backoff_max_ms: u64,
     /// Hybrid Layer 2 (Obscura) binary name or path (#787).
     pub obscura_binary: String,
+    /// Cap on the decompressed response body of a PAGE fetch, in bytes
+    /// (FIX-1, #1231 F-12). The Wreq layer aborts the read mid-body when the
+    /// streamed (already decompressed) byte count exceeds this value, so a
+    /// gzip bomb announced with a tiny Content-Length cannot exhaust memory.
+    /// `None` applies the historical default of 50 MiB.
+    pub max_page_bytes: Option<u64>,
 }
 
 /// Builds the downloader for a crawl strategy.

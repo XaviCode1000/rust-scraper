@@ -162,7 +162,7 @@ async fn start_seeded_server(n: usize) -> (String, tokio::task::JoinHandle<()>, 
         let content = ScrapedContent {
             title: format!("Seed Title {i}"),
             content: format!("Seed body content number {i} for export testing."),
-            url: ValidUrl::new(url),
+            url: ValidUrl::try_from_url(url).expect("seeded fixture is a plain https URL"),
             excerpt: None,
             author: None,
             date: None,
@@ -1627,4 +1627,190 @@ async fn mcp_ai_tools_registered_with_ai_off() {
         names.contains(&"search_obsidian"),
         "search_obsidian must be registered with ai off, got: {names:?}"
     );
+}
+
+// ============================================================================
+// 9. Protocol conformance (AUDIT-02: P5-3 + P6-4)
+// ============================================================================
+
+/// AUDIT-02 P5-3: `list_waf_providers` takes no arguments; the strict
+/// deserialization boundary must reject an unknown field with an
+/// invalid-params error instead of silently accepting it.
+#[tokio::test]
+async fn test_p5_3_list_waf_providers_rejects_unknown_field() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = Client::new();
+    let session_id = init_session(&client, &base_url).await;
+
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "list_waf_providers",
+        json!({ "nonexistent_field": true }),
+    )
+    .await;
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        is_tool_error(&result),
+        "unknown field must be rejected as a tool error: {}",
+        tool_text(&result)
+    );
+    let text = tool_text(&result);
+    assert!(
+        text.contains("failed to deserialize parameters"),
+        "rejection must surface as invalid params, got: {text}"
+    );
+    assert!(
+        text.contains("nonexistent_field"),
+        "error must name the offending field, got: {text}"
+    );
+
+    // Control: the strict boundary accepts the canonical empty arguments.
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "list_waf_providers",
+        json!({}),
+    )
+    .await;
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        !is_tool_error(&result),
+        "empty arguments must still succeed: {}",
+        tool_text(&result)
+    );
+}
+
+/// AUDIT-02 P5-3 (mechanical extension): `get_scrape_metrics` takes no
+/// arguments either — same strict boundary, same rejection contract.
+#[tokio::test]
+async fn test_p5_3_get_scrape_metrics_rejects_unknown_field() {
+    let (base_url, _handle) = start_test_server().await;
+    let client = Client::new();
+    let session_id = init_session(&client, &base_url).await;
+
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "get_scrape_metrics",
+        json!({ "surprise": 1 }),
+    )
+    .await;
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        is_tool_error(&result),
+        "unknown field must be rejected as a tool error: {}",
+        tool_text(&result)
+    );
+    assert!(
+        tool_text(&result).contains("failed to deserialize parameters"),
+        "rejection must surface as invalid params, got: {}",
+        tool_text(&result)
+    );
+}
+
+/// AUDIT-02 P6-4: `scrape_batch` exposes `single_page` with CLI-parity
+/// semantics. Batch scraping already scrapes exactly one page per URL
+/// (#1215), so `single_page:true` must be accepted and behave identically
+/// to its absence: one page per URL, no discovery or crawling.
+#[tokio::test]
+async fn test_p6_4_scrape_batch_single_page_scrapes_one_page_per_url() {
+    // Arrange: one article containing a link to /never-crawled. Both input
+    // URLs are served by path-scoped mocks so request counts are provable.
+    const P6_4_ARTICLE_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head><title>Batch Page</title></head>
+<body>
+<article>
+<h1>Batch Article</h1>
+<p>Substantive paragraph with enough text for Readability extraction to keep the article content.</p>
+<p><a href="/never-crawled">a tempting link</a></p>
+</article>
+</body>
+</html>"#;
+
+    let mock = wiremock::MockServer::start().await;
+    for path in ["/", "/only"] {
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(path))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(P6_4_ARTICLE_HTML))
+            .expect(1)
+            .mount(&mock)
+            .await;
+    }
+    // single_page contract: the linked page is never discovered or fetched.
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/never-crawled"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(P6_4_ARTICLE_HTML))
+        .expect(0)
+        .mount(&mock)
+        .await;
+    // robots.txt (fail-open): answer 404 so the batch proceeds naturally.
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/robots.txt"))
+        .respond_with(wiremock::ResponseTemplate::new(404))
+        .mount(&mock)
+        .await;
+
+    let (base_url, _handle) = start_test_server().await;
+    let client = Client::new();
+    let session_id = init_session(&client, &base_url).await;
+
+    // The tool must accept single_page alongside the existing params —
+    // a strict-deserialize failure here would mean the field never landed.
+    let page1 = format!("{}/", mock.uri());
+    let page2 = format!("{}/only", mock.uri());
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "scrape_batch",
+        json!({
+            "urls": [page1, page2],
+            "concurrency": 2,
+            "single_page": true
+        }),
+    )
+    .await;
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        !is_tool_error(&result),
+        "scrape_batch with single_page must succeed: {}",
+        tool_text(&result)
+    );
+
+    // One page per URL: both outcomes present, nothing failed, and the
+    // linked page never entered the batch outcome.
+    let text = tool_text(&result);
+    let outcome: Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("outcome must be JSON: {e}"));
+    let results = outcome
+        .get("results")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("outcome must carry results: {text}"));
+    assert_eq!(results.len(), 2, "one page per URL, got: {text}");
+    // `failed` is skipped when empty — absence IS the no-failure proof.
+    assert!(
+        outcome.get("failed").is_none(),
+        "no URL may fail: {:?}",
+        outcome.get("failed")
+    );
+    assert!(text.contains("/only"), "page2 content must be included");
+    // The /never-crawled mock's `.expect(0)` above is the no-crawl proof;
+    // the link TEXT still legitimately appears inside page1's own content.
 }

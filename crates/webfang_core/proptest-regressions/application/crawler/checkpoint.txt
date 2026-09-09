@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 37502a20bc79ed2e4978f99a764137d36a6227fa8d1d8bc1a4ef3c96dc337bb1 # shrinks to state = CrawlCheckpoint { visited: {}, pages_crawled: 0, banned_domains: [], version: 3 }

@@ -25,7 +25,7 @@
 //! |---|---|
 //! | `ExportState.processed_urls: Vec<String>` (persisted v1) | RETIRED. Survives only as input to the v1→v2 migration (PR2): every entry becomes a `COMMITTED` record with `run_id = "migrated-v1"`. |
 //! | `ScrapeStatus` (memory-only display) | Display projection read by the TUI — `Pending → Discovered/Queued`, `Downloading → Fetched`, `Fetching → Fetching`, `Extracting → Extracted`, `Completed → Committed`, `Failed → any state + last_error set`. Never consulted for resume. |
-//! | `CrawlCheckpoint.visited/queued` (engine) | UNTOUCHED (A5: Engine-API only). Maps conceptually onto `Fetched+` / `Queued`; no longer consulted for ANY resume decision after PR3. |
+//! | `CrawlCheckpoint.visited` / `.banned_domains` (engine) | STILL CONSULTED. `Engine::run` → `restore_checkpoint_state` feeds both back into the scheduler and the banned-domain list, so they DO drive resume. The earlier claim here — "no longer consulted for ANY resume decision after PR3" — was false; it survived untested until #1234 measured the code. `queued` is now GONE from the schema entirely (#1234 / F-39): the frontier was unbounded and was replayed ahead of the resumed run's `max_pages`. Resume rediscovers from `visited` plus the seed. Neither field is a page-lifecycle state: they are engine scheduling state that happens to be durable.
 
 pub mod status;
 pub mod typed;

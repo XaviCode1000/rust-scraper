@@ -51,7 +51,7 @@ async fn start_seeded_server(n: usize) -> (String, tokio::task::JoinHandle<()>, 
         let content = ScrapedContent {
             title: format!("Seed Title {i}"),
             content: format!("Seed body content number {i} for export testing."),
-            url: ValidUrl::new(url),
+            url: ValidUrl::try_from_url(url).expect("seeded fixture is a plain https URL"),
             excerpt: None,
             author: None,
             date: None,

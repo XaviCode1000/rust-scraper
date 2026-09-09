@@ -12,13 +12,19 @@
 //! Following **security-ssrf-prevention**: Parses URL via `url::Url` before
 //! comparison — no `.contains()` on raw strings. `Url::parse()` normalizes the
 //! URL (strips query params, fragments, etc.), preventing SSRF via crafted URLs.
+//! The universal wildcard is the one pattern that never reaches parsing.
 //!
 //! # Security
 //!
-//! All patterns go through `url::Url::parse()` first. For path patterns, the
-//! glob is matched against `url.as_str()` (the normalized URL), NOT the raw
-//! input string. This prevents SSRF attacks where malicious URLs like
+//! Every non-wildcard pattern goes through `url::Url::parse()` first. For path
+//! patterns, the glob is matched against `url.as_str()` (the normalized URL), NOT
+//! the raw input string. This prevents SSRF attacks where malicious URLs like
 //! `https://evil.com/?q=example.com/pricing` could bypass filters.
+//!
+//! The single exception is the universal wildcard (`*`, and the empty pattern),
+//! which is evaluated *before* parsing and therefore matches any input, garbage
+//! included. Universality is a property of the pattern, not of the target, so
+//! hoisting it cannot widen any structural match — see [`matches_pattern`].
 
 use globset::Glob;
 use url::Url;
@@ -35,10 +41,17 @@ use url::Url;
 ///   for backward-compatible behavior.
 ///   Examples: `example.com`, `*.example.com`, `*.example.com/*`
 ///
+/// The universal wildcard (`*`) and the empty pattern are checked **before** the
+/// URL is parsed, so they match every input — including unparseable strings.
+/// Universality is a property of the pattern, not of the target: an exclusion list
+/// of `["*"]` must fail closed, and evaluating it after a failed parse made it fail
+/// open instead (#1243). Every other pattern still requires a parseable URL.
+///
 /// Following **own-borrow-over-clone**: Accepts `&str` not `&String`.
 /// Following **opt-inline**: Inlined for hot path performance.
-/// Following **security-ssrf-prevention**: Always parses URL first; never
-/// compares raw strings.
+/// Following **security-ssrf-prevention**: Always parses URL first and never
+/// compares raw strings, except for the universal wildcard, which is shape-free
+/// by definition and parses nothing.
 ///
 /// # Examples
 ///
@@ -54,18 +67,24 @@ use url::Url;
 /// assert!(matches_pattern("https://blog.example.com/page", "*.example.com"));
 /// assert!(matches_pattern("https://example.com/page", "example.com"));
 /// assert!(!matches_pattern("https://evil.com/page", "example.com"));
+///
+/// // Universal wildcard: matches any input, parseable or not (#1243)
+/// assert!(matches_pattern("::garbage::", "*"));
 /// ```
 #[inline]
 #[must_use]
 pub fn matches_pattern(url_str: &str, pattern: &str) -> bool {
+    // Universal wildcard first, deliberately before `Url::parse`: `*` claims every
+    // input, so a parse failure must not veto it. Evaluating it after the parse made
+    // `is_excluded(garbage, ["*"])` return false — a fails-open exclusion (#1243).
+    if pattern.is_empty() || pattern == "*" {
+        return true;
+    }
+
     let url = match Url::parse(url_str) {
         Ok(u) => u,
         Err(_) => return false,
     };
-
-    if pattern.is_empty() || pattern == "*" {
-        return true;
-    }
 
     // Path pattern: starts with '/' → match against URL path component
     if pattern.starts_with('/') {
@@ -242,9 +261,26 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_invalid_url() {
+        // Non-wildcard patterns stay fail-closed on unparseable input: hoisting the
+        // wildcard (#1243) must not widen a single structural match.
         assert!(!matches_pattern("not-a-url", "*.example.com/*"));
-        assert!(!matches_pattern("://missing-scheme.com", "*"));
-        assert!(!matches_pattern("", "*"));
+        assert!(!matches_pattern("://missing-scheme.com", "example.com"));
+        assert!(!matches_pattern("not-a-url", "/admin/*"));
+        assert!(!matches_pattern("", "/admin/*"));
+        assert!(!matches_pattern("", "example.com"));
+    }
+
+    #[test]
+    fn test_matches_pattern_wildcard_matches_unparseable_input() {
+        // #1243: the universal wildcard is a property of the PATTERN, not of the
+        // target, so it must hold before `Url::parse` ever runs. An exclusion list
+        // of `["*"]` therefore cannot fail open on garbage input.
+        assert!(matches_pattern("::garbage::", "*"));
+        assert!(matches_pattern("://missing-scheme.com", "*"));
+        assert!(matches_pattern("not-a-url", "*"));
+        assert!(matches_pattern("", "*"));
+        // Empty pattern shares the same wildcard branch and contract.
+        assert!(matches_pattern("not-a-url", ""));
     }
 
     #[test]

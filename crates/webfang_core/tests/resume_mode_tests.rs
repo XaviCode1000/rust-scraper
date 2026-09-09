@@ -8,6 +8,35 @@
 //! Following contract-based-test-audit: observable behavior only, tempfile for filesystem.
 
 use tempfile::TempDir;
+use webfang_core::infrastructure::export::state_store::StateStore;
+
+/// Seed a v1 state document on disk.
+///
+/// `StateStore` no longer writes anything: its old `save()` targeted
+/// `<state-dir>/<domain>.json`, which is the SAME file the v2 record store owns
+/// (see `cli::scrape_flow::record_store_bridge`, which derives the record
+/// store's dir and domain from `StateStore::get_state_path`). One stray call
+/// would have replaced the whole record store with an empty v1 document, and
+/// `RecordStore::load` would read `processed_urls: []` as "migrate an empty
+/// v1" — silent total loss of resume state (#1230).
+///
+/// Tests that need state on disk therefore write the accepted v1 wire shape
+/// directly; the read side of the Gate 0 contract stays under test.
+fn write_v1_state(store: &StateStore, domain: &str, urls: &[&str]) {
+    let body = serde_json::json!({
+        "version": 1,
+        "domain": domain,
+        "processed_urls": urls,
+        "last_export": null,
+        "total_exported": urls.len(),
+    });
+    let path = store.get_state_path();
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&body).expect("serialize v1 state"),
+    )
+    .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+}
 
 // ===========================================================================
 // StateStore — public API tests
@@ -28,11 +57,11 @@ fn state_store_save_and_load_roundtrip() {
     let mut store = webfang_core::infrastructure::export::state_store::StateStore::new("test.com");
     store.set_cache_dir(tmp.path().to_path_buf());
 
-    let mut state = webfang_core::domain::ExportState::new("test.com").expect("valid domain");
-    state.mark_processed("https://test.com/page1");
-    state.mark_processed("https://test.com/page2");
-
-    store.save(&state).expect("save should succeed");
+    write_v1_state(
+        &store,
+        "test.com",
+        &["https://test.com/page1", "https://test.com/page2"],
+    );
 
     let loaded = store.load().expect("load should succeed");
     assert_eq!(loaded.domain(), "test.com");
@@ -64,9 +93,7 @@ fn state_store_load_or_default_returns_existing() {
     store.set_cache_dir(tmp.path().to_path_buf());
 
     // Save first
-    let mut state = webfang_core::domain::ExportState::new("existing.com").expect("valid domain");
-    state.mark_processed("https://existing.com/page1");
-    store.save(&state).unwrap();
+    write_v1_state(&store, "existing.com", &["https://existing.com/page1"]);
 
     // Load should return existing
     let loaded = store.load_or_default().unwrap();
