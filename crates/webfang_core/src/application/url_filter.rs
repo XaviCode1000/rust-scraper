@@ -279,6 +279,23 @@ mod tests {
     }
 
     #[test]
+    fn test_is_excluded_wildcard_catches_unparseable_url() {
+        // #1243: `["*"]` means "exclude everything". A garbage URL used to slip
+        // past it because `Url::parse` vetoed the match before the wildcard was
+        // ever consulted, so the exclusion filter failed open on bad input.
+        let all = vec!["*".to_string()];
+
+        assert!(is_excluded("::garbage::", &all));
+        assert!(is_excluded("", &all));
+        assert!(is_excluded("https://example.com/page", &all));
+
+        // A targeted exclusion still ignores input it cannot parse: the fix
+        // widens nothing beyond the universal wildcard.
+        let hosts = vec!["evil.com".to_string(), "*.evil.com".to_string()];
+        assert!(!is_excluded("::garbage::", &hosts));
+    }
+
+    #[test]
     fn test_is_allowed() {
         let seed = Url::parse("https://example.com").unwrap();
 
