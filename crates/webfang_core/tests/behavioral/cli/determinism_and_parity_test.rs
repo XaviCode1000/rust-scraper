@@ -65,10 +65,9 @@ async fn setup_two_level_fixture() -> BehavioralTest {
             .and(path(format!("/{page}")))
             .respond_with(ResponseTemplate::new(200).set_body_string(format!(
                 r#"<html><body>
-                    <h1>{}</h1>
+                    <h1>{name}</h1>
                     <p>This is a leaf page with sufficient content to pass the minimum-content guard. It contains enough text to be considered useful for extraction.</p>
-                </body></html>"#,
-                name
+                </body></html>"#
             )))
             .mount(&t.server)
             .await;
