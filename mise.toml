@@ -29,7 +29,12 @@ typos = "1.42.3"                       # spell checker (aqua shorthand, pinned f
 "aqua:jgm/pandoc" = "3.10.1"
 
 # === Optional (uncomment when needed) ===
-# rust-analyzer = "latest"             # LSP — global install preferred
+# rust-analyzer — pinned EXACT at project level (#1280): date-versioned by mise;
+# pinning keeps RA deterministic across sessions and worktrees. The previous
+# setup resolved RA through a fragile chain (rustup proxy for a non-installed
+# component falling back to a floating "latest"), a documented false-positive
+# source when RA and rustc drift apart.
+rust-analyzer = "2026-09-07"
 # "cargo:cargo-outdated" = "latest"    # no aqua, no binstall — compiles
 # "cargo:cargo-expand" = "latest"      # no aqua, no binstall — compiles
 # "cargo:cargo-watch" = "latest"       # no aqua, no binstall — compiles
