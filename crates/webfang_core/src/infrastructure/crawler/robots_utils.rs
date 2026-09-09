@@ -27,8 +27,16 @@ use url::Url;
 use wreq::Client;
 use wreq_util::Profile;
 
+use crate::domain::body_cap::read_body_capped;
 use crate::domain::crawler_port::RobotsPort;
 use crate::infrastructure::error::InfraError;
+
+/// Maximum robots.txt body size (decompressed bytes). robots.txt files are
+/// tiny by convention; 1 MiB bounds a malicious or broken origin without ever
+/// being hit in practice. Closes audit finding F-R3-5 (AUDIT-02
+/// rc3-closure-gate MATRIX.md): the robots fetcher must not read unbounded
+/// bodies either.
+const ROBOTS_MAX_BODY_BYTES: u64 = 1024 * 1024;
 use futures::future::BoxFuture;
 
 /// Parsed robots.txt rules for a domain.
@@ -349,7 +357,7 @@ impl RobotsFetcher {
         domain: &str,
         resp: wreq::Response,
     ) -> Result<String, RobotsFetchFailure> {
-        match resp.text().await {
+        match read_body_capped(resp, ROBOTS_MAX_BODY_BYTES).await {
             Ok(text) => Ok(text),
             Err(e) => {
                 tracing::warn!("Failed to read robots.txt body for {}: {}", domain, e);
