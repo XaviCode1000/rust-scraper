@@ -124,10 +124,7 @@ async fn dry_run_matches_real_discovery() {
         "dry-run exits 0, stderr: {}",
         String::from_utf8_lossy(&dry_out.stderr)
     );
-    let dry_paths = dry_run_paths(
-        &String::from_utf8_lossy(&dry_out.stdout),
-        &server_base,
-    );
+    let dry_paths = dry_run_paths(&String::from_utf8_lossy(&dry_out.stdout), &server_base);
     assert_eq!(
         dry_paths,
         FIXTURE_PATHS.iter().map(|s| s.to_string()).collect(),

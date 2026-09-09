@@ -26,9 +26,9 @@
 //! ```
 
 use assert_cmd::Command;
+use insta::assert_snapshot;
 use regex::Regex;
 use std::path::Path;
-use insta::assert_snapshot;
 use wiremock::matchers::{method, path as wm_path};
 use wiremock::{Mock, ResponseTemplate};
 
