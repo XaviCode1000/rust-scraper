@@ -212,7 +212,8 @@ is_docs_file() {
 is_ci_file() {
   local f="$1"
   case "$f" in
-    .github/* | scripts/* | .pre-commit-config.yaml | typos.toml | codecov.yml)
+    .github/* | scripts/* | .pre-commit-config.yaml | typos.toml | codecov.yml | \
+      .gitignore | .gitattributes | .editorconfig)
       return 0 ;;
   esac
   return 1
