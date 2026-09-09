@@ -289,10 +289,12 @@ impl McpHandler {
                     outcome.results.len(),
                     failed_count
                 );
-                // Serialize the full outcome (results + failed) so the caller
-                // knows exactly which URLs failed and why (issue #591).
-                let content = serde_json::to_string_pretty(&outcome)
-                    .unwrap_or_else(|_| "failed to serialize".into());
+                // RC-1 slice 2: emit the same shared record shape as
+                // scrape_url/scrape_with_options — one JSONL line per input
+                // URL: successes as the CLI `WebfangMetadata` record, per-URL
+                // failures (#591) as their own failure record. The full
+                // serialization contract lives in `batch_outcome_to_jsonl`.
+                let content = batch_outcome_to_jsonl(&outcome)?;
                 Ok(CallToolResult::success(vec![Content::text(content)]))
             },
             Err(e) => {
@@ -731,6 +733,56 @@ impl McpHandler {
             },
         }
     }
+}
+
+/// Serialize a batch outcome as the shared RC-1 record shape (slice 2).
+///
+/// One JSONL line per input URL, preserving the #591 per-URL failure
+/// contract and the spec's record cardinality (records = input URLs):
+///
+/// - each successful scrape becomes a `WebfangMetadata` record through the
+///   ONLY conversion path (`from_scraped_content` → `validate` →
+///   `from_chunk`), identical to `scrape_url` / `scrape_with_options` and to
+///   the CLI JSONL export;
+/// - each failed URL becomes its own record `{failed_url, error, category}`
+///   straight from `ScrapeFailed` — deliberately NOT a degraded
+///   `WebfangMetadata` (the CLI field-set binding covers success records
+///   only; see the slice-2 amendment in
+///   `openspec/changes/rc1-unification/spec.md`).
+///
+/// Failures come last so a client splitting on success-record fields never
+/// sees a failure line in the success prefix. Conversion/validation or
+/// serialization failures are `McpError::internal_error` — never a panic,
+/// never a silent fallback text (slice-1 error discipline).
+fn batch_outcome_to_jsonl(
+    outcome: &webfang_core::application::scraper_service::ScrapeBatchOutcome,
+) -> Result<String, McpError> {
+    let mut lines = Vec::with_capacity(outcome.results.len() + outcome.failed.len());
+    for scraped in &outcome.results {
+        let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
+            .validate()
+            .map_err(|e| McpError::internal_error(format!("chunk validation failed: {e}"), None))?;
+        let metadata =
+            webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata::from_chunk(
+                &chunk,
+            );
+        lines.push(serde_json::to_string(&metadata).map_err(|e| {
+            McpError::internal_error(format!("failed to serialize metadata: {e}"), None)
+        })?);
+    }
+    for failed in &outcome.failed {
+        // `serde_json::Value::to_string` is total (Display), so this path
+        // cannot panic or fail.
+        lines.push(
+            serde_json::json!({
+                "failed_url": failed.url,
+                "error": failed.error,
+                "category": failed.category,
+            })
+            .to_string(),
+        );
+    }
+    Ok(lines.join("\n"))
 }
 
 /// robots.txt gate for single-URL direct-fetch tools (#749).
