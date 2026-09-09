@@ -5,6 +5,7 @@ mod checkpoint_determinism_test;
 mod core_test;
 mod crawl_test;
 mod credential_strip_test;
+mod determinism_and_parity_test;
 mod dom_pruning_test;
 mod download_test;
 mod dry_run_batch_test;
