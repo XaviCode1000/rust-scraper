@@ -18,6 +18,7 @@ pub type HttpResult<T> = Result<T, HttpError>;
 /// - `Forbidden`: 403 - retry with different UA
 /// - `RateLimited`: 429 - respect Retry-After header
 /// - `ClientError` / `ServerError`: other 4xx/5xx codes
+/// - `BodyTooLarge`: response body exceeded the configured limit
 #[derive(Debug)]
 pub enum HttpError {
     /// 403 Forbidden - site blocking
@@ -38,6 +39,11 @@ pub enum HttpError {
     WafChallenge(String),
     /// Domain banned — no sessions available in the pool
     DomainBanned(String),
+    /// Response body exceeded the configured limit
+    BodyTooLarge {
+        /// Maximum number of bytes allowed.
+        limit: u64,
+    },
 }
 
 impl std::fmt::Display for HttpError {
@@ -57,6 +63,9 @@ impl std::fmt::Display for HttpError {
             },
             HttpError::DomainBanned(domain) => {
                 write!(f, "domain banned: {domain} — no sessions available")
+            },
+            HttpError::BodyTooLarge { limit } => {
+                write!(f, "Response body exceeded the limit of {limit} bytes")
             },
         }
     }

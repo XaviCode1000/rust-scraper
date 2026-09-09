@@ -4,6 +4,7 @@
 
 use super::factory::build_wreq_client;
 use super::retry::{retry_with_backoff, RetryPolicy};
+use crate::domain::body_cap;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use crate::domain::session_port::{SessionId, SessionPort};
@@ -188,6 +189,7 @@ impl HttpClient {
                     HttpError::ServerError(code) => *code,
                     HttpError::Request(_) => return,
                     HttpError::DomainBanned(_) => return,
+                    HttpError::BodyTooLarge { .. } => return,
                 };
                 pool.report_failure(domain, id, status);
             },
@@ -285,10 +287,7 @@ impl HttpClient {
         // (headers borrow must end before `.text()`).
         let ctx = inspection_context(status, response.headers(), self.config.ignore_waf);
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| HttpError::Request(e.to_string()))?;
+        let body = body_cap::read_body_capped(response, self.config.max_page_bytes).await?;
 
         // Context-aware WAF inspection (REQ-WAF-05). A classified block returns
         // immediately — the old fallback ladder (~4 requests / ~5s of UA rotation)
@@ -365,7 +364,7 @@ impl HttpClient {
         // inspection proceeds on headers only (cf-mitigated detection still
         // works) and the retry loop runs. The 2xx branch keeps its fatal body
         // read: there the body IS the scrape content.
-        let body = match response.text().await {
+        let body = match body_cap::read_body_capped(response, self.config.max_page_bytes).await {
             Ok(b) => b,
             Err(e) => {
                 debug!(url = %url, error = %e, "5xx body read failed; inspecting headers only");
@@ -513,10 +512,7 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
                     headers.insert(key.as_str().to_lowercase(), v.to_string());
                 }
             }
-            let body = resp
-                .text()
-                .await
-                .map_err(|e| crate::domain::http_error::HttpError::Request(e.to_string()))?;
+            let body = body_cap::read_body_capped(resp, self.config.max_page_bytes).await?;
 
             Ok(crate::domain::http_port::HttpResponse {
                 status,

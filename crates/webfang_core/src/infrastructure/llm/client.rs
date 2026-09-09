@@ -9,6 +9,12 @@
 use crate::domain::credentials::ApiKey;
 use crate::domain::llm_port::{ChatMessage, LlmPort, LlmRequest, LlmResponse};
 use crate::error::{Result, ScraperError};
+
+/// Maximum LLM completion body size (decompressed bytes). Completion payloads
+/// are JSON well below this in practice; the cap bounds a broken or malicious
+/// provider response. Closes audit finding F-R3-6 (AUDIT-02
+/// rc3-closure-gate MATRIX.md): no fetch path may read an unbounded body.
+const LLM_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
@@ -131,7 +137,13 @@ impl LlmPort for OpenAiLlmClient {
                 });
             }
 
-            let body = response.text().await.map_err(ScraperError::from)?;
+            let body = crate::domain::body_cap::read_body_capped(response, LLM_MAX_BODY_BYTES)
+                .await
+                .map_err(|e| {
+                    ScraperError::Extraction(format!(
+                        "error al leer la respuesta del proveedor LLM: {e}"
+                    ))
+                })?;
             let parsed: CompletionResponse = serde_json::from_str(&body).map_err(|e| {
                 ScraperError::Extraction(format!(
                     "el proveedor LLM devolvió un cuerpo inválido: {e}"

@@ -14,6 +14,7 @@
 use url::Url;
 
 pub mod axtree_port;
+pub mod body_cap;
 pub mod clock;
 pub mod config;
 pub mod config_value;

@@ -39,6 +39,7 @@ use super::BatchJob;
 use crate::application::crawler::content_sink::CrawlContentSink;
 use crate::domain::{CrawlError, CrawlErrorCategory, CrawlerConfig};
 use crate::error::ScraperError;
+use crate::ValidUrl;
 
 /// Result of processing a batch job
 ///
@@ -265,8 +266,12 @@ fn build_per_url_config(
 ) -> Result<CrawlerConfig, CrawlError> {
     let parsed_url =
         url::Url::parse(url).map_err(|e| CrawlError::InvalidUrl(format!("{url}: {e}")))?;
+    // Apply URL hardening policy (scheme allow-list + credential strip) to batch-file/stdin URLs.
+    // This closes audit finding F-R3-1 (batch entry parity with #1240/#1260).
+    let valid_url = ValidUrl::try_from_url(parsed_url)
+        .map_err(|e| CrawlError::InvalidUrl(format!("{url}: {e}")))?;
 
-    Ok(CrawlerConfig::builder(parsed_url)
+    Ok(CrawlerConfig::builder(valid_url.as_url().clone())
         .max_depth(0)
         .max_pages(1)
         .concurrency(base_config.concurrency)

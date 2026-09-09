@@ -29,7 +29,7 @@ use tracing::{info, warn};
 use super::processor::{BatchError, BatchProcessor, BatchResult};
 use super::{BatchJob, BatchJobStatus};
 use crate::application::crawler::content_sink::CrawlContentSink;
-use crate::domain::CrawlerConfig;
+use crate::domain::{CrawlerConfig, ValidUrl};
 use crate::error::ScraperError;
 
 /// Queue-based manager for batch crawl jobs
@@ -120,7 +120,8 @@ impl BatchManager {
         max_concurrent: usize,
     ) -> Result<Self, std::io::Error> {
         let content = std::fs::read_to_string(path)?;
-        let urls = Self::parse_url_lines(&content);
+        let (urls, skipped) = Self::parse_url_lines(&content);
+        Self::warn_skipped_lines(&skipped);
         Ok(Self::from_urls(urls, config, max_concurrent))
     }
 
@@ -135,18 +136,46 @@ impl BatchManager {
     ) -> Result<Self, std::io::Error> {
         let mut content = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut content)?;
-        let urls = Self::parse_url_lines(&content);
+        let (urls, skipped) = Self::parse_url_lines(&content);
+        Self::warn_skipped_lines(&skipped);
         Ok(Self::from_urls(urls, config, max_concurrent))
     }
 
+    /// Log lines rejected at the batch entry (F-R3-1). Never echoes the
+    /// offending text — a malformed line can still carry credential-looking
+    /// content, and traces must not capture it.
+    fn warn_skipped_lines(skipped: &[String]) {
+        for reason in skipped {
+            tracing::warn!(reason = %reason, "batch line rejected by URL entry validation");
+        }
+        if !skipped.is_empty() {
+            tracing::warn!(count = skipped.len(), "batch lines skipped");
+        }
+    }
+
     /// Parse URL lines from text, skipping blanks and comments
-    fn parse_url_lines(content: &str) -> Vec<String> {
-        content
-            .lines()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(String::from)
-            .collect()
+    ///
+    /// Each kept line is hardened through [`ValidUrl`] at the batch entry
+    /// (scheme allow-list + credential strip, F-R3-1): the raw string is
+    /// replaced by its sanitized rendering before it enters any job, so
+    /// credentials from `--batch-file`/stdin never reach logs, traces, or
+    /// the processor. Lines that fail `ValidUrl` are dropped and counted
+    /// in the returned skipped-line list.
+    fn parse_url_lines(content: &str) -> (Vec<String>, Vec<String>) {
+        let mut kept: Vec<String> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+        for line in content.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            match ValidUrl::parse(line) {
+                Ok(valid) => kept.push(valid.as_url().to_string()),
+                Err(e) => {
+                    skipped.push(e.to_string());
+                },
+            }
+        }
+        (kept, skipped)
     }
 
     /// Process all queued jobs sequentially
@@ -283,28 +312,46 @@ mod tests {
         let content = r#"
 # comment line
 https://example.com
-
+    
 https://example.com/about
   # indented comment
 https://example.com/blog
 "#;
-        let urls = BatchManager::parse_url_lines(content);
-        assert_eq!(urls.len(), 3);
-        assert_eq!(urls[0], "https://example.com");
+        let (urls, skipped) = BatchManager::parse_url_lines(content);
+        assert!(skipped.is_empty());
+        // Url normalization adds the trailing slash to bare hosts.
+        assert_eq!(urls[0], "https://example.com/");
         assert_eq!(urls[1], "https://example.com/about");
         assert_eq!(urls[2], "https://example.com/blog");
     }
 
     #[test]
+    fn test_manager_parse_url_lines_rejects_non_http_and_strips_credentials() {
+        // F-R3-1: entry validation is uniform with the seed path (#1240).
+        let (urls, skipped) = BatchManager::parse_url_lines(
+            "https://user:secret@example.com/page\nfile:///etc/passwd\nnot a url",
+        );
+        // The valid line survives stripped: no credential text anywhere.
+        assert_eq!(urls, vec!["https://example.com/page".to_string()]);
+        // Both invalid lines are rejected at the entry.
+        assert_eq!(skipped.len(), 2);
+        // Rejection reasons never echo the offending line.
+        assert!(!skipped[0].contains("file:"));
+        assert!(!skipped[1].contains("not a url"));
+    }
+
+    #[test]
     fn test_manager_parse_empty() {
-        let urls = BatchManager::parse_url_lines("");
+        let (urls, skipped) = BatchManager::parse_url_lines("");
         assert!(urls.is_empty());
+        assert!(skipped.is_empty());
     }
 
     #[test]
     fn test_manager_parse_only_comments() {
-        let urls = BatchManager::parse_url_lines("# just a comment\n# another");
+        let (urls, skipped) = BatchManager::parse_url_lines("# just a comment\n# another");
         assert!(urls.is_empty());
+        assert!(skipped.is_empty());
     }
 
     #[test]

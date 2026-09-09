@@ -245,3 +245,26 @@ async fn cached_rules_are_not_downgraded_by_later_failures() {
          even after the site starts returning errors"
     );
 }
+
+/// A robots.txt body larger than the 1 MiB robots cap must not balloon memory:
+/// the read aborts and the domain is cached as fail-open (AllowAll), matching
+/// the #794 structured-failure contract. Closes audit finding F-R3-5.
+#[cfg_attr(miri, ignore)] // real network stack via wreq — unsupported by Miri
+#[tokio::test]
+async fn oversized_robots_body_fails_open_without_reading_unbounded() {
+    let server = MockServer::start().await;
+    // 2 MiB body: twice the ROBOTS_MAX_BODY_BYTES cap (1 MiB).
+    let oversized = "a".repeat(2 * 1024 * 1024);
+    mount_robots(&server, 200, &oversized).await;
+    let (_guard, fetcher) = fetcher_for_server();
+    let base = server.uri();
+    let domain = format!("127.0.0.1:{}", server.address().port());
+
+    // Fail-open: an unreadable robots.txt must not block the site.
+    assert!(
+        fetcher.is_allowed(&format!("{base}/page"), &domain).await,
+        "oversized robots.txt must fail open as allowed"
+    );
+    // The failure is cached: exactly one fetch for the domain (#794).
+    assert_eq!(count_robots_requests(&server).await, 1);
+}
