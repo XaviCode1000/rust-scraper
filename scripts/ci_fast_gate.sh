@@ -186,6 +186,11 @@ EOF
   else
     skip_step "docs link sanity" "no markdown changed or no python3"
   fi
+  # Phase 3: orphan snapshots rot silently, so the check runs even on the
+  # cheap docs lane. Blocking run_step like the surrounding steps (never
+  # warn-only); markdownlint above stays warn-only as is.
+  run_guard "orphan snapshot guard" scripts/check_orphan_snapshots.sh \
+    bash scripts/check_orphan_snapshots.sh
 }
 
 # --- lane: ci-only (NO cargo) ----------------------------------------------------
@@ -260,6 +265,11 @@ lane_fmt_and_guards() {
     env INTRA_CRATE_MODE=strict bash scripts/check_intra_crate_direction.sh
   run_guard "ignored-test inventory guard" scripts/check_ignored_guard.sh \
     bash scripts/check_ignored_guard.sh
+  # Phase 3: same guard as the docs lane — blocking here because every
+  # surrounding repo-guard step is blocking (fail-closed on findings,
+  # warn-skip only when the script itself is absent).
+  run_guard "orphan snapshot guard" scripts/check_orphan_snapshots.sh \
+    bash scripts/check_orphan_snapshots.sh
   run_step "forbid sitemap string-match coupling" bash -c "
     if grep -rn 'contains(\"no URLs found\")' crates/*/src/ --include='*.rs'; then
       echo 'use ScraperError::SitemapEmpty, never message matching'; exit 1
