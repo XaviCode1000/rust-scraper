@@ -20,6 +20,14 @@
 //! identical and lives here once. The 5xx path's pre-loop WAF inspection stays
 //! in `get_inner` because it runs on the initial response, before any retry.
 //!
+//! Timeout handling (F-08 parity with Stack A `fetch_inner`, RC-1 slice 5):
+//! a request timeout is a transient (Stack A classifies it `TransientBackoff`,
+//! `downloader_port.rs`), so it consumes the current attempt and the loop
+//! continues — it is NOT a terminal error. If the retry budget exhausts with
+//! the last failure being a timeout, `HttpError::Timeout` still surfaces, so
+//! the terminal error surface is unchanged; it is just delayed until the
+//! operator-configured retry budget is actually spent.
+//!
 //! [`HttpClient`]: crate::application::http_client::HttpClient
 //! [`HttpError::RateLimited`]: crate::domain::http_error::HttpError::RateLimited
 //! [`HttpError::ServerError`]: crate::domain::http_error::HttpError::ServerError
@@ -64,10 +72,13 @@ pub(super) struct RetryPolicy {
 /// - a success status returns the body immediately;
 /// - a status satisfying `policy.retryable` continues to the next attempt;
 /// - any other status returns [`HttpError::ClientError`];
-/// - a transport error returns [`HttpError::Timeout`] when it is a timeout and
-///   otherwise continues to the next attempt.
+/// - a transport error continues to the next attempt: a timeout is transient
+///   (F-08, retried like Stack A's `fetch_inner`) and so is any other send
+///   failure.
 ///
-/// When every attempt is exhausted, `policy.exhausted` is returned. The `429`
+/// When every attempt is exhausted, `policy.exhausted` is returned — except
+/// when the last failure was a timeout, in which case [`HttpError::Timeout`]
+/// surfaces (the truthful terminal outcome, now only after the full budget). The `429`
 /// caller passes a policy with `Some(retry_after)` and
 /// [`HttpError::RateLimited`]; the `5xx` caller passes `None` (pure exponential
 /// backoff) and [`HttpError::ServerError`].
@@ -89,6 +100,7 @@ pub(super) async fn retry_with_backoff(
     policy: RetryPolicy,
 ) -> HttpResult<String> {
     let mut attempt = 0;
+    let mut last_failure_was_timeout = false;
     while attempt < config.max_retries {
         attempt += 1;
 
@@ -133,12 +145,18 @@ pub(super) async fn retry_with_backoff(
                 }
             },
             Err(e) => {
-                if e.is_timeout() {
-                    return Err(HttpError::Timeout);
-                }
+                // F-08 (RC-1 slice 5): a timeout is transient — it consumes
+                // this attempt and the loop continues, exactly like any
+                // other transport failure. The terminal surface is kept:
+                // if the budget exhausts on timeouts, `Timeout` is what
+                // the caller sees (tracked below).
+                last_failure_was_timeout = e.is_timeout();
                 continue;
             },
         }
+    }
+    if last_failure_was_timeout {
+        return Err(HttpError::Timeout);
     }
     Err(policy.exhausted)
 }
@@ -150,7 +168,7 @@ pub(super) async fn retry_with_backoff(
 /// `secs * 1000` ms. In every other case (the `5xx` path's `None`, or a `429`
 /// carrying `Retry-After: 0`) the delay is exponential backoff
 /// `base_ms * 2^(attempt - 1)` capped at `max_ms`.
-fn compute_backoff_delay(
+pub(super) fn compute_backoff_delay(
     attempt: u32,
     retry_after_secs: Option<u64>,
     base_ms: u64,
