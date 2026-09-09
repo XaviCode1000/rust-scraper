@@ -653,6 +653,7 @@ gh run list --workflow=ci.yml --branch "$(git branch --show-current)" --limit 1 
 
 ### PR checklist
 
+- [ ] `bash scripts/ci_fast_gate.sh` GREEN (lane-aware local gate: runs the cargo gates below only when code changed)
 - [ ] `cargo check` + `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` + `cargo fmt`
 - [ ] `cargo nextest run` (at least affected module)
 - [ ] Review `git diff --stat main...HEAD` to confirm only expected symbols/files changed
@@ -674,7 +675,7 @@ The fix GitHub announced for March 2026 has not landed for this repo profile.
 The automation path that works:
 
 1. Open the PR (`gh pr create ...`).
-2. Walk away while CI runs (~6m34s to merge-ready; full wall: ~8m41s).
+2. Walk away while CI runs (~6m34s to merge-ready; full wall: ~8m41s). Quick status any time: `scripts/ci_status.sh <PR-N>` (read-only).
 3. Run the automation script:
 
    ```bash
@@ -720,6 +721,9 @@ Do NOT rely on `--auto`: it never accepts in this repo configuration. If a futur
 needs auto-merge (e.g. transferring the repo to an organization with rulesets), revisit.
 
 ### Batch merge of multiple green PRs (avoid N× CI re-runs)
+
+Canonical procedure: `docs/merge-queue-manual.md` (helpers + strict-mode cost rationale).
+Summary below — the doc wins on conflict.
 
 **Trigger:** the agent detects 2+ open PRs, all with green CI, all targeting `main`.
 
