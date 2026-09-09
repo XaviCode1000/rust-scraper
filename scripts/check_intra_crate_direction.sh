@@ -591,6 +591,47 @@ while read -r file; do
 
 done < <(find "$ROOT" -name "*.rs" -type f)
 
+# === Port-adoption choke point (issue #1061) ===
+# Layer direction is necessary but not sufficient: a port owns an invariant and
+# must be the ONLY path to that effect. `domain::ssrf_guard::SsrfGuard` (whose
+# `secure_client` impl lives in `infrastructure/ssrf.rs` — domain types cannot
+# reference infrastructure I/O) is the single choke point composing both SSRF
+# layers (`redirect_policy()` + `ValidatingResolver`). The direction gate scores
+# infrastructure → infrastructure as legal, so a hand-wired
+# `.redirect(redirect_policy()).dns_resolver(ValidatingResolver::new())` client
+# (the 4 sites #1060 found, migrated to the guard in the RC-3 slices) passes
+# direction while bypassing the port. This pass fails closed on any raw
+# client-wiring primitive outside the two guard modules: a new surface must call
+# `ssrf_guard()` / `secure_client()` instead of wiring its own resolver or
+# redirect policy. Same test-code skip heuristic as the direction passes (past
+# the first `#[cfg(test)]` / `mod tests` marker) plus a `//`-comment skip;
+# string literals are NOT parsed, same residual-noise policy as the layer regex.
+CHOKE_OWNERS=("domain/ssrf_guard.rs" "infrastructure/ssrf.rs")
+while read -r file; do
+  is_owner=0
+  for owner in "${CHOKE_OWNERS[@]}"; do
+    [[ "$file" == *"$owner" ]] && is_owner=1
+  done
+  (( is_owner )) && continue
+  first_test_line=$(grep -n -E '#\[cfg\(test\)\]|mod tests' "$file" 2>/dev/null | head -n1 | cut -d: -f1 || true)
+  [[ -z "$first_test_line" ]] && first_test_line=999999
+  lineno=0
+  while IFS= read -r line; do
+    lineno=$((lineno + 1))
+    (( lineno > first_test_line )) && break
+    stripped="$(echo "$line" | sed -e 's/^[[:space:]]*//')"
+    [[ "$stripped" == //* ]] && continue
+    if [[ "$line" =~ \.dns_resolver\(|ValidatingResolver::\.new\(|\.redirect\( ]]; then
+      violations=$((violations + 1))
+      if [[ "$MODE" == "strict" ]]; then
+        echo "::error::$file:$lineno: raw HTTP client wiring outside the SsrfGuard choke point (port-adoption violation, #1061) — call ssrf_guard()/secure_client() instead"
+      else
+        echo "::warning::$file:$lineno: raw HTTP client wiring outside the SsrfGuard choke point (port-adoption violation, #1061)"
+      fi
+    fi
+  done < "$file"
+done < <(find "$ROOT" -name "*.rs" -type f)
+
 if [[ -f "$ALLOWLIST" ]]; then
   echo "allowlisted $allowlisted_count (max $ALLOWLIST_CAP, file: $ALLOWLIST, entries: ${#ALLOW_PATTERNS[@]})"
 fi
