@@ -361,6 +361,13 @@ elif [[ "$code_changed" == "true" ]]; then
   echo "fast-gate lane: CODE (fmt + guards + targeted cargo)"
   lane_fmt_and_guards
   targeted_cargo
+  # Phase 4 (advisory only): regression naming convention check. Runs
+  # outside run_step and can never fail the lane — findings are
+  # ::notice::/NOTICE lines for the author.
+  if [[ -x scripts/check_regression_naming.sh ]]; then
+    echo "fast-gate: regression naming check (advisory, never red)"
+    bash scripts/check_regression_naming.sh || true
+  fi
 fi
 
 # --- summary --------------------------------------------------------------------------
