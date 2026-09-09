@@ -118,19 +118,22 @@ pub(crate) fn build_fetch_router(
 ) -> Result<FetchRouter, DownloadError> {
     let connect_timeout = timeout_secs.min(10);
     Ok(match strategy {
-        JsStrategy::Static => FetchRouter::Static(Arc::new(WreqDownloader::new(
-            timeout_secs,
-            connect_timeout,
-            tls_emulation,
-            user_agent,
-            custom_headers,
-            accept_language,
-            initial_cookie_jar,
-            max_retries,
-            backoff_base_ms,
-            backoff_max_ms,
-            max_page_bytes,
-        )?)),
+        JsStrategy::Static => FetchRouter::Static(Arc::new(
+            WreqDownloader::new(
+                timeout_secs,
+                connect_timeout,
+                tls_emulation,
+                user_agent,
+                custom_headers,
+                accept_language,
+                initial_cookie_jar,
+                max_retries,
+                backoff_base_ms,
+                backoff_max_ms,
+                max_page_bytes,
+            )?
+            .with_ignore_waf(ignore_waf),
+        )),
         JsStrategy::Hybrid => {
             let l1 = WreqDownloader::new(
                 timeout_secs,
@@ -144,7 +147,8 @@ pub(crate) fn build_fetch_router(
                 backoff_base_ms,
                 backoff_max_ms,
                 max_page_bytes,
-            )?;
+            )?
+            .with_ignore_waf(ignore_waf);
             let l2 = build_obscura_layer(timeout_secs, obscura_binary);
             let l3 = ChromiumoxideDownloader::new(cookie_bridge);
             // #1009: share the engine's cancellation token with the Hybrid

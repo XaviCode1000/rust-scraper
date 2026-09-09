@@ -268,9 +268,23 @@ async fn scrape_single_url_inner(
     // production, a mock in tests). Download-level failures are mapped to their
     // `ScraperError` equivalents so WAF/HTTP semantics survive the conversion.
     let page = downloader.fetch(url).await.map_err(|e| match e {
-        DownloadError::WafChallenge(provider) => ScraperError::WafBlocked {
-            url: url.to_string(),
-            provider,
+        DownloadError::WafChallenge(provider) => {
+            // Observability parity (F-11): a challenge caught on the non-2xx path
+            // surfaces here as a mapped error and never reaches the 2xx inspection
+            // site below, so without this call a WAF block that the operator can see
+            // in the CLI would be absent from the trace — the exact asymmetry the
+            // audit measured as `stage: fetch` on 2xx and nothing on 403/503.
+            log_scrape_error(
+                &provider,
+                url.as_str(),
+                "fetch",
+                Some(&correlation),
+                "WAF challenge detected",
+            );
+            ScraperError::WafBlocked {
+                url: url.to_string(),
+                provider,
+            }
         },
         DownloadError::Http { status, .. } => ScraperError::http(status, url.as_str()),
         other => ScraperError::Network(Box::new(other)),

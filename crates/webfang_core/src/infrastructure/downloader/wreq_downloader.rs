@@ -6,6 +6,7 @@
 //! Following **own-arc-shared**: Uses `Arc<Client>` for thread-safe shared ownership
 //! of the connection pool. The client is created once and shared across all requests.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +19,7 @@ use wreq::Client;
 use wreq_util::Profile;
 
 use super::{Cookie, DownloadError, Downloader, FetchedPage};
+use crate::domain::waf::{is_t2_blocking_status, waf_inspector, InspectionContext};
 use crate::error::ErrorClass;
 use crate::infrastructure::user_agent::UserAgentCache;
 
@@ -27,6 +29,45 @@ use crate::infrastructure::user_agent::UserAgentCache;
 /// Value is approximate — real usage varies by pool size and active connections.
 const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 
+/// Bytes of a non-2xx response body read for WAF challenge inspection (F-11).
+///
+/// Bounded on purpose: this read happens on every failing attempt of every crawl, so
+/// the cost is failures × attempts × this number. Cloudflare, Akamai and DataDome
+/// challenge documents keep their marker prose ("Just a moment…", "Checking your
+/// browser", the `cf_chl_*` script prelude) inside the first few KiB, and every T1
+/// signature the engine knows is a substring match — so 8 KiB captures all of them
+/// while a pathological error page cannot be buffered per attempt. Deliberately far
+/// below `max_page_bytes`: this is evidence, not content.
+const WAF_SNIFF_MAX_BYTES: u64 = 8 * 1024;
+
+/// What to do when a bounded body read reaches its ceiling.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoundedRead {
+    /// Abort with [`DownloadError::BodyTooLarge`] — the page path, where the operator
+    /// configured a hard size cap (FIX-1, #1231 F-12).
+    Abort,
+    /// Keep the prefix and stop pulling the stream — the WAF sniff path (F-11), where a
+    /// body longer than the budget is normal and the prefix is all the evidence needs.
+    Truncate,
+}
+
+/// Collect a `wreq` header map into the lowercased, single-valued form the WAF
+/// inspection boundary expects (REQ-WAF-01).
+///
+/// This adapter — and not the inspection logic — is what each HTTP stack keeps local,
+/// because `domain` must not learn `wreq` types. Duplicate header names collapse with
+/// last-value-wins, which is sound here: every WAF control header is single-valued.
+fn lowercase_headers(headers: &HeaderMap) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_lowercase(), v.to_string()))
+        })
+        .collect()
+}
 /// Downloader implementation backed by `wreq` with connection pooling.
 ///
 /// The internal `wreq::Client` is shared via `Arc` — all requests reuse the same
@@ -60,6 +101,9 @@ pub struct WreqDownloader {
     /// memory stays bounded even against a decompression bomb with a tiny
     /// declared Content-Length.
     max_page_bytes: u64,
+    /// Bypass WAF/CAPTCHA classification entirely (`--ignore-waf`, REQ-WAF-07).
+    /// Set through [`WreqDownloader::with_ignore_waf`]; `false` enforces detection.
+    ignore_waf: bool,
 }
 
 impl WreqDownloader {
@@ -208,7 +252,26 @@ impl WreqDownloader {
             backoff_base_ms,
             backoff_max_ms,
             max_page_bytes,
+            // WAF enforcement is ON by default; `--ignore-waf` opts out through
+            // [`WreqDownloader::with_ignore_waf`] at construction time.
+            ignore_waf: false,
         })
+    }
+
+    /// Opt out of WAF/CAPTCHA classification (`--ignore-waf`, REQ-WAF-07).
+    ///
+    /// A builder rather than a twelfth `new` parameter on purpose: a positional `bool`
+    /// would have rewritten ~20 construction sites (most of them tests) to change one
+    /// default, and the flag is genuinely optional behaviour, which a method name states
+    /// better than an argument does.
+    ///
+    /// On the non-2xx path this does NOT rescue the fetch — a challenge body is never
+    /// scraped as content. It changes only the classification of the failure: a plain
+    /// HTTP error instead of a WAF block, same exit code (F-11).
+    #[must_use]
+    pub fn with_ignore_waf(mut self, ignore_waf: bool) -> Self {
+        self.ignore_waf = ignore_waf;
+        self
     }
 
     /// Create a WreqDownloader from an existing `wreq::Client`.
@@ -223,6 +286,7 @@ impl WreqDownloader {
             max_retries: 3,
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
+            ignore_waf: false,
         }
     }
 
@@ -424,6 +488,31 @@ impl WreqDownloader {
     /// Content-Length). Charset handling mirrors wreq's `text_with_charset`:
     /// the Content-Type charset param wins, UTF-8 as fallback.
     async fn read_body_capped(&self, response: wreq::Response) -> Result<String, DownloadError> {
+        self.read_body_bounded(response, self.max_page_bytes, BoundedRead::Abort)
+            .await
+    }
+
+    /// Read at most [`WAF_SNIFF_MAX_BYTES`] of a response body for challenge
+    /// inspection (F-11).
+    ///
+    /// Truncates rather than failing: unlike a page fetch, exceeding the budget here is
+    /// the expected case — the caller only wants the prefix that carries marker prose.
+    async fn read_body_snippet(&self, response: wreq::Response) -> Result<String, DownloadError> {
+        self.read_body_bounded(response, WAF_SNIFF_MAX_BYTES, BoundedRead::Truncate)
+            .await
+    }
+
+    /// Shared bounded body reader — the one place that streams, caps, decodes and
+    /// consumes a `wreq::Response`. Both the page path and the WAF sniff path route
+    /// through it so a fix to one cannot silently miss the other (F-11).
+    ///
+    /// `on_overflow` selects the only behavioural difference between them.
+    async fn read_body_bounded(
+        &self,
+        response: wreq::Response,
+        limit: u64,
+        on_overflow: BoundedRead,
+    ) -> Result<String, DownloadError> {
         use futures::StreamExt;
 
         // Charset from Content-Type BEFORE the body is consumed (headers stay
@@ -441,19 +530,30 @@ impl WreqDownloader {
             })
             .unwrap_or_else(|| "utf-8".to_string());
 
-        let limit = self.max_page_bytes;
+        let limit_len = usize::try_from(limit).unwrap_or(usize::MAX);
         let mut stream = response.bytes_stream();
         let mut buf = bytes::BytesMut::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(DownloadError::from)?;
-            if buf.len().saturating_add(chunk.len()) as u64 > limit {
-                // The outer fetch span already carries the URL; the event only
-                // needs the machine-readable cap facts.
-                warn!(
-                    limit = limit,
-                    "response body exceeded the page size cap; aborting read"
-                );
-                return Err(DownloadError::BodyTooLarge { limit });
+            if buf.len().saturating_add(chunk.len()) > limit_len {
+                match on_overflow {
+                    BoundedRead::Abort => {
+                        // The outer fetch span already carries the URL; the event only
+                        // needs the machine-readable cap facts.
+                        warn!(
+                            limit = limit,
+                            "response body exceeded the page size cap; aborting read"
+                        );
+                        return Err(DownloadError::BodyTooLarge { limit });
+                    },
+                    BoundedRead::Truncate => {
+                        // Keep the prefix that fits and stop pulling the stream: the rest
+                        // of the body is never read, so an oversized error page costs at
+                        // most the sniff budget.
+                        buf.extend_from_slice(&chunk[..limit_len.saturating_sub(buf.len())]);
+                        break;
+                    },
+                }
             }
             buf.extend_from_slice(&chunk);
         }
@@ -528,6 +628,58 @@ impl WreqDownloader {
                 return self.build_page(response, url).await;
             }
 
+            // ── WAF inspection on non-2xx responses (F-11) ─────────────────────────
+            //
+            // The tiered inspector used to see only successful responses, so the ordinary
+            // Cloudflare shape — 403/503 carrying `cf-mitigated: challenge` — surfaced as a
+            // generic HTTP error and `--ignore-waf` looked inert on it. The engine is
+            // already status-aware (T1 Challenge blocks at any status, T2 Fingerprint needs
+            // a WAF status — see `domain::waf`), so this was purely a missing call site,
+            // not a detection gap.
+            //
+            // Placement matters: it runs BEFORE the rotated-UA request and before the
+            // 429/5xx backoff, so a confirmed challenge costs zero retries. A WAF challenge
+            // does not clear by rotating a User-Agent, and #1236's amplification lesson says
+            // a request that cannot succeed should not be repeated.
+            //
+            // Retry-After is captured BEFORE anything reads the body: `read_body_snippet`
+            // consumes the response, and the 429 branch below still needs the server's
+            // requested delay or #1231's backoff silently degrades.
+            let retry_after_ms =
+                (last_status == 429).then(|| parse_retry_after_ms(&response, self.backoff_max_ms));
+
+            if !self.ignore_waf {
+                let headers = lowercase_headers(response.headers());
+                let ctx = InspectionContext::from_lowercase_headers(last_status, &headers, false);
+
+                // Phase 1 — headers only, no read at all. Control headers such as
+                // `cf-mitigated` are T2 evidence and block on their own even with an empty
+                // body (RES-01), which is exactly how a mitigating edge answers.
+                let verdict = waf_inspector().inspect("", &ctx);
+                let verdict = if verdict.is_blocked || !is_t2_blocking_status(ctx.status) {
+                    verdict
+                } else {
+                    // Phase 2 — T1 marker prose, but only on a status a WAF actually
+                    // answers with. T2 never blocks outside that set, so a plain 404 would
+                    // pay a body read for a verdict that cannot change; a 404 serving
+                    // challenge prose stays unclassified by design, and is reported as the
+                    // HTTP error it is.
+                    let snippet = self.read_body_snippet(response).await?;
+                    waf_inspector().inspect(&snippet, &ctx)
+                };
+
+                if verdict.is_blocked {
+                    let chain = verdict.evidence_chain();
+                    warn!(
+                        url = %url,
+                        status = last_status,
+                        evidences = verdict.evidences.len(),
+                        "WAF/CAPTCHA challenge detected on a non-2xx response"
+                    );
+                    return Err(DownloadError::WafChallenge(chain));
+                }
+            }
+
             // 403: one implicit retry with rotated User-Agent (mirrors HttpClient).
             // Pinned UA (#503): the operator asked to be identified exactly as
             // configured, so pool rotation is skipped and the 403 falls through
@@ -565,10 +717,7 @@ impl WreqDownloader {
                     // backoff_delay_ms returns exponential delay (also capped).
                     // max() ensures we never retry faster than the server asked,
                     // but also never slower than our own exponential strategy.
-                    std::cmp::max(
-                        parse_retry_after_ms(&response, self.backoff_max_ms),
-                        self.backoff_delay_ms(attempt),
-                    )
+                    std::cmp::max(retry_after_ms.unwrap_or(0), self.backoff_delay_ms(attempt))
                 } else {
                     self.backoff_delay_ms(attempt) // 5xx already correct
                 };

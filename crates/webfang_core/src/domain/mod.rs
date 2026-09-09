@@ -154,8 +154,8 @@ pub use url_validator::{StaticUrlValidator, UrlValidator, UrlValidatorTrait};
 pub use user_agent::{UserAgentPool, UserAgentProvider};
 pub use value_objects::{CorrelationId, Sha256Hex, ValidUrl};
 pub use waf::{
-    set_waf_inspector, waf_inspector, EvidenceSource, InspectionContext, WafEvidence,
-    WafInspectorPort, WafTier, WafVerdict,
+    is_t2_blocking_status, set_waf_inspector, waf_inspector, EvidenceSource, InspectionContext,
+    WafEvidence, WafInspectorPort, WafTier, WafVerdict,
 };
 
 /// Compression types supported for sitemap parsing

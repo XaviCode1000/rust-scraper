@@ -79,7 +79,7 @@ pub enum ScraperError {
     #[error("funcionalidad no disponible: {0}")]
     FeatureGated(String),
 
-    /// WAF/CAPTCHA challenge detected in HTTP 200 response
+    /// WAF/CAPTCHA challenge detected — on any response status, not only 200.
     ///
     /// The `provider` field carries the full Spanish evidence chain
     /// (`provider (patrón: …, tier: …)` per evidence, joined by `; `) when raised

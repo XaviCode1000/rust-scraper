@@ -310,7 +310,9 @@ pub struct CrawlerArgs {
     /// Skip robots.txt enforcement
     pub ignore_robots: bool,
 
-    /// Bypass WAF/CAPTCHA detection entirely (never block on challenge markers)
+    /// Skip WAF/CAPTCHA classification (REQ-WAF-07): challenged responses are reported
+    /// as plain HTTP errors instead of WAF blocks. It does not rescue the fetch — a
+    /// challenge page is never scraped as content (F-11).
     pub ignore_waf: bool,
 
     /// Enable autoscaled concurrency — dynamically adjusts task concurrency based on RAM usage
