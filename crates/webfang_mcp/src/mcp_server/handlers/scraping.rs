@@ -81,10 +81,10 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                    // P6-1 slice: emit the same CLI record shape (WebfangMetadata JSONL,
-                    // checksum + timestamp + word_count + metadata_version) instead of
-                    // the simplified DTO, so CLI and MCP outputs share one contract.
-                    let jsonl_lines: Result<Vec<String>, McpError> = results
+                // P6-1 slice: emit the same CLI record shape (WebfangMetadata JSONL,
+                // checksum + timestamp + word_count + metadata_version) instead of
+                // the simplified DTO, so CLI and MCP outputs share one contract.
+                let jsonl_lines: Result<Vec<String>, McpError> = results
                         .iter()
                         .map(|scraped| {
                             let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
@@ -95,8 +95,8 @@ impl McpHandler {
                                 .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
                         })
                         .collect();
-                    let content = jsonl_lines?.join("\n");
-                    Ok(CallToolResult::success(vec![Content::text(content)]))
+                let content = jsonl_lines?.join("\n");
+                Ok(CallToolResult::success(vec![Content::text(content)]))
             },
             Err(e) => {
                 self.state.record_scrape_identity(
@@ -183,9 +183,9 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                    // P6-1 slice: same shared record shape as scrape_url above — one
-                    // contract for CLI and MCP instead of the simplified DTO.
-                    let jsonl_lines: Result<Vec<String>, McpError> = outcome.results
+                // P6-1 slice: same shared record shape as scrape_url above — one
+                // contract for CLI and MCP instead of the simplified DTO.
+                let jsonl_lines: Result<Vec<String>, McpError> = outcome.results
                         .iter()
                         .map(|scraped| {
                             let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
@@ -196,8 +196,8 @@ impl McpHandler {
                                 .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
                         })
                         .collect();
-                    let content = jsonl_lines?.join("\n");
-                    Ok(CallToolResult::success(vec![Content::text(content)]))
+                let content = jsonl_lines?.join("\n");
+                Ok(CallToolResult::success(vec![Content::text(content)]))
             },
             Err(e) => {
                 self.state.record_scrape_identity(
