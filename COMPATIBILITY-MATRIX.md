@@ -63,7 +63,7 @@ Full 37-row `#[ignore]` catalog: [`docs/test-inventory.md`](docs/test-inventory.
 ## References
 
 - SDD: `sdd/stabilization-sprint0-baseline`
-- Gate 0: `FREEZE_FEATURES=true` in `.github/workflows/pr-validation.yml` + `AGENTS.md` Freeze policy
+- Gate 0 freeze: **retired 2026-09-07** (#1241) — see `AGENTS.md` §"Gate 0 freeze — RETIRED"
 - `scripts/check_dependency_direction.sh` still enforces inter-crate direction
 - Stack: `wreq` (TLS fingerprint), `Tokio`, `ort` (feature-gated), `SQLite`
 

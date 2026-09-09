@@ -32,7 +32,7 @@ git_release_enable = false
 
 # Release PR must pass pr-validation.yml unchanged:
 # - `chore/release-...` matches the conventional branch regex
-# - `type:chore` is the single type:* label (Gate 0 freeze does not block it)
+# - `type:chore` is the single type:* label (pr-validation requires exactly one)
 # - `Closes part of #1177` passes the linked-issue check without auto-closing
 #   the tracker (auto-close requires strict adjacency).
 pr_branch_prefix = "chore/release-"
