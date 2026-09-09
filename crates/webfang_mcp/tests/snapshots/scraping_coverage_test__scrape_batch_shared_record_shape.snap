@@ -1,0 +1,19 @@
+---
+source: crates/webfang_mcp/tests/scraping_coverage_test.rs
+expression: "serde_json::to_string_pretty(&canonical).unwrap_or_else(|e|\npanic!(\"canonical JSON must serialize: {e}\"))"
+---
+{
+  "checksum_sha256": "[REDACTED]",
+  "content": "[REDACTED]",
+  "content_length": 99,
+  "extra_metadata": {
+    "domain": "127.0.0.1",
+    "excerpt": "This is the content of the article. It has enough text to be extracted by Readability."
+  },
+  "metadata_version": "2.1.0",
+  "reading_time": 1,
+  "timestamp_utc": "[REDACTED]",
+  "title": "Test Page",
+  "url": "http://127.0.0.1:[PORT]/a",
+  "word_count": 18
+}

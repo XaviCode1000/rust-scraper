@@ -625,9 +625,73 @@ async fn test_detect_spa_predicts_scrape_verdict_on_js_shell() {
 // scrape_batch
 // ============================================================================
 
-/// Failed URLs are logged but do not stop the batch: 2 OK + 1 error → a
-/// successful result with exactly the 2 scraped pages + the failed URL in the
-/// `failed` array (issue #591).
+/// Parse a scrape_batch JSONL response into (success records, failure
+/// records). Every line must be a JSON object; success records are those
+/// without a `failed_url` key.
+fn parse_batch_records(text: &str) -> (Vec<Value>, Vec<Value>) {
+    let mut successes = Vec::new();
+    let mut failures = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let record: Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("every record must be a JSON object: {e} — got: {text}"));
+        if record.get("failed_url").is_some() {
+            failures.push(record);
+        } else {
+            successes.push(record);
+        }
+    }
+    (successes, failures)
+}
+
+/// Success records share the exact CLI field set (slice-1 binding): the
+/// record-identifying + integrity fields must be present with the pinned
+/// schema version.
+fn assert_success_record_shape(record: &Value, context: &str) {
+    assert_eq!(
+        record.get("metadata_version").and_then(Value::as_str),
+        Some("2.1.0"),
+        "success records carry the shared CLI shape: {context}"
+    );
+    for field in ["checksum_sha256", "timestamp_utc", "content_length"] {
+        assert!(
+            record.get(field).is_some(),
+            "success record must carry {field}: {context}"
+        );
+    }
+}
+
+/// The failure record is its own shape (#591): failed_url + error text +
+/// operational category — never a success field smuggled in.
+fn assert_failure_record_shape(
+    failed: &Value,
+    expected_url: &str,
+    error_hint: &str,
+    context: &str,
+) {
+    assert_eq!(
+        failed["failed_url"],
+        json!(expected_url),
+        "failed URL mismatch, got: {context}"
+    );
+    assert!(
+        failed["error"].as_str().unwrap_or("").contains(error_hint),
+        "error message should mention {error_hint}, got: {context}"
+    );
+    assert!(
+        failed["category"].is_string(),
+        "failure record must carry the operational category, got: {context}"
+    );
+    assert!(
+        failed.get("checksum_sha256").is_none(),
+        "failure records must NOT carry success-record fields: {context}"
+    );
+}
+
+/// RC-1 slice 2: failed URLs are logged but do not stop the batch, and the
+/// response is the shared JSONL record shape: ONE line per input URL —
+/// successes as CLI `WebfangMetadata` records (slice-1 pipeline), the failed
+/// URL as its own `{failed_url, error, category}` record (#591, spec.md
+/// slice-2 amendment — NOT a degraded `WebfangMetadata`).
 #[tokio::test]
 async fn test_scrape_batch_partial_results_on_failure() {
     let _guard = ssrf_guards_off().await;
@@ -674,35 +738,142 @@ async fn test_scrape_batch_partial_results_on_failure() {
     );
 
     let text = tool_text(&result);
-    // Issue #591: response is now { results: [...], failed: [...] }
-    let outcome: Value = serde_json::from_str(&text).expect("batch result must be valid JSON");
-    let pages = outcome
-        .get("results")
-        .and_then(|v| v.as_array())
-        .expect("batch result must have a 'results' array");
-    assert_eq!(
-        pages.len(),
-        2,
-        "only the 2 successful pages should be returned, got: {text}"
-    );
+    // Record cardinality = input URLs (spec.md slice-2 amendment): 3 in → 3
+    // JSONL lines.
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 3, "one record per input URL, got: {text}");
 
-    let failed = outcome
-        .get("failed")
-        .and_then(|v| v.as_array())
-        .expect("batch result must have a 'failed' array");
+    // Successes first, failures last — but results arrive in completion
+    // order (`buffer_unordered`), so success URLs are compared as a set.
+    let (success_records, failure_records) = parse_batch_records(&text);
+    let success_urls: Vec<String> = success_records
+        .iter()
+        .map(|r| {
+            r["url"]
+                .as_str()
+                .expect("success record must carry url")
+                .to_string()
+        })
+        .collect();
+    for record in &success_records {
+        assert_success_record_shape(record, &text);
+    }
     assert_eq!(
-        failed.len(),
-        1,
-        "one URL should be in the failed array, got: {text}"
-    );
-    assert_eq!(
-        failed[0]["url"],
-        format!("{}/c", mock.uri()),
-        "failed URL must be /c, got: {text}"
+        success_urls.len(),
+        2,
+        "only the 2 successful pages become success records, got: {text}"
     );
     assert!(
-        failed[0]["error"].as_str().unwrap().contains("500"),
-        "error message should mention 500, got: {text}"
+        success_urls.contains(&format!("{}/a", mock.uri()))
+            && success_urls.contains(&format!("{}/b", mock.uri())),
+        "success URLs must be /a and /b, got: {success_urls:?}"
+    );
+
+    // The failure record is its own shape (#591): failed_url + error text
+    // + operational category — see `assert_failure_record_shape`.
+    assert_eq!(
+        failure_records.len(),
+        1,
+        "one URL should produce a failure record, got: {text}"
+    );
+    assert_failure_record_shape(
+        &failure_records[0],
+        &format!("{}/c", mock.uri()),
+        "500",
+        &text,
+    );
+
+    // Shape pin (XC-2, slice-2 contract): canonicalized success record —
+    // timestamp, content, checksum and the wiremock port are the only
+    // non-deterministic parts; the FIELD SET is the contract.
+    let mut canonical: Value = success_records[0].clone();
+    if let Some(obj) = canonical.as_object_mut() {
+        for key in ["timestamp_utc", "content", "checksum_sha256"] {
+            obj.insert(key.to_string(), json!("[REDACTED]"));
+        }
+        if let Some(url) = obj.get("url").and_then(Value::as_str) {
+            let redacted = url.replace(&mock.uri(), "http://127.0.0.1:[PORT]");
+            obj.insert("url".to_string(), json!(redacted));
+        }
+    }
+    insta::assert_snapshot!(
+        "scrape_batch_shared_record_shape",
+        serde_json::to_string_pretty(&canonical)
+            .unwrap_or_else(|e| panic!("canonical JSON must serialize: {e}"))
+    );
+}
+
+/// G2 (RC-1 slice 4): `delay_ms` paces request starts through the shared
+/// token bucket (engine cadence, no second limiter) and the record shape is
+/// unchanged. 16 URLs with a 60 ms refill: the burst tier is capped at 8
+/// (auto table + budget clamp), so at least 7 full refill gaps are guaranteed
+/// on ANY hardware — a plain burst would finish near zero wall time.
+#[tokio::test]
+async fn test_scrape_batch_delay_ms_spaces_fetches() {
+    let _guard = ssrf_guards_off().await;
+    let mock = MockServer::start().await;
+    for i in 0..16 {
+        Mock::given(method("GET"))
+            .and(path(format!("/{i}")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(ARTICLE_HTML))
+            .mount(&mock)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&mock)
+        .await;
+
+    let (base_url, _handle) = start_test_server().await;
+    let client = Client::new();
+    let session_id = init_session(&client, &base_url).await;
+
+    let start = std::time::Instant::now();
+    let resp = call_tool(
+        &client,
+        &base_url,
+        &session_id,
+        "scrape_batch",
+        json!({
+            "urls": (0..16)
+                .map(|i| format!("{}/{}", mock.uri(), i))
+                .collect::<Vec<_>>(),
+            "concurrency": 16,
+            "delay_ms": 60
+        }),
+    )
+    .await;
+    let elapsed = start.elapsed();
+
+    let result = resp
+        .get("result")
+        .unwrap_or_else(|| panic!("expected result, got: {resp}"))
+        .clone();
+    assert!(
+        !is_tool_error(&result),
+        "paced batch must succeed: {}",
+        tool_text(&result)
+    );
+
+    let text = tool_text(&result);
+    let (successes, failures) = parse_batch_records(&text);
+    assert_eq!(successes.len(), 16, "all 16 URLs scraped: {text}");
+    assert!(failures.is_empty(), "no URL may fail: {text}");
+
+    // The handler derives the burst from the SAME budget model — mirror it
+    // for the exact lower bound: the last request can start no earlier than
+    // (N - 1 - burst) refill periods.
+    let burst = webfang_core::domain::budget::BudgetModel::build(
+        webfang_core::domain::budget::BudgetOverrides::default(),
+        &webfang_core::domain::budget::detector::SystemDetector,
+    )
+    .burst()
+    .get() as u64;
+    let floor_ms = (16_u64.saturating_sub(1 + burst.min(16))) * 60;
+    assert!(
+        elapsed >= std::time::Duration::from_millis(floor_ms),
+        "paced batch must spend at least (N-1-burst)*delay waiting (burst={burst}), took {elapsed:?}"
     );
 }
 

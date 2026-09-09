@@ -1288,3 +1288,114 @@ async fn test_download_assets_disabled_returns_empty_immediately() {
         "downloads disabled -> empty result without touching Downloader"
     );
 }
+
+// =====================================================================
+// G2 (RC-1 slice 4): pre-fetch pacing on the batch path
+// =====================================================================
+
+/// Pacing is enforced BEFORE each fetch (guard-chain stage 2): N URLs behind
+/// a shared burst-1 bucket with a 50 ms refill take at least (N-1)×50 ms of
+/// wall time. The bucket is the SAME `SharedRateLimiter` type the crawl
+/// engine and the CLI scrape phase use — no second limiter implementation.
+#[tokio::test]
+async fn test_batch_pacing_spaces_fetches_before_the_dial() {
+    use std::time::Duration;
+
+    use webfang_core::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
+    use webfang_core::application::scraper_service::scrape_multiple_with_limit_paced;
+
+    let html = r#"<!DOCTYPE html>
+<html>
+<head><title>Pacing Page</title></head>
+<body>
+<article>
+<h1>Pacing</h1>
+<p>This paragraph has enough text for Readability to extract the article content deterministically.</p>
+</article>
+</body>
+</html>"#;
+
+    let mock = MockHttpClient::new()
+        .with_ok_response("https://pacing.example/0", html)
+        .with_ok_response("https://pacing.example/1", html)
+        .with_ok_response("https://pacing.example/2", html)
+        .with_ok_response("https://pacing.example/3", html);
+
+    let config = ScraperConfig::default();
+
+    // burst 1 → strictly one permit at a time; 4 URLs ⇒ 3 full refill gaps.
+    let limiter =
+        SharedRateLimiter::new(&RateLimiterConfig::new(50, 1)).expect("valid token bucket");
+
+    let urls: Vec<url::Url> = (0..4)
+        .map(|i| url::Url::parse(&format!("https://pacing.example/{i}")).expect("valid url"))
+        .collect();
+
+    let start = std::time::Instant::now();
+    let outcome =
+        scrape_multiple_with_limit_paced(&mock, &urls, &config, None, None, false, Some(&limiter))
+            .await
+            .expect("all URLs should scrape");
+    let elapsed = start.elapsed();
+
+    assert_eq!(outcome.results.len(), 4, "all URLs scraped");
+    assert!(
+        outcome.failed.is_empty(),
+        "no URL may fail: {:?}",
+        outcome.failed
+    );
+    // 3 gaps × 50 ms of deliberate pre-dial waits.
+    assert!(
+        elapsed >= Duration::from_millis(150),
+        "paced batch must spend at least (N-1)*delay waiting before dials, took {elapsed:?}"
+    );
+    // It is pacing, not transport latency: the mock answers instantly, so a
+    // run far above the lower bound would mean a stall, not spacing.
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "paced batch must not stall — spacing only, took {elapsed:?}"
+    );
+}
+
+/// `delay_ms == 0` semantics: no bucket is built, no await is performed —
+/// the unthrottled path is byte-identical to the pre-G2 behavior.
+#[tokio::test]
+async fn test_batch_without_pacing_runs_unthrottled() {
+    use std::time::Duration;
+
+    use webfang_core::application::scraper_service::scrape_multiple_with_limit_paced;
+
+    let html = r#"<!DOCTYPE html>
+<html>
+<head><title>Free Page</title></head>
+<body>
+<article>
+<h1>Free</h1>
+<p>This paragraph has enough text for Readability to extract the article content deterministically.</p>
+</article>
+</body>
+</html>"#;
+
+    let mock = MockHttpClient::new()
+        .with_ok_response("https://unthrottled.example/0", html)
+        .with_ok_response("https://unthrottled.example/1", html)
+        .with_ok_response("https://unthrottled.example/2", html)
+        .with_ok_response("https://unthrottled.example/3", html);
+
+    let config = ScraperConfig::default();
+    let urls: Vec<url::Url> = (0..4)
+        .map(|i| url::Url::parse(&format!("https://unthrottled.example/{i}")).expect("valid url"))
+        .collect();
+
+    let start = std::time::Instant::now();
+    let outcome = scrape_multiple_with_limit_paced(&mock, &urls, &config, None, None, false, None)
+        .await
+        .expect("all URLs should scrape");
+    let elapsed = start.elapsed();
+
+    assert_eq!(outcome.results.len(), 4, "all URLs scraped");
+    assert!(
+        elapsed < Duration::from_millis(150),
+        "unthrottled batch must not pace, took {elapsed:?}"
+    );
+}

@@ -1794,21 +1794,38 @@ async fn test_p6_4_scrape_batch_single_page_scrapes_one_page_per_url() {
         tool_text(&result)
     );
 
-    // One page per URL: both outcomes present, nothing failed, and the
-    // linked page never entered the batch outcome.
+    // One page per URL (RC-1 slice 2 shape): the response is the shared
+    // JSONL record shape — one line per input URL, all successes carrying
+    // the CLI `WebfangMetadata` fields; `failed_url` records appear only
+    // for failures (absence IS the no-failure proof).
     let text = tool_text(&result);
-    let outcome: Value =
-        serde_json::from_str(&text).unwrap_or_else(|e| panic!("outcome must be JSON: {e}"));
-    let results = outcome
-        .get("results")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("outcome must carry results: {text}"));
-    assert_eq!(results.len(), 2, "one page per URL, got: {text}");
-    // `failed` is skipped when empty — absence IS the no-failure proof.
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 2, "one record per input URL, got: {text}");
+    let mut success_urls: Vec<String> = Vec::new();
+    for line in &lines {
+        let record: Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("record must be a JSON object: {e} — got: {text}"));
+        assert!(
+            record.get("failed_url").is_none(),
+            "no URL may fail, got: {text}"
+        );
+        assert_eq!(
+            record.get("metadata_version").and_then(Value::as_str),
+            Some("2.1.0"),
+            "success records carry the shared CLI shape: {text}"
+        );
+        success_urls.push(
+            record["url"]
+                .as_str()
+                .unwrap_or_else(|| panic!("success record must carry url: {text}"))
+                .to_string(),
+        );
+    }
+    // Results arrive in completion order (`buffer_unordered`); both input
+    // URLs must be present regardless of order.
     assert!(
-        outcome.get("failed").is_none(),
-        "no URL may fail: {:?}",
-        outcome.get("failed")
+        success_urls.contains(&page1) && success_urls.contains(&page2),
+        "both input URLs must be scraped, got: {success_urls:?}"
     );
     assert!(text.contains("/only"), "page2 content must be included");
     // The /never-crawled mock's `.expect(0)` above is the no-crawl proof;

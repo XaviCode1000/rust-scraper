@@ -282,6 +282,7 @@ fn scrape_batch_params_rejects_empty_list() {
         concurrency: None,
         ignore_robots: None,
         single_page: None,
+        delay_ms: None,
     };
     let err = p.validate().unwrap_err();
     assert!(matches!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS));
@@ -307,6 +308,7 @@ fn scrape_batch_params_rejects_oversize_concurrency() {
         concurrency: Some(65),
         ignore_robots: None,
         single_page: None,
+        delay_ms: None,
     };
     let err = p.validate().unwrap_err();
     assert!(matches!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS));
@@ -319,6 +321,7 @@ fn scrape_batch_params_accepts_valid() {
         concurrency: Some(8),
         ignore_robots: None,
         single_page: None,
+        delay_ms: None,
     };
     p.validate().expect("valid batch");
 }
