@@ -731,7 +731,7 @@ re-runs the FULL CI (~27 min). N PRs sequential ≈ N × 27 min. One batch PR �
 
 1. All PRs are `MERGEABLE` with `mergeStateStatus: CLEAN`.
 2. **Files touched are fully disjoint** — check with:
-   `for pr in <N1> <N2>; do gh pr view $pr --json files --jq '.files[].path'; done`
+   `scripts/ci_pr_overlap.sh <N1> <N2> [...]` (exit 0 = disjoint, 1 = overlap with paths printed, 2 = usage/non-open/non-main PR).
    Any overlap → do NOT batch; merge sequentially instead.
    (`CHANGELOG.md` must not appear in any of these lists — see "CHANGELOG policy" above. If it
    does, that PR violated the policy and must drop the file before batching.)
@@ -740,9 +740,11 @@ re-runs the FULL CI (~27 min). N PRs sequential ≈ N × 27 min. One batch PR �
 **Procedure:**
 
 ```bash
-# 1. Branch from current main in a new worktree
+# 1. Branch from current main in a new worktree (or let the helper do it)
 git fetch origin && git merge --ff-only origin/main
 git worktree add ~/Projects/Rust/webfang-worktrees/fix-batch -b fix/batch-<topic>
+# Helper alternative (validates names/SHAs, merges, never auto-resolves):
+# scripts/ci_batch_branch.sh fix/batch-<topic> <sha1> <sha2> [--dry-run]
 
 # 2. Merge each PR's REMOTE head SHA (not the local branch — it may be stale)
 #    Get the exact SHA: gh pr view <N> --json headRefOid --jq '.headRefOid'
@@ -753,9 +755,8 @@ git merge --no-ff <sha2> -m "Merge <branch> (PR #N2)"
 #    Under `## [Unreleased]`, one entry per merged slice (or per closed issue for small ones).
 #    See "CHANGELOG policy" above: no other PR ever touches this file.
 
-# 4. Local gate, push, create the batch PR linking ALL issues
-cargo check && cargo clippy --all-targets --all-features -- -D warnings \
-  -W clippy::cognitive_complexity -W clippy::too_many_lines && cargo fmt
+# 4. Local gate (lane-aware: cheap for docs/CI, full for code), push, create the batch PR linking ALL issues
+bash scripts/ci_fast_gate.sh
 git push -u origin fix/batch-<topic>
 gh pr create --base main --head fix/batch-<topic> --label type:bug \
   --title "fix(batch): ..." --body "Closes #A
@@ -831,12 +832,29 @@ cargo nextest run            # Full suite
 cargo build --release        # LTO fat, ~3-5 min
 ```
 
+**Local lane gate (pre-push, path-aware):**
+
+```bash
+bash scripts/ci_fast_gate.sh       # docs/CI/code/full lanes; GREEN required before push or PR
+bash scripts/ci_test_budget.sh     # advisory: affected areas + estimated CI lane set
+bash scripts/ci_metrics.sh         # read-only SLO snapshot (see docs/ci-slo.md)
+```
+
+CI itself classifies every PR via the `change-scope` job
+(`scripts/ci_path_classifier.sh`): docs-only/CI-only PRs skip the
+compile-heavy entry points, AI/MCP lanes trigger only on affected paths, and
+`CI Gate` stays fail-closed for skipped producers. `cargo-mutants (PR diff)`
+remains required only as the temporary context until Tier 1 is proven stable.
+
 **PR automation (single maintainer):**
 
 ```bash
 scripts/merge-when-green.sh <PR-N>            # Wait for green checks, squash-merge (default)
 scripts/merge-when-green.sh <PR-N> --merge    # Merge commit — use this for batch PRs
 scripts/merge-when-green.sh <PR-N> --dry-run  # Poll and report; do not merge
+scripts/ci_pr_overlap.sh <N1> <N2>            # exit 0 = disjoint files, safe to batch
+scripts/ci_batch_branch.sh <branch> <sha...>  # local integration branch helper (--dry-run first)
+scripts/ci_status.sh <PR-N>                   # compact required-check + mergeability summary (read-only)
 ```
     
 All three delete the **remote** head branch after a successful merge, via a
