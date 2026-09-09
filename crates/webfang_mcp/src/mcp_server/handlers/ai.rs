@@ -418,12 +418,12 @@ mod tests {
             Some(true),
             "missing cleaner must set isError:true, got: {json}"
         );
-            let text = result_text(&res);
-            assert!(
-                text.contains("limpieza semántica")
-                    && (text.contains("--features ai") || text.contains("--enable-ai")),
-                "Spanish feature-gated message expected, got: {text}"
-            );
+        let text = result_text(&res);
+        assert!(
+            text.contains("limpieza semántica")
+                && (text.contains("--features ai") || text.contains("--enable-ai")),
+            "Spanish feature-gated message expected, got: {text}"
+        );
     }
 
     /// #749: a robots-disallowed URL is rejected with an honest `robots.txt`
@@ -495,12 +495,12 @@ mod tests {
             Some(true),
             "missing embedding port must set isError:true, got: {json}"
         );
-            let text = result_text(&res);
-            assert!(
-                text.contains("búsqueda semántica")
-                    && (text.contains("--features ai") || text.contains("--enable-ai")),
-                "Spanish feature-gated message expected, got: {text}"
-            );
+        let text = result_text(&res);
+        assert!(
+            text.contains("búsqueda semántica")
+                && (text.contains("--features ai") || text.contains("--enable-ai")),
+            "Spanish feature-gated message expected, got: {text}"
+        );
     }
 
     /// `build_router` returns the AI-tool partial router without panicking.
