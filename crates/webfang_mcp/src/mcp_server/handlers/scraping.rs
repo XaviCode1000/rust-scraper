@@ -14,6 +14,8 @@ use rmcp::tool_router;
 use rmcp::{model::CallToolResult, model::Content, ErrorData as McpError};
 use std::time::Instant;
 use tracing::instrument;
+use webfang_core::domain::DocumentChunkValidated;
+use webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata;
 
 /// Runtime-effective `crawl_site` default for `max_depth`, applied via
 /// `unwrap_or` when the MCP parameter is omitted (#940 F1). The schema bridge
@@ -82,21 +84,29 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                let content = serde_json::to_string_pretty(&results)
-                    .unwrap_or_else(|_| "failed to serialize".into());
-                Ok(CallToolResult::success(vec![Content::text(content)]))
-            },
-            Err(e) => {
-                self.state.record_scrape_identity(
-                    "scrape_url",
-                    domain_of(params.url.as_str()),
-                    Outcome::Error,
-                    0,
-                    start,
-                    &root_correlation,
-                );
-                Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
-            },
+// Convert each ScrapedContent to WebfangMetadata and serialize as JSONL
+                    let jsonl_lines: Vec<String> = results
+                        .iter()
+                        .map(|scraped| {
+                            let chunk = DocumentChunkValidated::from(scraped);
+                            let metadata = WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata).expect("failed to serialize metadata")
+                        })
+                        .collect();
+                    let content = jsonl_lines.join("\n");
+                    Ok(CallToolResult::success(vec![Content::text(content)]))
+                },
+                Err(e) => {
+                    self.state.record_scrape_identity(
+                        "scrape_url",
+                        domain_of(params.url.as_str()),
+                        Outcome::Error,
+                        0,
+                        start,
+                        &root_correlation,
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
+                },
         }
     }
 
@@ -171,26 +181,29 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-                let response = selector_service::build_scrape_response(
-                    outcome.results,
-                    &outcome.extract_result,
-                    &params.selector,
-                );
-                let content = serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|_| "failed to serialize".into());
-                Ok(CallToolResult::success(vec![Content::text(content)]))
-            },
-            Err(e) => {
-                self.state.record_scrape_identity(
-                    "scrape_with_options",
-                    domain_of(params.url.as_str()),
-                    Outcome::Error,
-                    0,
-                    start,
-                    &root_correlation,
-                );
-                Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
-            },
+// Convert each ScrapedContent to WebfangMetadata and serialize as JSONL
+                    let jsonl_lines: Vec<String> = outcome.results
+                        .iter()
+                        .map(|scraped| {
+                            let chunk = DocumentChunkValidated::from(scraped);
+                            let metadata = WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata).expect("failed to serialize metadata")
+                        })
+                        .collect();
+                    let content = jsonl_lines.join("\n");
+                    Ok(CallToolResult::success(vec![Content::text(content)]))
+                },
+                Err(e) => {
+                    self.state.record_scrape_identity(
+                        "scrape_with_options",
+                        domain_of(params.url.as_str()),
+                        Outcome::Error,
+                        0,
+                        start,
+                        &root_correlation,
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
+                },
         }
     }
 
