@@ -455,3 +455,251 @@ async fn waf_gauntlet_checkpoint_atomicity_and_resume() {
         phase2_result.total_pages
     );
 }
+
+// ===========================================================================
+// F-11 — WAF inspection on the NON-2xx fetch path
+// ===========================================================================
+//
+// Before F-11 the tiered inspector only ever saw successful responses
+// (`discovery.rs` inspects after a 2xx fetch), so the ordinary Cloudflare shape —
+// 403/503 answering with `cf-mitigated: challenge` — died as a generic HTTP error
+// and `--ignore-waf` had nothing to bypass. These tests pin the four properties the
+// fix has to hold simultaneously: a challenge is classified as WAF, the classification
+// happens before any retry is spent, a genuine transient 5xx is NOT swallowed by the
+// new guard, and `--ignore-waf` changes only the classification.
+
+/// A challenge answer in the shape real edges use: control headers + marker prose.
+const WAF_CHALLENGE_HTML: &str = r#"<html><head><title>Just a moment...</title></head><body><form id="challenge-form">Checking your browser before accessing this site.</form><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></body></html>"#;
+
+/// Mount a single WAF-challenge answer with `status` on `mock_path`.
+async fn mount_waf_challenge(server: &MockServer, mock_path: &str, status: u16) {
+    Mock::given(method("GET"))
+        .and(path(mock_path))
+        .respond_with(
+            ResponseTemplate::new(status)
+                .insert_header("cf-mitigated", "challenge")
+                .insert_header("server", "cloudflare")
+                .insert_header("content-type", "text/html; charset=utf-8")
+                .set_body_string(WAF_CHALLENGE_HTML),
+        )
+        .mount(server)
+        .await;
+}
+
+/// Scrape one URL with a small retry budget, returning (exit code, stderr, hits).
+///
+/// `--quiet` is deliberately NOT passed: these assertions are about the error line.
+async fn scrape_once(
+    t: &BehavioralTest,
+    mock_path: &str,
+    extra_args: &[&str],
+) -> (Option<i32>, String, usize) {
+    let base = t.server.uri();
+    let mut command = cmd();
+    command
+        .arg("--url")
+        .arg(format!("{base}{mock_path}"))
+        .arg("--single-page")
+        .arg("--output")
+        .arg(t.out.path())
+        .arg("--max-retries")
+        .arg("2")
+        .arg("--backoff-base-ms")
+        .arg("10")
+        .arg("--backoff-max-ms")
+        .arg("50");
+    for arg in extra_args {
+        command.arg(arg);
+    }
+    let output = command.output().expect("run webfang binary");
+    let hits = t
+        .server
+        .received_requests()
+        .await
+        .expect("wiremock request log")
+        .iter()
+        .filter(|r| r.url.path() == mock_path)
+        .count();
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+        hits,
+    )
+}
+
+/// Terminal WAF block, so the process must not keep crawling.
+const EXIT_WAF_BLOCK: i32 = 69;
+
+/// A 503 carrying `cf-mitigated` is a WAF challenge, not a plain server error.
+///
+/// This is the headline regression: pre-fix it reported `http error 503` and the
+/// operator learned nothing about why the site was unreachable.
+#[tokio::test]
+async fn f11_503_challenge_is_classified_as_waf_not_http_error() {
+    let t = BehavioralTest::new().await;
+    mount_waf_challenge(&t.server, "/f11-503", 503).await;
+
+    let (code, stderr, hits) = scrape_once(&t, "/f11-503", &[]).await;
+
+    assert_eq!(
+        code,
+        Some(EXIT_WAF_BLOCK),
+        "expected exit {EXIT_WAF_BLOCK}, got {code:?}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("WAF/CAPTCHA detectado"),
+        "a 503 + cf-mitigated challenge must be reported as a WAF block\nstderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("HTTP 503") && !stderr.contains("http error 503"),
+        "the WAF classification must replace the generic HTTP error, not join it\nstderr: {stderr}"
+    );
+    assert!(
+        t.find_files("md").is_empty(),
+        "a challenge page must never be written as content"
+    );
+
+    // Fail fast: the 503 is in the retriable set, so without the WAF short-circuit
+    // --max-retries 2 would spend three requests on a challenge that cannot clear.
+    assert_eq!(
+        hits, 1,
+        "a confirmed WAF verdict must cost exactly one request, got {hits}\nstderr: {stderr}"
+    );
+}
+
+/// A 403 challenge must not burn the rotated-User-Agent request either.
+///
+/// The rotated-UA retry is correct for an ordinary 403 (see
+/// `waf_gauntlet_403_429_200_success`), but a challenge does not clear by changing
+/// the User-Agent, so inspecting before rotating saves a request that cannot help.
+#[tokio::test]
+async fn f11_403_challenge_is_classified_as_waf_without_rotating_user_agent() {
+    let t = BehavioralTest::new().await;
+    mount_waf_challenge(&t.server, "/f11-403", 403).await;
+
+    let (code, stderr, hits) = scrape_once(&t, "/f11-403", &[]).await;
+
+    assert_eq!(code, Some(EXIT_WAF_BLOCK), "stderr: {stderr}");
+    assert!(
+        stderr.contains("WAF/CAPTCHA detectado"),
+        "a 403 + cf-mitigated challenge must be reported as a WAF block\nstderr: {stderr}"
+    );
+    assert_eq!(
+        hits, 1,
+        "the 403 rotated-UA retry must be skipped once the challenge is confirmed, got {hits}"
+    );
+}
+
+/// The over-block guard: a real 503 with no challenge evidence must still retry and
+/// then succeed. This is the test that keeps F-11 from becoming an outage amplifier —
+/// it mirrors the unit pin `test_inspect_t2_body_at_503_does_not_block` at the process
+/// boundary, through the retry loop the unit test cannot see.
+#[tokio::test]
+async fn f11_transient_503_without_challenge_markers_still_retries() {
+    let t = BehavioralTest::new().await;
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    Mock::given(method("GET"))
+        .and(path("/f11-flaky"))
+        .respond_with(move |_req: &wiremock::Request| {
+            // No cf-mitigated, no marker prose: a plain origin hiccup.
+            match counter_clone.fetch_add(1, Ordering::SeqCst) {
+                0..=1 => ResponseTemplate::new(503).set_body_string(
+                    "<html><body><p>Upstream temporarily unavailable, please retry.</p></body></html>",
+                ),
+                _ => ResponseTemplate::new(200).set_body_string(GAUNTLET_HTML),
+            }
+        })
+        .mount(&t.server)
+        .await;
+
+    let (code, stderr, hits) = scrape_once(&t, "/f11-flaky", &[]).await;
+
+    assert_eq!(
+        code,
+        Some(0),
+        "a transient 503 must still be retried and succeed\nstderr: {stderr}"
+    );
+    assert_eq!(
+        hits, 3,
+        "expected 2 retries then success, got {hits} requests"
+    );
+    assert!(
+        !stderr.contains("WAF/CAPTCHA detectado"),
+        "a bare 503 must never be classified as a WAF block\nstderr: {stderr}"
+    );
+    assert_eq!(
+        t.find_files("md").len(),
+        1,
+        "the page must be scraped once the origin recovers"
+    );
+}
+
+/// A 404 is not a WAF status, so it must stay a plain HTTP error.
+///
+/// The body carries real challenge prose, which the inspector WOULD block on if it
+/// were read — T1 evidence blocks at any status. The fix deliberately skips the phase-2
+/// read outside the canonical WAF status set, because a crawl spends most of its
+/// failures on 404s and a guaranteed-clean verdict is not worth a body read per 404.
+/// This test pins that trade-off so a future "just always read it" change is a
+/// deliberate decision and not an accident.
+#[tokio::test]
+async fn f11_404_with_challenge_prose_stays_a_generic_http_error() {
+    let t = BehavioralTest::new().await;
+    Mock::given(method("GET"))
+        .and(path("/f11-404"))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .insert_header("content-type", "text/html; charset=utf-8")
+                .set_body_string(WAF_CHALLENGE_HTML),
+        )
+        .mount(&t.server)
+        .await;
+
+    let (code, stderr, hits) = scrape_once(&t, "/f11-404", &[]).await;
+
+    assert_eq!(code, Some(EXIT_WAF_BLOCK), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("WAF/CAPTCHA detectado"),
+        "a 404 must not be classified as WAF — the sniff read is gated on the canonical WAF statuses\nstderr: {stderr}"
+    );
+    assert_eq!(
+        hits, 1,
+        "404 is non-retriable, so exactly one request and no sniff read cost, got {hits}"
+    );
+}
+
+/// `--ignore-waf` on a non-2xx challenge reclassifies the failure as a plain HTTP
+/// error; it does NOT rescue the fetch. Same exit code, different message — which is
+/// the only honest meaning the flag can have when the body is a challenge page.
+#[tokio::test]
+async fn f11_ignore_waf_downgrades_only_the_classification() {
+    let t = BehavioralTest::new().await;
+    mount_waf_challenge(&t.server, "/f11-bypass", 503).await;
+
+    let (code, stderr, hits) = scrape_once(&t, "/f11-bypass", &["--ignore-waf"]).await;
+
+    assert_eq!(
+        code,
+        Some(EXIT_WAF_BLOCK),
+        "--ignore-waf must not change the exit code, only the classification\nstderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("WAF/CAPTCHA detectado"),
+        "--ignore-waf must suppress the WAF classification (REQ-WAF-07)\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("503"),
+        "with the bypass the operator must still see the underlying HTTP status\nstderr: {stderr}"
+    );
+    assert!(
+        t.find_files("md").is_empty(),
+        "--ignore-waf must never turn a challenge page into scraped content"
+    );
+    // Bypassed means the retriable path is taken again, so this one DOES spend retries.
+    assert_eq!(
+        hits, 3,
+        "without classification the 503 keeps its normal retry budget, got {hits}"
+    );
+}

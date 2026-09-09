@@ -349,6 +349,14 @@ impl HttpClient {
         // Approved behavior change: a 503 Cloudflare challenge is classified as
         // a WAF block instead of dying as a generic ServerError after exhausting
         // retries.
+        //
+        // Scope, stated because this comment used to read like global coverage: this
+        // is the AI extraction stack — `application::llm_extraction` is its only
+        // production consumer, and the crawler never fetched through here. The page
+        // fetch path had no non-2xx inspection at all until F-11 added it in
+        // `infrastructure::downloader::wreq_downloader`. The two stacks now share the
+        // status-aware inspector and the canonical WAF-status predicate in `domain`;
+        // they never shared this call site.
         let ctx = inspection_context(status, response.headers(), self.config.ignore_waf);
 
         // Non-critical enrichment (FIX C): a body-transfer failure (connection
@@ -419,10 +427,13 @@ fn waf_block_error(
 
 /// Build a WAF [`InspectionContext`] from an HTTP response's status and headers.
 ///
-/// Extracts the content-type for the REQ-WAF-02 gate and clones the headers for
-/// control-header evidence (REQ-WAF-03). `ignore_waf` short-circuits inspection
-/// to a clean verdict (REQ-WAF-07). The header borrow ends when this returns
-/// (the map is cloned), so the caller can still consume the response body.
+/// Only the `wreq` → lowercased-`HashMap` adapter is local here: the context itself
+/// comes from [`InspectionContext::from_lowercase_headers`], the same constructor the
+/// crawler's fetch path uses, so the two stacks cannot drift on how status,
+/// content-type (REQ-WAF-02) and control-header evidence (REQ-WAF-03) are packaged.
+/// `ignore_waf` short-circuits inspection to a clean verdict (REQ-WAF-07). The header
+/// borrow ends when this returns (the map is cloned), so the caller can still consume
+/// the response body.
 fn inspection_context(status: u16, headers: &HeaderMap, ignore_waf: bool) -> InspectionContext {
     let mut map = HashMap::new();
     for (name, value) in headers {
@@ -430,15 +441,7 @@ fn inspection_context(status: u16, headers: &HeaderMap, ignore_waf: bool) -> Ins
             map.insert(name.as_str().to_lowercase(), v.to_string());
         }
     }
-    InspectionContext {
-        status: Some(status),
-        content_type: headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(String::from),
-        headers: map,
-        ignore_waf,
-    }
+    InspectionContext::from_lowercase_headers(status, &map, ignore_waf)
 }
 
 // ============================================================================

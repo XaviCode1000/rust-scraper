@@ -681,7 +681,7 @@ pub const IGNORE_WAF: OptionSpec = OptionSpec {
     default: Some(DefaultValue::Bool(false)),
     nullable: false,
     description_override: None,
-    help: "Bypass WAF/CAPTCHA detection entirely (never block on challenge markers)",
+    help: "Skip WAF/CAPTCHA classification (REQ-WAF-07): challenged responses are reported as plain HTTP errors instead of WAF blocks. It does not rescue the fetch — a challenge page is never scraped as content (F-11).",
     heading: Some("Competitive Features"),
     kind: ValueKind::Bool,
     visible_aliases: &[],

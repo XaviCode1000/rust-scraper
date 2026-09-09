@@ -228,6 +228,25 @@ impl WafInspectorPort for CleanWafInspector {
     }
 }
 
+/// Whether an HTTP status correlates with a WAF block for Fingerprint (T2) evidence.
+///
+/// The canonical set is 403 / 429 / 503 / 520–529. It lives in `domain` because both
+/// consumers need it and they sit on opposite sides of the crate: the inspection engine
+/// (`infrastructure::http::waf_engine`, which gates T2 evidence on it — REQ-WAF-04) and
+/// the crawler's fetch path (`infrastructure::downloader::wreq_downloader`), which uses
+/// it to decide whether a challenge body is worth reading at all (F-11). `application`
+/// reaches it through the `domain::` re-export; keeping it in `infrastructure` would
+/// have forced the AI `HttpClient` path to depend outward.
+///
+/// T2 evidence never blocks outside these statuses, so a header-only check on a plain
+/// 404 can only return clean — reading its body would cost a stream and change nothing.
+/// T1 [`WafTier::Challenge`] evidence is deliberately NOT gated by this predicate: it
+/// blocks at any status, including 200.
+#[must_use]
+pub fn is_t2_blocking_status(status: Option<u16>) -> bool {
+    matches!(status, Some(403 | 429 | 503 | 520..=529))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

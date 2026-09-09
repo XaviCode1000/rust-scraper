@@ -40,7 +40,9 @@ use std::collections::HashSet;
 // the allowed inward dependency direction (Clean Architecture).
 // ============================================================================
 
-use crate::domain::waf::{EvidenceSource, InspectionContext, WafEvidence, WafTier, WafVerdict};
+use crate::domain::waf::{
+    is_t2_blocking_status, EvidenceSource, InspectionContext, WafEvidence, WafTier, WafVerdict,
+};
 
 /// Control headers that indicate WAF processing (REQ-WAF-03).
 ///
@@ -864,12 +866,6 @@ fn decide(evidences: &[WafEvidence], ctx: &InspectionContext) -> bool {
         }
     }
     false
-}
-
-/// Whether an HTTP status correlates with a WAF block for Fingerprint evidence.
-#[inline]
-fn is_t2_blocking_status(status: Option<u16>) -> bool {
-    matches!(status, Some(403 | 429 | 503 | 520..=529))
 }
 
 /// Whether an HTTP status is a 5xx server error (FIX B body-vs-header carve-out).
