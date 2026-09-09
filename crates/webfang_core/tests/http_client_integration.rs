@@ -336,3 +336,69 @@ async fn test_mock_server_empty_body() {
     let body = result.unwrap();
     assert!(body.is_empty(), "Body should be empty, got: '{body}'");
 }
+
+/// Test handling of oversized response body: returns BodyTooLarge error
+#[tokio::test]
+async fn test_mock_server_oversized_body() {
+    let mock_server = MockServer::start().await;
+
+    // Body size: 2 KiB (2048 bytes)
+    let oversized_body = vec![b'x'; 2048];
+    Mock::given(method("GET"))
+        .and(path("/oversized"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(std::str::from_utf8(&oversized_body).unwrap())
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Configure client with a small limit: 1 KiB (1024 bytes)
+    let config = HttpClientConfig {
+        max_page_bytes: 1024, // 1 KiB
+        ..HttpClientConfig::default()
+    };
+    let client = HttpClient::new(config).unwrap();
+
+    let url = format!("{}/oversized", mock_server.uri());
+    let result = client.get(&url).await;
+
+    // Should fail with BodyTooLarge error
+    assert!(matches!(
+        result,
+        Err(HttpError::BodyTooLarge { limit: 1024 })
+    ));
+}
+
+/// Test normal body still works under the limit (regression test)
+#[tokio::test]
+async fn test_mock_server_normal_body_under_limit() {
+    let mock_server = MockServer::start().await;
+
+    let normal_body = b"Hello, world!";
+    Mock::given(method("GET"))
+        .and(path("/normal"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(std::str::from_utf8(normal_body).unwrap())
+                .insert_header("content-type", "text/plain"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Configure client with a limit larger than the body: 2 KiB
+    let config = HttpClientConfig {
+        max_page_bytes: 2 * 1024, // 2 KiB
+        ..HttpClientConfig::default()
+    };
+    let client = HttpClient::new(config).unwrap();
+
+    let url = format!("{}/normal", mock_server.uri());
+    let result = client.get(&url).await;
+
+    // Should succeed and return the body
+    assert!(result.is_ok(), "Should succeed: {result:?}");
+    let body = result.unwrap();
+    assert_eq!(body, std::str::from_utf8(normal_body).unwrap());
+}

@@ -7,6 +7,7 @@
 //! consumes it; infrastructure maps domain values (e.g. the TLS profile)
 //! onto a concrete client when building the network stack.
 
+use crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES;
 use thiserror::Error;
 
 /// Configuration for HTTP client behavior
@@ -56,6 +57,9 @@ pub struct HttpClientConfig {
     ///
     /// Populated from `--header`/`WEBFANG_HEADER`.
     pub custom_headers: Vec<(String, String)>,
+    /// Maximum number of bytes to read from a response body (decompressed size).
+    /// Defaults to 50 MiB.
+    pub max_page_bytes: u64,
 }
 
 impl Default for HttpClientConfig {
@@ -76,6 +80,7 @@ impl Default for HttpClientConfig {
             user_agent: None,
             ignore_waf: false,
             custom_headers: Vec::new(),
+            max_page_bytes: DEFAULT_MAX_PAGE_BYTES,
         }
     }
 }
@@ -176,6 +181,7 @@ mod tests {
             user_agent: Some("custom".into()),
             ignore_waf: true,
             custom_headers: vec![("X-Custom".into(), "value".into())],
+            max_page_bytes: DEFAULT_MAX_PAGE_BYTES,
         };
 
         assert_eq!(config.accept_language, "es-ES");

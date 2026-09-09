@@ -365,6 +365,9 @@ impl From<crate::domain::http_error::HttpError> for CrawlError {
             HttpError::DomainBanned(domain) => {
                 CrawlError::SessionPool(format!("domain banned: {domain}"))
             },
+            HttpError::BodyTooLarge { limit } => CrawlError::RequestFailed(format!(
+                "response body exceeded the limit of {limit} bytes"
+            )),
         }
     }
 }

@@ -67,6 +67,9 @@ impl HttpClientPort for MockHttpClient {
             Some(Err(HttpError::Request(m))) => Err(HttpError::Request(m.clone())),
             Some(Err(HttpError::WafChallenge(p))) => Err(HttpError::WafChallenge(p.clone())),
             Some(Err(HttpError::DomainBanned(d))) => Err(HttpError::DomainBanned(d.clone())),
+            Some(Err(HttpError::BodyTooLarge { limit })) => {
+                Err(HttpError::BodyTooLarge { limit: *limit })
+            },
             None => Err(HttpError::ClientError(404)),
         };
         Box::pin(async move { result })
