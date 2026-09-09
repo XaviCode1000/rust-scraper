@@ -5,6 +5,11 @@
 # Developer gets feedback in <30s (toolchain), <60s (fmt), <3min (clippy), <8min (full).
 #
 # Pipeline flow:
+#   change-scope (path-aware tier, <15s, no cargo) classifies the PR diff via
+#   scripts/ci_path_classifier.sh: docs-only/CI-only PRs skip the expensive
+#   compile/test entry points (fmt, clippy, test-core, test-full) while
+#   toolchain, repo-guards, security, and doc-quality always run. Full-scope
+#   changes (code=true OR all=true) keep the current required producers.
 #   toolchain (15s) → fmt (30s) → clippy (2min) → CI Gate aggregates the fast required tier
 #   repo-guards (parallel) runs dead-test detection + the other architectural
 #   guards + actionlint/shellcheck lint; gate still blocks merge on it.
@@ -101,6 +106,45 @@ jobs:
           else
             echo "ERROR: Rust $INSTALLED is below minimum $REQUIRED"
             exit 1
+          fi
+
+  # ============================================================================
+  # TIER 0a: CHANGE SCOPE (path-aware, <15s, no cargo/cache/model work)
+  # Classifies the changed files via scripts/ci_path_classifier.sh so
+  # docs-only/CI-only PRs skip the expensive compile/test entry points
+  # (fmt, clippy, test-core, test-full). push/merge_group/schedule/dispatch
+  # always default to full scope (run_code_jobs=true). Downstream code jobs
+  # gate on `needs.change-scope.outputs.run_code_jobs == 'true'`; the `gate`
+  # job explicitly allows skipped non-applicable producers only from here.
+  # ============================================================================
+  change-scope:
+    name: Change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_code_jobs: ${{ steps.scope.outputs.run_code_jobs }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/ci_path_classifier.sh \
+              --base "${{ github.event.pull_request.base.sha }}" \
+              --head "${{ github.event.pull_request.head.sha }}" \
+              --format github >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "docs_only=false"
+              echo "ci_only=false"
+              echo "code=true"
+              echo "all=true"
+              echo "affected=all"
+              echo "run_code_jobs=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true)"
           fi
 
   # ============================================================================
@@ -205,7 +249,8 @@ jobs:
   # ============================================================================
   fmt:
     name: Check formatting
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -230,7 +275,8 @@ jobs:
   # ============================================================================
   clippy:
     name: Clippy (strict)
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -281,7 +327,8 @@ jobs:
   # ============================================================================
   test-core:
     name: Tests (unit + integration + behavioral)
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -303,6 +350,8 @@ jobs:
   # ============================================================================
   test-full:
     name: Tests (all features)
+    needs: [change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -492,7 +541,7 @@ jobs:
   # ============================================================================
   gate:
     name: CI Gate
-    needs: [toolchain, repo-guards, fmt, clippy, test-core, test-full, security, doc-quality]
+    needs: [change-scope, toolchain, repo-guards, fmt, clippy, test-core, test-full, security, doc-quality]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -500,13 +549,44 @@ jobs:
       - name: Verify all required jobs succeeded
         env:
           RESULTS: ${{ toJson(needs) }}
+          RUN_CODE_JOBS: ${{ needs.change-scope.outputs.run_code_jobs }}
         run: |
+          # Path-aware gate semantics: full scope requires every producer to
+          # succeed; narrow scope (run_code_jobs=false) requires only the
+          # always-applicable producers (change-scope, toolchain, repo-guards,
+          # security, doc-quality) to succeed while the skipped code producers
+          # (fmt, clippy, test-core, test-full) must be `skipped` — skipped
+          # non-applicable producers are explicitly allowed only from
+          # change-scope, and any failure/cancelled result still fails.
           echo "$RESULTS"
-          if echo "$RESULTS" | jq -e '.[] | select(.result != "success")' > /dev/null; then
-            echo "::error::One or more required CI jobs did not succeed (failure/skipped/cancelled)."
+          SCOPE_RESULT="$(echo "$RESULTS" | jq -r '."change-scope".result')"
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "::error::change-scope did not succeed (result=$SCOPE_RESULT)."
             exit 1
           fi
-          echo "All required CI jobs succeeded."
+          if [ "${RUN_CODE_JOBS:-true}" = "true" ]; then
+            if echo "$RESULTS" | jq -e '.[] | select(.result != "success")' > /dev/null; then
+              echo "::error::One or more required CI jobs did not succeed (failure/skipped/cancelled)."
+              exit 1
+            fi
+            echo "All required CI jobs succeeded (full scope)."
+          else
+            for job in change-scope toolchain repo-guards security doc-quality; do
+              r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
+              if [ "$r" != "success" ]; then
+                echo "::error::Applicable producer '$job' did not succeed in narrow scope (result=$r)."
+                exit 1
+              fi
+            done
+            for job in fmt clippy test-core test-full; do
+              r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
+              if [ "$r" != "skipped" ]; then
+                echo "::error::Non-applicable code producer '$job' must be skipped in narrow scope (result=$r)."
+                exit 1
+              fi
+            done
+            echo "Narrow scope: applicable producers succeeded, code jobs skipped by change-scope."
+          fi
 
   # ============================================================================
   # FEATURE MATRIX: cargo-hack checks each feature in isolation (Wave 4, #403).

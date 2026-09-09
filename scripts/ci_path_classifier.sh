@@ -11,12 +11,24 @@
 #
 # Usage:
 #   scripts/ci_path_classifier.sh [--base-ref <ref>] [--head-ref <ref>]
+#                                 [--base <ref>] [--head <ref>]
+#                                 [--format human|github]
 #                                 [--github-output <path>] [--files <list>]
 #   scripts/ci_path_classifier.sh classify <base> <head>
 #
 # Flags:
-#   --base-ref <ref>       base for `git diff` (default: origin/main).
-#   --head-ref <ref>       head for `git diff` (default: HEAD).
+#   --base-ref <ref> / --base <ref>   base for `git diff` (default: origin/main).
+#                                     (--base is an alias of --base-ref.)
+#   --head-ref <ref> / --head <ref>   head for `git diff` (default: HEAD).
+#                                     (--head is an alias of --head-ref.)
+#   --format human|github  human (default): full 13-key output to
+#                          $GITHUB_OUTPUT (or --github-output) else stdout,
+#                          plus a stderr summary. github: only deterministic
+#                          `key=value` lines to stdout (caller appends to
+#                          $GITHUB_OUTPUT), including docs_only, ci_only, code,
+#                          all, affected, run_code_jobs. An explicit
+#                          --github-output <path> with --format github writes
+#                          there instead of stdout.
 #   --github-output <path> override for $GITHUB_OUTPUT (CI writes here).
 #   --files <list>         newline-separated file list; skips `git diff`.
 #                          Also honoured via $CI_PATH_CLASSIFIER_FILES.
@@ -111,7 +123,9 @@ set -euo pipefail
 
 BASE_REF="origin/main"
 HEAD_REF="HEAD"
+FORMAT="human"
 OUTPUT_OVERRIDE=""
+OUTPUT_EXPLICIT=false
 FILES_OVERRIDE="${CI_PATH_CLASSIFIER_FILES:-}"
 # Tracks whether --files / $CI_PATH_CLASSIFIER_FILES was GIVEN at all: an
 # explicitly empty list means "zero files changed" ( -> all=true ), which is
@@ -126,7 +140,7 @@ if [[ -n "$FILES_OVERRIDE" ]]; then
 fi
 
 usage() {
-  sed -n '2,30p' "$0"
+  sed -n '2,38p' "$0"
 }
 
 # --- per-file predicates (return 0 on match) --------------------------------
@@ -312,6 +326,65 @@ classify() {
     if ! $known; then all=true; fi
   fi
 
+  # Derived scope signals for --format github (deterministic, filename-only).
+  #   code          = alias of code_changed (any Rust build input).
+  #   run_code_jobs = true when code=true OR all=true; otherwise false.
+  #   affected      = sorted CSV of true areas among
+  #                   docs,ci,code,ai,mcp,cli,core,crawler,downloader,tests,
+  #                   release,lock,all — or "none" when nothing matched.
+  local code="$code_changed"
+  local run_code_jobs=false
+  if [[ "$code_changed" == "true" || "$all" == "true" ]]; then
+    run_code_jobs=true
+  fi
+  local affected="none"
+  {
+    local -a parts=()
+    [[ "$docs_only" == "true" ]] && parts+=(docs)
+    [[ "$ci_only" == "true" ]] && parts+=(ci)
+    [[ "$code_changed" == "true" ]] && parts+=(code)
+    [[ "$ai_changed" == "true" ]] && parts+=(ai)
+    [[ "$mcp_changed" == "true" ]] && parts+=(mcp)
+    [[ "$cli_changed" == "true" ]] && parts+=(cli)
+    [[ "$core_changed" == "true" ]] && parts+=(core)
+    [[ "$crawler_changed" == "true" ]] && parts+=(crawler)
+    [[ "$downloader_changed" == "true" ]] && parts+=(downloader)
+    [[ "$tests_changed" == "true" ]] && parts+=(tests)
+    [[ "$release_changed" == "true" ]] && parts+=(release)
+    [[ "$lock_changed" == "true" ]] && parts+=(lock)
+    [[ "$all" == "true" ]] && parts+=(all)
+    if [[ ${#parts[@]} -gt 0 ]]; then
+      affected="$(IFS=,; echo "${parts[*]}")"
+    fi
+  }
+
+  # --format github: only deterministic key=value lines (suitable for
+  # $GITHUB_OUTPUT). Stdout by default so the caller can
+  # `... --format github >> "$GITHUB_OUTPUT"`; an explicit --github-output
+  # path takes precedence over stdout. The human summary still goes to
+  # stderr so it never pollutes GITHUB_OUTPUT parsing.
+  if [[ "$FORMAT" == "github" ]]; then
+    if $OUTPUT_EXPLICIT; then
+      {
+        echo "docs_only=$docs_only"
+        echo "ci_only=$ci_only"
+        echo "code=$code"
+        echo "all=$all"
+        echo "affected=$affected"
+        echo "run_code_jobs=$run_code_jobs"
+      } >> "$OUTPUT_OVERRIDE"
+    else
+      echo "docs_only=$docs_only"
+      echo "ci_only=$ci_only"
+      echo "code=$code"
+      echo "all=$all"
+      echo "affected=$affected"
+      echo "run_code_jobs=$run_code_jobs"
+    fi
+    echo "classifier: ${#files[@]} file(s) base=$base head=$head -> docs_only=$docs_only ci_only=$ci_only code=$code_changed ai=$ai_changed mcp=$mcp_changed cli=$cli_changed core=$core_changed crawler=$crawler_changed downloader=$downloader_changed tests=$tests_changed release=$release_changed lock=$lock_changed all=$all affected=$affected run_code_jobs=$run_code_jobs" >&2
+    return 0
+  fi
+
   # NOTE: never redirect to /dev/stdout by path — some sandboxes and CI
   # capture harnesses expose fd 1 via a non-reopenable handle (ENXIO on
   # open). With no dest we inherit stdout directly, which always works.
@@ -362,9 +435,15 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --base-ref) BASE_REF="${2:?missing value for --base-ref}"; shift 2 ;;
-    --head-ref) HEAD_REF="${2:?missing value for --head-ref}"; shift 2 ;;
-    --github-output) OUTPUT_OVERRIDE="${2:?missing value for --github-output}"; shift 2 ;;
+    --base-ref | --base) BASE_REF="${2:?missing value for $1}"; shift 2 ;;
+    --head-ref | --head) HEAD_REF="${2:?missing value for $1}"; shift 2 ;;
+    --format)
+      case "${2:?missing value for --format}" in
+        human | github) FORMAT="$2" ;;
+        *) echo "error: --format must be human|github (got '$2')" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
+    --github-output) OUTPUT_OVERRIDE="${2:?missing value for --github-output}"; OUTPUT_EXPLICIT=true; shift 2 ;;
     --files) FILES_OVERRIDE="$2"; FILES_GIVEN=true; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     *) echo "error: unknown argument '$1' (see --help)" >&2; exit 2 ;;
