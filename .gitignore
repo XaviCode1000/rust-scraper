@@ -121,6 +121,9 @@ zed-settings.json
 
 # Logs
 *.log
+# Phase 6 exception: the local fast-gate timing series is a tracked metric,
+# appended best-effort by scripts/ci_fast_gate.sh (see docs/ci-slo.md).
+!docs/ci-metrics/fast-gate.log
 
 # OS
 .DS_Store

@@ -26,6 +26,20 @@
 #     no `rm -rf`, no release, no push. Temp files use mktemp + trap.
 #   - Steps are fail-open on MISSING tools (warn + skip) but fail-closed on
 #     real findings. A missing linter must never greenwash, nor red-block.
+#
+# Timing log (Phase 6 observability, best-effort, never fails the gate):
+#   on every non-dry-run finish this script appends one CSV line to
+#   docs/ci-metrics/fast-gate.log:
+#     date,branch,lane,result,seconds
+#   date    UTC ISO-8601 of gate finish (`date` only, no new dependencies).
+#   branch  `git branch --show-current` (or `unknown` when unreadable).
+#   lane    one of: docs, ci, docs+ci, code, full, unknown.
+#   result  `green` (FAIL=0) or `red` (FAIL>0).
+#   seconds wall-clock seconds for the whole gate invocation.
+#   The append is `|| true`-guarded: logging must never turn green red, and
+#   dry runs are never logged (they would pollute the series).
+#   The summary also echoes the `scripts/ci_metrics.sh` regeneration command
+#   (echo-only, no behaviour change; see docs/ci-slo.md).
 
 # NOTE: `set -e` is DELIBERATELY absent — the run_step collector owns
 # failure handling so one red step never hides the rest. `-u` + pipefail
@@ -34,6 +48,10 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLASSIFIER="$SCRIPT_DIR/ci_path_classifier.sh"
+
+# Phase 6 timing: start stamp + lane label (set in the dispatch below).
+FAST_GATE_START_SECONDS="$(date +%s)"
+FAST_GATE_LANE="unknown"
 
 BASE_REF="origin/main"
 HEAD_REF="HEAD"
@@ -84,6 +102,23 @@ run_step() {
 skip_step() {
   echo "    SKIP: $1 ($2)"
   SKIPPED=$((SKIPPED + 1))
+}
+
+# Phase 6: append one `date,branch,lane,result,seconds` line to
+# docs/ci-metrics/fast-gate.log. Shell built-ins + `date` only, fully
+# `|| true`-guarded: best-effort, never fails the gate.
+log_fast_gate_timing() {
+  local result="$1"
+  local now elapsed branch finished_at
+  now="$(date +%s)"
+  elapsed=$((now - FAST_GATE_START_SECONDS))
+  branch="$(git branch --show-current 2>/dev/null || echo unknown)"
+  [[ -z "$branch" ]] && branch="unknown"
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p docs/ci-metrics 2>/dev/null || true
+  printf '%s,%s,%s,%s,%s\n' "$finished_at" "$branch" \
+    "$FAST_GATE_LANE" "$result" "$elapsed" \
+    >> docs/ci-metrics/fast-gate.log 2>/dev/null || true
 }
 
 # --- classify ------------------------------------------------------------------
@@ -342,8 +377,10 @@ lane_full() {
 # --- dispatch -----------------------------------------------------------------------
 
 if [[ "$all" == "true" ]]; then
+  FAST_GATE_LANE="full"
   lane_full
 elif [[ "$docs_only" == "true" && "$ci_only" == "true" ]]; then
+  FAST_GATE_LANE="docs+ci"
   echo "fast-gate note: change is docs+CI only; running docs and CI lanes."
   lane_docs true
   lane_ci
@@ -351,13 +388,21 @@ elif [[ "$docs_only" == "true" || "$ci_only" == "true" ]]; then
   if [[ "$release_changed" == "true" ]]; then
     echo "fast-gate note: non-code change BUT release files touched (e.g. CHANGELOG) — release validation stays a main-tier concern; running the cheap lane."
   fi
-  [[ "$docs_only" == "true" ]] && lane_docs true
-  [[ "$ci_only" == "true" ]] && lane_ci
+  if [[ "$docs_only" == "true" ]]; then
+    FAST_GATE_LANE="docs"
+    lane_docs true
+  fi
+  if [[ "$ci_only" == "true" ]]; then
+    FAST_GATE_LANE="ci"
+    lane_ci
+  fi
 elif [[ "$code_changed" != "true" ]]; then
+  FAST_GATE_LANE="docs+ci"
   echo "fast-gate note: known non-code scope; running cheap docs+CI lanes."
   lane_docs false
   lane_ci
 elif [[ "$code_changed" == "true" ]]; then
+  FAST_GATE_LANE="code"
   echo "fast-gate lane: CODE (fmt + guards + targeted cargo)"
   lane_fmt_and_guards
   targeted_cargo
@@ -374,9 +419,19 @@ fi
 
 echo "----------------------------------------"
 echo "fast-gate summary: PASS=$PASS FAIL=$FAIL SKIP=$SKIPPED"
+FAST_GATE_RESULT="green"
 if [[ $FAIL -gt 0 ]]; then
   printf 'failed steps:\n'
   printf '  - %s\n' "${FAILED_STEPS[@]}"
+  FAST_GATE_RESULT="red"
+fi
+# Phase 6 observability: best-effort timing log (never fails the gate; dry
+# runs are skipped) + metrics command hint (echo only, no behaviour change).
+if ! $DRY_RUN; then
+  log_fast_gate_timing "$FAST_GATE_RESULT"
+fi
+echo "metrics: regenerate the SLO snapshot with: bash scripts/ci_metrics.sh [--days N] [--workflow ci.yml] [--branch main] (see docs/ci-slo.md)"
+if [[ $FAIL -gt 0 ]]; then
   exit 1
 fi
 echo "fast-gate: GREEN"
