@@ -6,7 +6,6 @@
 use super::McpHandler;
 use crate::mcp_server::metrics::{domain_of, Outcome};
 use crate::mcp_server::params::*;
-use crate::mcp_server::selector_service;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
@@ -14,8 +13,6 @@ use rmcp::tool_router;
 use rmcp::{model::CallToolResult, model::Content, ErrorData as McpError};
 use std::time::Instant;
 use tracing::instrument;
-use webfang_core::domain::DocumentChunkValidated;
-use webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata;
 
 /// Runtime-effective `crawl_site` default for `max_depth`, applied via
 /// `unwrap_or` when the MCP parameter is omitted (#940 F1). The schema bridge
@@ -84,29 +81,34 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-// Convert each ScrapedContent to WebfangMetadata and serialize as JSONL
-                    let jsonl_lines: Vec<String> = results
+                    // P6-1 slice: emit the same CLI record shape (WebfangMetadata JSONL,
+                    // checksum + timestamp + word_count + metadata_version) instead of
+                    // the simplified DTO, so CLI and MCP outputs share one contract.
+                    let jsonl_lines: Result<Vec<String>, McpError> = results
                         .iter()
                         .map(|scraped| {
-                            let chunk = DocumentChunkValidated::from(scraped);
-                            let metadata = WebfangMetadata::from_chunk(&chunk);
-                            serde_json::to_string(&metadata).expect("failed to serialize metadata")
+                            let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
+                                .validate()
+                                .map_err(|e| McpError::internal_error(format!("chunk validation failed: {e}"), None))?;
+                            let metadata = webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata)
+                                .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
                         })
                         .collect();
-                    let content = jsonl_lines.join("\n");
+                    let content = jsonl_lines?.join("\n");
                     Ok(CallToolResult::success(vec![Content::text(content)]))
-                },
-                Err(e) => {
-                    self.state.record_scrape_identity(
-                        "scrape_url",
-                        domain_of(params.url.as_str()),
-                        Outcome::Error,
-                        0,
-                        start,
-                        &root_correlation,
-                    );
-                    Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
-                },
+            },
+            Err(e) => {
+                self.state.record_scrape_identity(
+                    "scrape_url",
+                    domain_of(params.url.as_str()),
+                    Outcome::Error,
+                    0,
+                    start,
+                    &root_correlation,
+                );
+                Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
+            },
         }
     }
 
@@ -181,29 +183,33 @@ impl McpHandler {
                     start,
                     &root_correlation,
                 );
-// Convert each ScrapedContent to WebfangMetadata and serialize as JSONL
-                    let jsonl_lines: Vec<String> = outcome.results
+                    // P6-1 slice: same shared record shape as scrape_url above — one
+                    // contract for CLI and MCP instead of the simplified DTO.
+                    let jsonl_lines: Result<Vec<String>, McpError> = outcome.results
                         .iter()
                         .map(|scraped| {
-                            let chunk = DocumentChunkValidated::from(scraped);
-                            let metadata = WebfangMetadata::from_chunk(&chunk);
-                            serde_json::to_string(&metadata).expect("failed to serialize metadata")
+                            let chunk = webfang_core::domain::DocumentChunk::from_scraped_content(scraped)
+                                .validate()
+                                .map_err(|e| McpError::internal_error(format!("chunk validation failed: {e}"), None))?;
+                            let metadata = webfang_core::infrastructure::export::jsonl_exporter::WebfangMetadata::from_chunk(&chunk);
+                            serde_json::to_string(&metadata)
+                                .map_err(|e| McpError::internal_error(format!("failed to serialize metadata: {e}"), None))
                         })
                         .collect();
-                    let content = jsonl_lines.join("\n");
+                    let content = jsonl_lines?.join("\n");
                     Ok(CallToolResult::success(vec![Content::text(content)]))
-                },
-                Err(e) => {
-                    self.state.record_scrape_identity(
-                        "scrape_with_options",
-                        domain_of(params.url.as_str()),
-                        Outcome::Error,
-                        0,
-                        start,
-                        &root_correlation,
-                    );
-                    Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
-                },
+            },
+            Err(e) => {
+                self.state.record_scrape_identity(
+                    "scrape_with_options",
+                    domain_of(params.url.as_str()),
+                    Outcome::Error,
+                    0,
+                    start,
+                    &root_correlation,
+                );
+                Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
+            },
         }
     }
 
