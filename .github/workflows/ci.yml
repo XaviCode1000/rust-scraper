@@ -5,20 +5,26 @@
 # Developer gets feedback in <30s (toolchain), <60s (fmt), <3min (clippy), <8min (full).
 #
 # Pipeline flow:
-#   toolchain (15s) → fmt (30s) → clippy (2min) → test-core (15min) → test-full (20min cold cache)
+#   change-scope (path-aware tier, <15s, no cargo) classifies the PR diff via
+#   scripts/ci_path_classifier.sh: docs-only/CI-only PRs skip the expensive
+#   compile/test entry points (fmt, clippy, test-core, test-full) while
+#   toolchain, repo-guards, security, and doc-quality always run. Full-scope
+#   changes (code=true OR all=true) keep the current required producers.
+#   toolchain (15s) → fmt (30s) → clippy (2min) → CI Gate aggregates the fast required tier
 #   repo-guards (parallel) runs dead-test detection + the other architectural
 #   guards + actionlint/shellcheck lint; gate still blocks merge on it.
 #   test-core runs: unit tests (--lib) then integration/behavioral tests (--test '*')
 #   test-full runs: all features enabled (full workspace compile + test, NO AI inference)
-#   test-ai (REQUIRED since #848, parallel after clippy): AI integration tests with ONNX model.
-#     Soak passed 2026-09-05 (~2 weeks since #847 + 12 consecutive green runs on real
-#     PRs, zero model-download failures). Blocks merge via the gate like every other
-#     required producer. Gated behind clippy to skip the
-#     model download on PRs that already fail the compile gate.
+#   test-ai (ADVISORY, path-gated on needs_ai): AI integration tests with ONNX model.
+#     This tier keeps model inference out of CI Gate to avoid making every PR pay
+#     the 20 min AI cold-build path. It runs on PRs for signal, but merge confidence
+#     for AI-heavy changes should come from path-gated PR checks + main/queue runs.
+#     If branch protection adds this job as a direct required context, CI Gate alone
+#     is no longer the fast PR contract; keep that decision explicit and short-lived.
 #   security runs in parallel with tests (no Rust compile)
 #   feature-matrix runs after clippy (cargo-hack --each-feature, catches broken feature combos)
-#   mcp smoke runs after test-full
-#   coverage runs on PRs + dispatch (llvm-cov + Codecov)
+#   mcp smoke runs after test-full, path-gated on needs_mcp (advisory, never in gate)
+#   coverage runs on PRs + dispatch (llvm-cov + Codecov) and remains non-gating
 #   release runs after all gates pass (main only)
 #   miri runs on schedule/dispatch only
 #
@@ -100,6 +106,59 @@ jobs:
           else
             echo "ERROR: Rust $INSTALLED is below minimum $REQUIRED"
             exit 1
+          fi
+
+  # ============================================================================
+  # TIER 0a: CHANGE SCOPE (path-aware, <15s, no cargo/cache/model work)
+  # Classifies the changed files via scripts/ci_path_classifier.sh so
+  # docs-only/CI-only PRs skip the expensive compile/test entry points
+  # (fmt, clippy, test-core, test-full). push/merge_group/schedule/dispatch
+  # always default to full scope (run_code_jobs=true + every lane true).
+  # Downstream code jobs gate on `needs.change-scope.outputs.run_code_jobs
+  # == 'true'`; the affected-area lanes gate test-ai on needs_ai and the
+  # mcp smoke job on needs_mcp (both advisory, never in `gate` needs);
+  # needs_mutation_hotpath is exposed as an output only (Phase 4 advisory —
+  # no job gates on it in this phase, to keep the change non-breaking);
+  # snapshot baselines are test expectations and keep test coverage
+  # applicable. The `gate` job explicitly allows skipped non-applicable
+  # producers only from here.
+  # ============================================================================
+  change-scope:
+    name: Change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_code_jobs: ${{ steps.scope.outputs.run_code_jobs }}
+      needs_ai: ${{ steps.scope.outputs.needs_ai }}
+      needs_mcp: ${{ steps.scope.outputs.needs_mcp }}
+      needs_mutation_hotpath: ${{ steps.scope.outputs.needs_mutation_hotpath }}
+      snapshot_changed: ${{ steps.scope.outputs.snapshot_changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/ci_path_classifier.sh \
+              --base "${{ github.event.pull_request.base.sha }}" \
+              --head "${{ github.event.pull_request.head.sha }}" \
+              --format github >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "docs_only=false"
+              echo "ci_only=false"
+              echo "code=true"
+              echo "all=true"
+              echo "affected=all"
+              echo "run_code_jobs=true"
+              echo "needs_ai=true"
+              echo "needs_mcp=true"
+              echo "needs_mutation_hotpath=true"
+              echo "snapshot_changed=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "change-scope: event=${{ github.event_name }} -> full scope (run_code_jobs=true, needs_ai=true, needs_mcp=true, needs_mutation_hotpath=true, snapshot_changed=true)"
           fi
 
   # ============================================================================
@@ -204,7 +263,8 @@ jobs:
   # ============================================================================
   fmt:
     name: Check formatting
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -229,7 +289,8 @@ jobs:
   # ============================================================================
   clippy:
     name: Clippy (strict)
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -280,7 +341,8 @@ jobs:
   # ============================================================================
   test-core:
     name: Tests (unit + integration + behavioral)
-    needs: [toolchain]
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -302,6 +364,8 @@ jobs:
   # ============================================================================
   test-full:
     name: Tests (all features)
+    needs: [change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -347,18 +411,21 @@ jobs:
         run: cargo nextest run -p webfang_core --features console --test tokio_console_smoke_test
 
   # ============================================================================
-  # TEST AI (REQUIRED since #848): AI integration tests with ONNX model.
+  # TEST AI (ADVISORY SIGNAL IN PR): AI integration tests with ONNX model.
   #
-  # These tests load a 372MB ONNX model and run
-  # real inference. Soak passed 2026-09-05, so they now block merge via
-  # the gate like every other required producer. They run in
-  # parallel after clippy (NOT after test-full) so they don't add to the critical
-  # path. Gated behind clippy to avoid wasting the model download on PRs that
-  # already fail compilation.
+  # These tests load a 372MB ONNX model and run real inference. They remain on PRs
+  # as signal, but CI Gate no longer depends on `test-ai`: the 20 min AI path was
+  # the biggest known merge-latency cost when model-heavy changes were unrelated.
+  # Path-gated: runs only when run_code_jobs=true AND needs_ai=true
+  # (AI/model inputs changed or full scope). Advisory only — never in `gate` needs.
+  # Run after clippy to avoid spending model download/compute on compile failures.
+  # If AI changes must become merge-blocking again, do it through branch protection
+  # explicitly or re-add them to the gate after measuring the wall-clock effect.
   # ============================================================================
   test-ai:
     name: Tests (AI integration)
-    needs: [clippy]
+    needs: [clippy, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_ai == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -493,17 +560,18 @@ jobs:
 
   # ============================================================================
   # FINAL GATE: the ONLY required check produced by this workflow.
-  # Aggregates every PR-blocking job. Fails on `failure` AND on unexpected
+  # Aggregates the fast PR-blocking jobs. Fails on `failure` AND on unexpected
   # `skipped`/`cancelled` — GitHub treats skipped required checks as satisfied,
   # which allowed PR #833 to merge with 4 required checks SKIPPED and 1 FAILED.
-  # Branch protection must require exactly "CI Gate" from ci.yml (plus
-  # "Validate PR metadata" and "cargo-mutants (PR diff)" from their own
-  # workflows, both skip-proof by construction).
+  # Branch protection should require only "CI Gate" from ci.yml, plus cheap
+  # metadata guards from their own workflows. Heavy jobs stay visible in the
+  # workflow run, but they do not belong in the merge gate until we explicitly
+  # decide to pay that wall-clock cost.
   # NEVER add a required producer without listing it in `needs:` here.
   # ============================================================================
   gate:
     name: CI Gate
-    needs: [toolchain, repo-guards, fmt, clippy, test-core, test-full, test-ai, security, doc-quality]
+    needs: [change-scope, toolchain, repo-guards, fmt, clippy, test-core, test-full, security, doc-quality]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -511,13 +579,44 @@ jobs:
       - name: Verify all required jobs succeeded
         env:
           RESULTS: ${{ toJson(needs) }}
+          RUN_CODE_JOBS: ${{ needs.change-scope.outputs.run_code_jobs }}
         run: |
+          # Path-aware gate semantics: full scope requires every producer to
+          # succeed; narrow scope (run_code_jobs=false) requires only the
+          # always-applicable producers (change-scope, toolchain, repo-guards,
+          # security, doc-quality) to succeed while the skipped code producers
+          # (fmt, clippy, test-core, test-full) must be `skipped` — skipped
+          # non-applicable producers are explicitly allowed only from
+          # change-scope, and any failure/cancelled result still fails.
           echo "$RESULTS"
-          if echo "$RESULTS" | jq -e '.[] | select(.result != "success")' > /dev/null; then
-            echo "::error::One or more required CI jobs did not succeed (failure/skipped/cancelled)."
+          SCOPE_RESULT="$(echo "$RESULTS" | jq -r '."change-scope".result')"
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "::error::change-scope did not succeed (result=$SCOPE_RESULT)."
             exit 1
           fi
-          echo "All required CI jobs succeeded."
+          if [ "${RUN_CODE_JOBS:-true}" = "true" ]; then
+            if echo "$RESULTS" | jq -e '.[] | select(.result != "success")' > /dev/null; then
+              echo "::error::One or more required CI jobs did not succeed (failure/skipped/cancelled)."
+              exit 1
+            fi
+            echo "All required CI jobs succeeded (full scope)."
+          else
+            for job in change-scope toolchain repo-guards security doc-quality; do
+              r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
+              if [ "$r" != "success" ]; then
+                echo "::error::Applicable producer '$job' did not succeed in narrow scope (result=$r)."
+                exit 1
+              fi
+            done
+            for job in fmt clippy test-core test-full; do
+              r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
+              if [ "$r" != "skipped" ]; then
+                echo "::error::Non-applicable code producer '$job' must be skipped in narrow scope (result=$r)."
+                exit 1
+              fi
+            done
+            echo "Narrow scope: applicable producers succeeded, code jobs skipped by change-scope."
+          fi
 
   # ============================================================================
   # FEATURE MATRIX: cargo-hack checks each feature in isolation (Wave 4, #403).
@@ -549,10 +648,15 @@ jobs:
   # ============================================================================
   # MCP SMOKE: After full tests pass
   # Separate job so MCP failure doesn't block test results.
+  # Path-gated: runs only when test-full ran AND run_code_jobs=true AND
+  # needs_mcp=true (MCP/server inputs changed or full scope). Advisory only —
+  # never in `gate` needs. On main full scope needs_mcp=true so the existing
+  # release chain (needs test-full, security, mcp) is unchanged.
   # ============================================================================
   mcp:
     name: MCP handshake
-    needs: [test-full]
+    needs: [test-full, change-scope]
+    if: ${{ needs.test-full.result == 'success' && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_mcp == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
