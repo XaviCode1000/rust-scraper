@@ -53,7 +53,8 @@ use crate::domain::downloader_port::{DownloadError, Downloader};
 use crate::domain::ram_probe_port::{system_default, RamProbePort};
 use crate::domain::session_port::{SessionPoolConfig, SessionPort};
 use crate::domain::{
-    CorrelationId, CrawlError, CrawlErrorCategory, CrawlResult, CrawlerConfig, JsStrategy,
+    post_load_wait::PostLoadWait, CorrelationId, CrawlError, CrawlErrorCategory, CrawlResult,
+    CrawlerConfig, JsStrategy,
 };
 
 /// Shared shutdown signal — set to `true` when SIGINT/SIGTERM received.
@@ -397,8 +398,8 @@ impl Engine {
     /// # Errors
     ///
     /// Returns [`DownloadError::Internal`] if the wreq client cannot be built.
-    // 8 params: the strategy's full dependency set (profile, WAF, retry
-    // backoff, obscura binary). Bundling them would only move the same
+    // 9 params: the strategy's full dependency set (profile, WAF, retry
+    // backoff, obscura binary, post-load wait). Bundling them would only move the same
     // wiring one level up (same pattern as DownloaderSpec).
     #[allow(clippy::too_many_arguments)]
     pub fn with_js_strategy(
@@ -410,6 +411,7 @@ impl Engine {
         backoff_base_ms: u64,
         backoff_max_ms: u64,
         obscura_binary: String,
+        post_load_wait: PostLoadWait,
     ) -> Result<Self, DownloadError> {
         let timeout = self.config.timeout_secs;
         // No factory injected => no downloader built. `None` is a supported
@@ -439,6 +441,8 @@ impl Engine {
                         backoff_base_ms,
                         backoff_max_ms,
                         obscura_binary,
+                        // F-52-b: wait mode for the chromium path.
+                        post_load_wait,
                         // FIX-1 (#1231 F-12): the historical 50 MiB cap.
                         // Plumbing an engine-side operator flag for it is a
                         // follow-up (CrawlerConfig change, gate3-pinned).
@@ -1103,6 +1107,10 @@ pub struct EngineOptions {
     /// A path is invoked as given; a bare name is resolved from `PATH`.
     /// Defaults to `obscura`.
     pub obscura_binary: String,
+    /// Post-load settlement wait for the chromium render path (F-52-b).
+    /// Defaults to [`PostLoadWait::Idle`]; populated from
+    /// `CrawlOptions.network.post_load_wait` by the CLI composition root.
+    pub post_load_wait: PostLoadWait,
     /// Enable autoscaled concurrency based on system RAM.
     pub autoscale_enabled: bool,
     /// TLS/HTTP2 fingerprint profile applied to the wreq fetch layer.
@@ -1150,6 +1158,8 @@ impl Default for EngineOptions {
             // #787: keep today's `obscura`-on-PATH behavior for callers that
             // do not configure the binary.
             obscura_binary: DEFAULT_OBSCURA_BINARY.to_string(),
+            // F-52-b: idle by default; the CLI gate path resolves it.
+            post_load_wait: PostLoadWait::Idle,
             autoscale_enabled: false,
             tls_emulation: Profile::Chrome145,
             ignore_waf: false,
@@ -1399,6 +1409,8 @@ async fn crawl_site_with_options_inner(
         options.backoff_max_ms,
         // #787: propagate --obscura-binary into the Hybrid Layer 2 downloader.
         options.obscura_binary.clone(),
+        // F-52-b: propagate the post-load wait mode into the chromium path.
+        options.post_load_wait,
     )?;
 
     // Apply autoscale if enabled

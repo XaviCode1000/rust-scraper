@@ -51,6 +51,7 @@ use wreq_util::Profile;
 
 use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::downloader_port::{DownloadError, Downloader};
+use crate::domain::post_load_wait::PostLoadWait;
 use crate::domain::JsStrategy;
 
 /// Default binary name for the Hybrid Layer 2 (Obscura) downloader.
@@ -108,6 +109,12 @@ pub struct DownloaderSpec {
     pub backoff_max_ms: u64,
     /// Hybrid Layer 2 (Obscura) binary name or path (#787).
     pub obscura_binary: String,
+    /// Post-load settlement wait for the chromium render path (F-52-b).
+    ///
+    /// Carried from `CrawlOptions.network.post_load_wait`; the chromium
+    /// downloader applies it between navigation and capture. Plain enum
+    /// (not `Option`): historical behavior is [`PostLoadWait::None`].
+    pub post_load_wait: PostLoadWait,
     /// Cap on the decompressed response body of a PAGE fetch, in bytes
     /// (FIX-1, #1231 F-12). The Wreq layer aborts the read mid-body when the
     /// streamed (already decompressed) byte count exceeds this value, so a

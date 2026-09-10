@@ -173,6 +173,8 @@ fn build_discovery_engine_options(
         ignore_robots,
         js_strategy: opts.network.js_strategy,
         content_sink,
+        // F-52-b: carry the post-load wait mode into the engine path.
+        post_load_wait: opts.network.post_load_wait,
         // Without the factory `with_js_strategy` records the strategy but builds
         // no router, so the strategy still degrades to static (#1229 note above).
         downloader_factory: Some(crate::application::container::Container::downloader_factory()),
@@ -254,6 +256,28 @@ mod tests {
             build_discovery_engine_options(&opts, true, Some(sink as Arc<dyn CrawlContentSink>));
         assert!(built.ignore_robots);
         assert!(built.content_sink.is_some());
+    }
+
+    /// F-52-b (#1277): the `--js-wait` mode must reach the engine path —
+    /// same propagation guarantee as `--js-strategy` above, or crawls
+    /// silently settle differently from scrapes.
+    #[test]
+    fn discovery_engine_options_propagate_post_load_wait() {
+        use crate::domain::post_load_wait::PostLoadWait;
+
+        for mode in [
+            PostLoadWait::Idle,
+            PostLoadWait::Fixed(750),
+            PostLoadWait::None,
+        ] {
+            let mut opts = CrawlOptions::default();
+            opts.network.post_load_wait = mode;
+            let built = build_discovery_engine_options(&opts, true, None);
+            assert_eq!(
+                built.post_load_wait, mode,
+                "--js-wait {mode} must reach EngineOptions"
+            );
+        }
     }
 
     // T-2.1: discover_urls returns Result (compile-time + runtime verification)

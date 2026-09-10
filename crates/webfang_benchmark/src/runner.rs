@@ -243,6 +243,9 @@ fn ram_proxy(strategy: JsStrategy) -> Result<usize> {
             // #1231: the benchmark RAM proxy mirrors the production cap.
             max_page_bytes: Some(webfang_core::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES),
             obscura_binary: "obscura".to_string(),
+            // F-52-b: benchmarks measure the historical stack timing — settle
+            // immediately, like production `--js-wait none`.
+            post_load_wait: webfang_core::domain::PostLoadWait::None,
         },
         cookie_bridge,
         CancellationToken::new(),
