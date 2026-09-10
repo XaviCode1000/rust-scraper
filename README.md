@@ -320,7 +320,7 @@ codedb index .
 
 - **Dependency direction:** CLI → {MCP, AI} → Core (never reverse)
 - **Port/Adapter pattern:** Domain defines traits, Infrastructure implements them
-- **Error types:** DomainError, InfraError, AppError → ScraperError (dual wrapping)
+- **Error types:** DomainError, InfraError → ScraperError (dual wrapping)
 - **User-facing errors:** Spanish. Internal logs: English.
 
 **Stack:** Rust 1.88 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html · tract-onnx
