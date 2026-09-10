@@ -165,6 +165,14 @@ async fn __main() -> CliExit {
     if let Err(exit) = preflight::check_js_dependencies(&opts) {
         return exit;
     }
+    // F-52-c (#1278): pin the launcher to the gate-certified binary. The
+    // resolution runs once here (process PATH, post-gate) and travels in
+    // CrawlOptions so every chromium launch uses `chrome_executable`
+    // instead of chromiumoxide auto-detection (which omits bare
+    // `google-chrome` and accepts the `/opt/google/chrome` directory).
+    // `None` (non-Full strategies, or a lost post-gate race) keeps
+    // historical auto-detection on paths that never run this gate.
+    opts.network.chrome_binary = preflight::resolve_chrome_binary();
 
     // 6d. Elastic sink preflight (#695): --elastic without persistence nor
     // --output-vectors would wire no sink and silently no-op — exit 78.

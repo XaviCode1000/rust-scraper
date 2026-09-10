@@ -238,6 +238,9 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
                 h2_profile: args.crawler.h2_profile,
                 js_strategy: args.crawler.js_strategy,
                 obscura_binary: args.crawler.obscura_binary,
+                // F-52-c: unresolved at projection; the preflight gate
+                // (main.rs 6c) resolves it post-validation.
+                chrome_binary: None,
                 custom_headers: args
                     .crawler
                     .headers

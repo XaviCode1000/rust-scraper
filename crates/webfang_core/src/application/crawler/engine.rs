@@ -397,8 +397,8 @@ impl Engine {
     /// # Errors
     ///
     /// Returns [`DownloadError::Internal`] if the wreq client cannot be built.
-    // 8 params: the strategy's full dependency set (profile, WAF, retry
-    // backoff, obscura binary). Bundling them would only move the same
+    // 9 params: the strategy's full dependency set (profile, WAF, retry
+    // backoff, obscura binary, resolved chrome binary). Bundling them would only move the same
     // wiring one level up (same pattern as DownloaderSpec).
     #[allow(clippy::too_many_arguments)]
     pub fn with_js_strategy(
@@ -410,6 +410,7 @@ impl Engine {
         backoff_base_ms: u64,
         backoff_max_ms: u64,
         obscura_binary: String,
+        chrome_binary: Option<PathBuf>,
     ) -> Result<Self, DownloadError> {
         let timeout = self.config.timeout_secs;
         // No factory injected => no downloader built. `None` is a supported
@@ -439,6 +440,8 @@ impl Engine {
                         backoff_base_ms,
                         backoff_max_ms,
                         obscura_binary,
+                        // F-52-c: the gate-certified binary (or None = auto-detect).
+                        chrome_binary,
                         // FIX-1 (#1231 F-12): the historical 50 MiB cap.
                         // Plumbing an engine-side operator flag for it is a
                         // follow-up (CrawlerConfig change, gate3-pinned).
@@ -1103,6 +1106,14 @@ pub struct EngineOptions {
     /// A path is invoked as given; a bare name is resolved from `PATH`.
     /// Defaults to `obscura`.
     pub obscura_binary: String,
+    /// Preflight-resolved Chrome/Chromium binary for the chromium render
+    /// path (F-52-c, #1278).
+    ///
+    /// `Some(path)` pins every chromium launch to the gate-certified
+    /// binary; `None` (default, MCP/benchmark/test paths) keeps launcher
+    /// auto-detection. Populated from `CrawlOptions.network.chrome_binary`
+    /// by the CLI composition root.
+    pub chrome_binary: Option<PathBuf>,
     /// Enable autoscaled concurrency based on system RAM.
     pub autoscale_enabled: bool,
     /// TLS/HTTP2 fingerprint profile applied to the wreq fetch layer.
@@ -1150,6 +1161,8 @@ impl Default for EngineOptions {
             // #787: keep today's `obscura`-on-PATH behavior for callers that
             // do not configure the binary.
             obscura_binary: DEFAULT_OBSCURA_BINARY.to_string(),
+            // F-52-c: unresolved by default; the CLI gate resolves it.
+            chrome_binary: None,
             autoscale_enabled: false,
             tls_emulation: Profile::Chrome145,
             ignore_waf: false,
@@ -1399,6 +1412,9 @@ async fn crawl_site_with_options_inner(
         options.backoff_max_ms,
         // #787: propagate --obscura-binary into the Hybrid Layer 2 downloader.
         options.obscura_binary.clone(),
+        // F-52-c: propagate the gate-certified Chrome binary into the
+        // Hybrid L3 / Full launcher.
+        options.chrome_binary.clone(),
     )?;
 
     // Apply autoscale if enabled

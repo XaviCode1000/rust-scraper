@@ -185,6 +185,14 @@ pub struct NetworkOptions {
     pub js_strategy: JsStrategy,
     /// Path to the obscura binary (default: "obscura").
     pub obscura_binary: String,
+    /// Preflight-resolved Chrome/Chromium binary for `--js-strategy full`
+    /// (F-52-c, #1278).
+    ///
+    /// `None` until the CLI preflight gate resolves it after startup
+    /// validation (`main.rs` 6c); the downloader then launches exactly the
+    /// certified binary instead of chromiumoxide auto-detection. Paths that
+    /// never run the gate (MCP, benchmark) keep `None` = auto-detect.
+    pub chrome_binary: Option<PathBuf>,
     /// Custom HTTP headers as `(name, value)` pairs, injected into every request.
     ///
     /// Populated from `--header`/`WEBFANG_HEADER`. Overrides same-named default
@@ -336,6 +344,8 @@ impl Default for NetworkOptions {
             h2_profile: "Chrome145".to_owned(),
             js_strategy: JsStrategy::default(),
             obscura_binary: "obscura".to_owned(),
+            // F-52-c: unresolved until the preflight gate certifies a binary.
+            chrome_binary: None,
             custom_headers: Vec::new(),
             initial_cookies: Vec::new(),
         }

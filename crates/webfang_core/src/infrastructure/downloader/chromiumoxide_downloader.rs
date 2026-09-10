@@ -16,6 +16,9 @@ use {
     tokio::time::{timeout, Duration},
 };
 
+#[cfg(all(test, feature = "chromium"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -81,16 +84,39 @@ impl Drop for HandlerGuard {
 pub struct ChromiumoxideDownloader {
     #[cfg(feature = "chromium")]
     cookie_bridge: Arc<RwLock<CookieBridge>>,
+    /// Gate-certified Chrome binary (F-52-c, #1278). `Some` pins the launch
+    /// via `chrome_executable`; `None` keeps auto-detection.
+    #[cfg(feature = "chromium")]
+    chrome_binary: Option<PathBuf>,
 }
 
 impl ChromiumoxideDownloader {
     #[cfg(feature = "chromium")]
-    pub(crate) fn new(cookie_bridge: Arc<RwLock<CookieBridge>>) -> Self {
-        Self { cookie_bridge }
+    pub(crate) fn new(
+        cookie_bridge: Arc<RwLock<CookieBridge>>,
+        chrome_binary: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            cookie_bridge,
+            chrome_binary,
+        }
+    }
+
+    /// The configured Chrome binary, if the preflight gate resolved one.
+    ///
+    /// Seam for the F-52-c propagation test (mirrors the Layer 2
+    /// `.binary()` accessor, #787): proves the configured path reaches the
+    /// launcher without spawning a browser.
+    #[cfg(all(test, feature = "chromium"))]
+    pub(crate) fn chrome_binary(&self) -> Option<&Path> {
+        self.chrome_binary.as_deref()
     }
 
     #[cfg(not(feature = "chromium"))]
-    pub(crate) fn new(_cookie_bridge: Arc<RwLock<CookieBridge>>) -> Self {
+    pub(crate) fn new(
+        _cookie_bridge: Arc<RwLock<CookieBridge>>,
+        _chrome_binary: Option<PathBuf>,
+    ) -> Self {
         Self {}
     }
 }
@@ -107,10 +133,17 @@ impl Downloader for ChromiumoxideDownloader {
                 )));
             }
 
-            // 2. Browser config with sandbox bypass for CI/Docker
-            let config = BrowserConfig::builder()
+            // 2. Browser config with sandbox bypass for CI/Docker.
+            // F-52-c (#1278): when the preflight gate certified a binary,
+            // launch exactly it instead of chromiumoxide auto-detection.
+            let mut config_builder = BrowserConfig::builder()
                 .headless_mode(HeadlessMode::True)
-                .no_sandbox()
+                .no_sandbox();
+            if let Some(path) = &self.chrome_binary {
+                tracing::debug!(chrome_binary = %path.display(), "using gate-certified chrome binary");
+                config_builder = config_builder.chrome_executable(path);
+            }
+            let config = config_builder
                 .build()
                 // LCOV_EXCL_LINE defensive: browser-config-build — static builder flags cannot fail at runtime
                 .map_err(DownloadError::Internal)?;
@@ -225,7 +258,7 @@ mod tests {
     #[cfg(not(feature = "chromium"))]
     #[tokio::test]
     async fn test_chromiumoxide_returns_stub_error() {
-        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())));
+        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())), None);
         let url: Url = "https://example.com".parse().unwrap();
         let err = dl.fetch(&url).await.unwrap_err();
         assert!(
@@ -237,7 +270,7 @@ mod tests {
     #[test]
     #[cfg(feature = "chromium")]
     fn test_chromiumoxide_metadata() {
-        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())));
+        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())), None);
         assert!(dl.supports_interactions());
         assert_eq!(dl.memory_cost(), 200_000_000);
     }
@@ -280,7 +313,7 @@ mod tests {
     #[test]
     #[cfg(not(feature = "chromium"))]
     fn test_chromiumoxide_metadata_stub() {
-        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())));
+        let dl = ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())), None);
         assert!(!dl.supports_interactions());
         assert_eq!(dl.memory_cost(), 0);
     }
