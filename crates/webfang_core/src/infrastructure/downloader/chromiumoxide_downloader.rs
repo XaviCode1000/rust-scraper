@@ -19,6 +19,9 @@ use {
     tokio::time::{timeout, Duration},
 };
 
+#[cfg(all(test, feature = "chromium"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -91,6 +94,10 @@ pub struct ChromiumoxideDownloader {
     /// Fetch ceiling bounding the idle wait (F-52-b).
     #[cfg(feature = "chromium")]
     timeout_secs: u64,
+    /// Gate-certified Chrome binary (F-52-c, #1278). `Some` pins the launch
+    /// via `chrome_executable`; `None` keeps auto-detection.
+    #[cfg(feature = "chromium")]
+    chrome_binary: Option<PathBuf>,
 }
 
 /// Wall-clock ms since `started`, saturating (never wraps).
@@ -125,11 +132,13 @@ impl ChromiumoxideDownloader {
         cookie_bridge: Arc<RwLock<CookieBridge>>,
         post_load_wait: PostLoadWait,
         timeout_secs: u64,
+        chrome_binary: Option<PathBuf>,
     ) -> Self {
         Self {
             cookie_bridge,
             post_load_wait,
             timeout_secs,
+            chrome_binary,
         }
     }
 
@@ -139,11 +148,22 @@ impl ChromiumoxideDownloader {
         self.post_load_wait
     }
 
+    /// The configured Chrome binary, if the preflight gate resolved one.
+    ///
+    /// Seam for the F-52-c propagation test (mirrors the Layer 2
+    /// `.binary()` accessor, #787): proves the configured path reaches the
+    /// launcher without spawning a browser.
+    #[cfg(all(test, feature = "chromium"))]
+    pub(crate) fn chrome_binary(&self) -> Option<&Path> {
+        self.chrome_binary.as_deref()
+    }
+
     #[cfg(not(feature = "chromium"))]
     pub(crate) fn new(
         _cookie_bridge: Arc<RwLock<CookieBridge>>,
         _post_load_wait: PostLoadWait,
         _timeout_secs: u64,
+        _chrome_binary: Option<PathBuf>,
     ) -> Self {
         Self {}
     }
@@ -302,10 +322,17 @@ impl Downloader for ChromiumoxideDownloader {
                 )));
             }
 
-            // 2. Browser config with sandbox bypass for CI/Docker
-            let config = BrowserConfig::builder()
+            // 2. Browser config with sandbox bypass for CI/Docker.
+            // F-52-c (#1278): when the preflight gate certified a binary,
+            // launch exactly it instead of chromiumoxide auto-detection.
+            let mut config_builder = BrowserConfig::builder()
                 .headless_mode(HeadlessMode::True)
-                .no_sandbox()
+                .no_sandbox();
+            if let Some(path) = &self.chrome_binary {
+                tracing::debug!(chrome_binary = %path.display(), "using gate-certified chrome binary");
+                config_builder = config_builder.chrome_executable(path);
+            }
+            let config = config_builder
                 .build()
                 // LCOV_EXCL_LINE defensive: browser-config-build — static builder flags cannot fail at runtime
                 .map_err(DownloadError::Internal)?;
@@ -442,6 +469,7 @@ mod tests {
             Arc::new(RwLock::new(CookieBridge::new())),
             PostLoadWait::None,
             30,
+            None,
         );
         let url: Url = "https://example.com".parse().unwrap();
         let err = dl.fetch(&url).await.unwrap_err();
@@ -458,6 +486,7 @@ mod tests {
             Arc::new(RwLock::new(CookieBridge::new())),
             PostLoadWait::None,
             30,
+            None,
         );
         assert!(dl.supports_interactions());
         assert_eq!(dl.memory_cost(), 200_000_000);
@@ -520,8 +549,12 @@ mod tests {
             .await;
         let server_uri = server.uri();
         async fn fetch_page(server_uri: &str, mode: PostLoadWait, path: &str) -> FetchedPage {
-            let dl =
-                ChromiumoxideDownloader::new(Arc::new(RwLock::new(CookieBridge::new())), mode, 30);
+            let dl = ChromiumoxideDownloader::new(
+                Arc::new(RwLock::new(CookieBridge::new())),
+                mode,
+                30,
+                None,
+            );
             let url: Url = format!("{server_uri}{path}").parse().expect("wiremock uri");
             dl.fetch(&url).await.expect("loopback fetch must succeed")
         }
@@ -623,6 +656,7 @@ mod tests {
             Arc::new(RwLock::new(CookieBridge::new())),
             PostLoadWait::None,
             30,
+            None,
         );
         assert!(!dl.supports_interactions());
         assert_eq!(dl.memory_cost(), 0);

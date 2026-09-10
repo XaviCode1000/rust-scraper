@@ -246,6 +246,9 @@ fn ram_proxy(strategy: JsStrategy) -> Result<usize> {
             // F-52-b: benchmarks measure the historical stack timing — settle
             // immediately, like production `--js-wait none`.
             post_load_wait: webfang_core::domain::PostLoadWait::None,
+            // F-52-c: benchmarks never run the CLI preflight gate, so no
+            // resolved binary exists — keep launcher auto-detection.
+            chrome_binary: None,
         },
         cookie_bridge,
         CancellationToken::new(),

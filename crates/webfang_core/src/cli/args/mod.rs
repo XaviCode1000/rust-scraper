@@ -240,6 +240,9 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
                 obscura_binary: args.crawler.obscura_binary,
                 // F-52-b: default idle; CLI/env override via --js-wait.
                 post_load_wait: args.crawler.post_load_wait,
+                // F-52-c: unresolved at projection; the preflight gate
+                // (main.rs 6c) resolves it post-validation.
+                chrome_binary: None,
                 custom_headers: args
                     .crawler
                     .headers

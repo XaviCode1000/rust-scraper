@@ -175,6 +175,9 @@ fn build_discovery_engine_options(
         content_sink,
         // F-52-b: carry the post-load wait mode into the engine path.
         post_load_wait: opts.network.post_load_wait,
+        // F-52-c: carry the gate-certified Chrome binary into the engine
+        // path (same as --obscura-binary above).
+        chrome_binary: opts.network.chrome_binary.clone(),
         // Without the factory `with_js_strategy` records the strategy but builds
         // no router, so the strategy still degrades to static (#1229 note above).
         downloader_factory: Some(crate::application::container::Container::downloader_factory()),

@@ -398,8 +398,9 @@ impl Engine {
     /// # Errors
     ///
     /// Returns [`DownloadError::Internal`] if the wreq client cannot be built.
-    // 9 params: the strategy's full dependency set (profile, WAF, retry
-    // backoff, obscura binary, post-load wait). Bundling them would only move the same
+    // 10 params: the strategy's full dependency set (profile, WAF, retry
+    // backoff, obscura binary, resolved chrome binary, post-load wait).
+    // Bundling them would only move the same
     // wiring one level up (same pattern as DownloaderSpec).
     #[allow(clippy::too_many_arguments)]
     pub fn with_js_strategy(
@@ -412,6 +413,7 @@ impl Engine {
         backoff_max_ms: u64,
         obscura_binary: String,
         post_load_wait: PostLoadWait,
+        chrome_binary: Option<PathBuf>,
     ) -> Result<Self, DownloadError> {
         let timeout = self.config.timeout_secs;
         // No factory injected => no downloader built. `None` is a supported
@@ -443,6 +445,8 @@ impl Engine {
                         obscura_binary,
                         // F-52-b: wait mode for the chromium path.
                         post_load_wait,
+                        // F-52-c: the gate-certified binary (or None = auto-detect).
+                        chrome_binary,
                         // FIX-1 (#1231 F-12): the historical 50 MiB cap.
                         // Plumbing an engine-side operator flag for it is a
                         // follow-up (CrawlerConfig change, gate3-pinned).
@@ -1111,6 +1115,14 @@ pub struct EngineOptions {
     /// Defaults to [`PostLoadWait::Idle`]; populated from
     /// `CrawlOptions.network.post_load_wait` by the CLI composition root.
     pub post_load_wait: PostLoadWait,
+    /// Preflight-resolved Chrome/Chromium binary for the chromium render
+    /// path (F-52-c, #1278).
+    ///
+    /// `Some(path)` pins every chromium launch to the gate-certified
+    /// binary; `None` (default, MCP/benchmark/test paths) keeps launcher
+    /// auto-detection. Populated from `CrawlOptions.network.chrome_binary`
+    /// by the CLI composition root.
+    pub chrome_binary: Option<PathBuf>,
     /// Enable autoscaled concurrency based on system RAM.
     pub autoscale_enabled: bool,
     /// TLS/HTTP2 fingerprint profile applied to the wreq fetch layer.
@@ -1160,6 +1172,8 @@ impl Default for EngineOptions {
             obscura_binary: DEFAULT_OBSCURA_BINARY.to_string(),
             // F-52-b: idle by default; the CLI gate path resolves it.
             post_load_wait: PostLoadWait::Idle,
+            // F-52-c: unresolved by default; the CLI gate resolves it.
+            chrome_binary: None,
             autoscale_enabled: false,
             tls_emulation: Profile::Chrome145,
             ignore_waf: false,
@@ -1411,6 +1425,9 @@ async fn crawl_site_with_options_inner(
         options.obscura_binary.clone(),
         // F-52-b: propagate the post-load wait mode into the chromium path.
         options.post_load_wait,
+        // F-52-c: propagate the gate-certified Chrome binary into the
+        // Hybrid L3 / Full launcher.
+        options.chrome_binary.clone(),
     )?;
 
     // Apply autoscale if enabled
