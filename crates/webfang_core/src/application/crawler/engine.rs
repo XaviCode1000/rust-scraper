@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use crate::infrastructure::observability::log_scrape_error;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn, Instrument};
@@ -40,6 +41,7 @@ use super::crawl_scheduler::CrawlScheduler;
 use super::crawl_task::{handle_crawl_result, run_crawl_task};
 use super::ports;
 use super::progress::CrawlProgress;
+use super::session::{CheckpointAction, CrawlExec, CrawlSession};
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::application::pipeline::{OutputStage, PipelineExecutor};
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
@@ -50,6 +52,7 @@ use crate::domain::downloader_factory::{
     DownloaderFactory, DownloaderSpec, DEFAULT_OBSCURA_BINARY,
 };
 use crate::domain::downloader_port::{DownloadError, Downloader};
+use crate::domain::persistence::{CheckpointCfg, PersistenceMode};
 use crate::domain::ram_probe_port::{system_default, RamProbePort};
 use crate::domain::session_port::{SessionPoolConfig, SessionPort};
 use crate::domain::{
@@ -133,6 +136,10 @@ pub struct Engine {
     pipeline: Option<Arc<PipelineExecutor>>,
     /// Output stages that receive items after pipeline processing.
     output_stages: Vec<Arc<Box<dyn OutputStage>>>,
+    /// Run owner (P6-2 slice 1): `Some` when built via `from_session`.
+    /// `build_task_ctx` derives the shared context from it; `None` keeps
+    /// the legacy direct construction path verbatim.
+    session: Option<CrawlSession>,
     /// Optional handle for the signal handler task — aborted on shutdown
     /// to prevent the tokio runtime from hanging waiting for it.
     signal_handle: Option<tokio::task::JoinHandle<()>>,
@@ -244,6 +251,9 @@ impl Engine {
             content_sink: None,
             pipeline: None,
             output_stages: Vec::new(),
+            // Slice 1 (P6-2): no session unless built via `from_session` —
+            // the legacy direct constructors keep today's behavior verbatim.
+            session: None,
             signal_handle: None,
             // Default to the sysinfo-backed probe so the autoscale loop is
             // wired without any extra setup. Tests inject a fake via
@@ -252,6 +262,84 @@ impl Engine {
             // infrastructure concrete (ADR-0012-B cheap win).
             ram_probe: system_default(),
         })
+    }
+
+    /// Build an Engine from a validated [`CrawlSession`] (P6-2 slice 1).
+    ///
+    /// Run facts (config, identity, policies, ports) come from the session;
+    /// execution machinery (scheduler, limiter, counters, bridges) is built
+    /// exactly as in [`Engine::new`]. The session is stored so
+    /// [`Engine::build_task_ctx`] derives the shared context from it and
+    /// [`Engine::run`] closes the run through [`CrawlSession::finish`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CrawlError`] when the engine or its fetch router cannot
+    /// be constructed — same contract as the `with_*` chain it replaces.
+    pub(crate) fn from_session(session: CrawlSession) -> Result<Self, CrawlError> {
+        let transport = session.transport.clone();
+        let config = session.config().as_ref().clone();
+        let mut engine = Engine::new(config, transport.ignore_robots)?;
+        // Adopt the session's single-minted identity: every page shares
+        // its trace_id by construction (P6-2 identity requirement).
+        engine.correlation_id = session.identity().root.clone();
+        // Adopt the session's single cancellation authority (#509).
+        engine.cancel_token = session.cancel_token();
+        if let Some(pool) = session.ports.session_pool.clone() {
+            engine = engine.with_session_pool(pool);
+        } else if transport.session_pool_enabled {
+            // Same construction the legacy entry performed: pool slot
+            // count derives from the model's Domain tier (task 2.2c), the
+            // 2s cooldown is the backoff base delay.
+            let pool_cfg = SessionPoolConfig {
+                base_delay: Duration::from_secs(2),
+                pool_size: engine.budget.domain(),
+                ..SessionPoolConfig::default()
+            };
+            engine = engine.with_session_pool(
+                crate::application::container::build_crawl_session_pool(pool_cfg),
+            );
+        }
+        if let Some(factory) = session.ports.downloader_factory.clone() {
+            engine = engine.with_downloader_factory(factory);
+        }
+        if let Some(sink) = session.ports.content_sink.clone() {
+            engine = engine.with_content_sink(sink);
+        }
+        engine.pipeline = session.ports.pipeline.clone();
+        engine.output_stages = session.ports.output_stages.clone();
+        // Checkpoint wiring from the session policy (mirrors
+        // `with_checkpoint`, but reuses the state `begin()` loaded
+        // instead of hitting disk a second time).
+        match &session.persistence.mode {
+            crate::domain::persistence::PersistenceMode::Checkpoint { cfg }
+            | crate::domain::persistence::PersistenceMode::Full {
+                checkpoint: cfg, ..
+            } => {
+                let scoped = super::checkpoint::CheckpointPath::new(&cfg.dir)
+                    .file_for_seed(engine.config.seed_url.as_str());
+                engine.checkpoint_path = Some(scoped);
+                engine.checkpoint_interval = cfg.interval;
+                engine.checkpoint_state = session.persistence.loaded.clone();
+            },
+            crate::domain::persistence::PersistenceMode::Disabled
+            | crate::domain::persistence::PersistenceMode::Resume { .. } => {},
+        }
+        if transport.autoscale_enabled {
+            engine = engine.with_autoscale();
+        }
+        engine = engine.with_js_strategy(
+            transport.js_strategy,
+            transport.tls_emulation,
+            transport.ignore_waf,
+            transport.max_retries,
+            transport.backoff_base_ms,
+            transport.backoff_max_ms,
+            transport.obscura_binary.clone(),
+            transport.chrome_binary.clone(),
+        )?;
+        engine.session = Some(session);
+        Ok(engine)
     }
 
     /// Override the crawl's root correlation ID.
@@ -657,6 +745,19 @@ impl Engine {
 
     /// Clone of the engine's cancellation token (#509).
     ///
+    /// Fire the run's cancellation authority: the session's when the
+    /// engine runs from one (P6-2 — `from_session` adopts its token, so
+    /// the effect is identical), the engine token otherwise. Call sites
+    /// name the authority instead of the mechanism.
+    fn cancel_run(&self) {
+        match &self.session {
+            Some(session) => session.cancel(),
+            None => self.cancel_token.cancel(),
+        }
+    }
+
+    /// Clone of the engine's cancellation token (#509).
+    ///
     /// Fire it to abort workers blocked on rate-limit or resource-governor
     /// waits and unblock [`run`](Self::run)'s drain — the same effect as a
     /// signal-driven shutdown, without an OS signal.
@@ -728,15 +829,32 @@ impl Engine {
         // work left, not truncated by max_pages) deletes its checkpoint
         // (F-01) so the next identical run reproduces the same output set
         // instead of resuming stale state. Interrupted or truncated runs
-        // keep the file for resume.
+        // keep the file for resume. With a session (P6-2) the verdict
+        // comes from `CrawlSession::finish` — same branches, plus the
+        // run label and checkpoint action for the summary.
         let completed_fully = !self.shutdown.load(std::sync::atomic::Ordering::SeqCst)
             && !self.scheduler.has_pending_work()
             && !self.collector.is_full(self.config.max_pages);
-        if completed_fully {
-            self.delete_checkpoint();
-        } else {
-            self.save_checkpoint().await;
-        }
+        let session_close = match self.session.take() {
+            Some(session) => {
+                let run_label = session.identity().run_label.clone();
+                let action = session.finish(completed_fully);
+                match action {
+                    CheckpointAction::Delete => self.delete_checkpoint(),
+                    CheckpointAction::Write => self.save_checkpoint().await,
+                    CheckpointAction::Skip => {},
+                }
+                Some((run_label, action))
+            },
+            None => {
+                if completed_fully {
+                    self.delete_checkpoint();
+                } else {
+                    self.save_checkpoint().await;
+                }
+                None
+            },
+        };
 
         // Collect results via mpsc channel — now all Senders are dropped,
         // so the receiver worker will drain and terminate.
@@ -748,6 +866,25 @@ impl Engine {
 
         // Structured crawl summary (issue #356 Fase 4, error breakdown #374)
         self.log_crawl_summary(total_pages, errors, start);
+        // P6-2: the session close carries the run label and the F-01
+        // verdict so `--trace-file` shows what happened to resume state.
+        // NOTE: distinct message from the canonical `crawl completed`
+        // summary below — the benchmark aggregator keys on that message
+        // and a second line with the same message but fewer numeric
+        // fields breaks its parse (P6-2 slice 1 CI).
+        if let Some((run_label, action)) = session_close {
+            let checkpoint_action = match action {
+                CheckpointAction::Delete => "deleted",
+                CheckpointAction::Write => "wrote",
+                CheckpointAction::Skip => "skipped",
+            };
+            info!(
+                run_label = %run_label,
+                checkpoint_action = %checkpoint_action,
+                total_pages = total_pages,
+                "crawl session closed"
+            );
+        }
 
         Ok(CrawlResult::new(
             collected_urls,
@@ -799,7 +936,30 @@ impl Engine {
     }
 
     /// Build the shared task context once — all spawned tasks share this Arc.
+    ///
+    /// With a session (P6-2), the context is *derived* by the run owner
+    /// from run facts + these execution handles; without one, the legacy
+    /// literal below keeps today's behavior verbatim (slice-1 additive).
     fn build_task_ctx(&self) -> Arc<CrawlTaskCtx> {
+        match &self.session {
+            Some(session) => session.task_ctx(CrawlExec {
+                queue: self.scheduler.queue(),
+                rate_limiter: self.rate_limiter.clone(),
+                pages_crawled: Arc::clone(&self.pages_crawled),
+                error_count: Arc::clone(&self.error_count),
+                error_breakdown: Arc::clone(&self.error_breakdown),
+                collector: self.collector.clone(),
+                cookie_bridge: Arc::clone(&self.cookie_bridge),
+                banned_domains: Arc::clone(&self.banned_domains),
+                robots_fetcher: Arc::clone(&self.robots_fetcher),
+                fetch_router: self.fetch_router.clone(),
+            }),
+            None => self.build_task_ctx_legacy(),
+        }
+    }
+
+    /// Legacy direct construction (pre-session path).
+    fn build_task_ctx_legacy(&self) -> Arc<CrawlTaskCtx> {
         Arc::new(CrawlTaskCtx {
             config: Arc::clone(&self.config),
             correlation_id: self.correlation_id.clone(),
@@ -862,7 +1022,7 @@ impl Engine {
                 info!("Shutdown signal received — saving checkpoint and exiting");
                 // Unblock workers parked on rate-limit/governor waits (#509)
                 // before saving state; cancel() is idempotent.
-                self.cancel_token.cancel();
+                self.cancel_run();
                 self.save_checkpoint().await;
                 break;
             }
@@ -885,7 +1045,7 @@ impl Engine {
                     "Reached max pages limit after processing: {}",
                     self.config.max_pages
                 );
-                self.cancel_token.cancel();
+                self.cancel_run();
                 break;
             }
 
@@ -1065,7 +1225,7 @@ impl Engine {
     /// Graceful shutdown — drop the collector sender, receiver drains remaining items
     pub async fn shutdown(mut self) {
         // Unblock any worker still parked on a rate-limit/governor wait (#509).
-        self.cancel_token.cancel();
+        self.cancel_run();
 
         // Abort signal handler to prevent the runtime from hanging
         if let Some(handle) = self.signal_handle.take() {
@@ -1265,6 +1425,72 @@ async fn crawl_site_inner(
     );
 
     let ignore_robots = config.ignore_robots;
+    let fallback_config = config.clone();
+    // P6-2 slice 1: build the validated run object first; the engine
+    // executes from it. A build failure (exotic seed, inconsistent
+    // transport) falls back to the legacy path so behavior stays
+    // verbatim — slice 2 hardens callers instead of branching here.
+    let run_label = config.seed_url.host_str().unwrap_or("seed").to_string();
+    let seed_url = config.seed_url.as_str().to_string();
+    let session = super::session::CrawlSession::builder()
+        .config(config)
+        .persistence(PersistenceMode::Disabled)
+        .transport(super::session::TransportPolicy {
+            js_strategy: JsStrategy::Static,
+            tls_emulation: wreq_util::Profile::Chrome145,
+            ignore_waf: false,
+            max_retries: 3,
+            backoff_base_ms: 1000,
+            backoff_max_ms: 10000,
+            obscura_binary: crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY.to_string(),
+            chrome_binary: None,
+            session_pool_enabled: false,
+            autoscale_enabled: false,
+            ignore_robots,
+        })
+        .ports(super::session::CrawlPorts {
+            session_pool: None,
+            downloader_factory: None,
+            content_sink: content_sink.clone(),
+            pipeline: None,
+            output_stages: Vec::new(),
+        })
+        .identity(super::session::CrawlIdentity {
+            root: correlation_id.clone(),
+            run_label,
+        })
+        .build();
+    let mut session = match session {
+        Ok(session) => session,
+        Err(err) => {
+            log_scrape_error(
+                &err,
+                &seed_url,
+                "session",
+                Some(&correlation_id),
+                "session build failed — legacy engine path",
+            );
+            return crawl_site_inner_legacy(fallback_config, correlation_id, content_sink).await;
+        },
+    };
+    session.begin();
+    let mut engine = Engine::from_session(session)?;
+    let result = engine.run().await;
+    engine.shutdown().await;
+    result
+}
+
+/// Legacy direct path for [`crawl_site_inner`] (pre-session).
+///
+/// Reached only when the session builder rejects the description
+/// (exotic seed, inconsistent transport); behavior is byte-identical to
+/// the pre-slice-1 body so tripwires cannot distinguish it.
+async fn crawl_site_inner_legacy(
+    config: CrawlerConfig,
+    correlation_id: CorrelationId,
+    content_sink: Option<Arc<dyn CrawlContentSink>>,
+) -> Result<CrawlResult, CrawlError> {
+    let ignore_robots = config.ignore_robots;
     let mut engine = Engine::new(config, ignore_robots)?.with_correlation_id(correlation_id);
     if let Some(sink) = content_sink {
         engine = engine.with_content_sink(sink);
@@ -1363,6 +1589,75 @@ async fn crawl_site_with_options_inner(
         options.ignore_robots
     );
 
+    let seed_url = config.seed_url.as_str().to_string();
+    let run_label = config.seed_url.host_str().unwrap_or("seed").to_string();
+    // P6-2 slice 1: the run object carries what `EngineOptions` carried.
+    // Checkpoint mode comes from the same (path, interval) pair the
+    // legacy `with_checkpoint` below consumes. Ports the options cannot
+    // prebuild (pool needs the budget tier) stay unset — `from_session`
+    // assembles them exactly as the legacy body did.
+    let mode = match &options.checkpoint_path {
+        Some(dir) => PersistenceMode::Checkpoint {
+            cfg: CheckpointCfg {
+                dir: dir.clone(),
+                interval: options.checkpoint_interval,
+            },
+        },
+        None => PersistenceMode::Disabled,
+    };
+    let fallback_options = options.clone();
+    let fallback_config = config.clone();
+    let session = super::session::CrawlSession::builder()
+        .config(config)
+        .persistence(mode)
+        .transport(super::session::TransportPolicy::from(&options))
+        .ports(super::session::CrawlPorts {
+            session_pool: None,
+            downloader_factory: options.downloader_factory.clone(),
+            content_sink: options.content_sink.clone(),
+            pipeline: None,
+            output_stages: Vec::new(),
+        })
+        .identity(super::session::CrawlIdentity {
+            root: correlation_id.clone(),
+            run_label,
+        })
+        .build();
+    let mut session = match session {
+        Ok(session) => session,
+        Err(err) => {
+            log_scrape_error(
+                &err,
+                &seed_url,
+                "session",
+                Some(&correlation_id),
+                "session build failed — legacy engine path",
+            );
+            return crawl_site_with_options_legacy(
+                fallback_config,
+                fallback_options,
+                correlation_id,
+            )
+            .await;
+        },
+    };
+
+    session.begin();
+    let mut engine = Engine::from_session(session)?;
+    let result = engine.run().await;
+    engine.shutdown().await;
+    result
+}
+
+/// Legacy direct path for the `with_options` entry (pre-session).
+///
+/// Reached only when the session builder rejects the description;
+/// behavior is byte-identical to the pre-slice-1 body.
+async fn crawl_site_with_options_legacy(
+    config: CrawlerConfig,
+    options: EngineOptions,
+    correlation_id: CorrelationId,
+) -> Result<CrawlResult, CrawlError> {
     let mut engine =
         Engine::new(config, options.ignore_robots)?.with_correlation_id(correlation_id);
 
@@ -1438,9 +1733,78 @@ mod tests {
     use crate::domain::budget::detector::FixedDetector;
     use crate::domain::budget::tiers::{BurstPermits, CrawlConcurrency};
     use crate::domain::budget::{BudgetModel, BudgetOverrides};
+    use crate::infrastructure::downloader::fetch_router::DefaultDownloaderFactory;
     use url::Url;
-    use wiremock::matchers::{path, path_regex};
+    use wiremock::matchers::{method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// P6-2 slice 1: the session-built run and the legacy direct path
+    /// must produce identical result sets on the same site — the seam
+    /// changes ownership, never outcomes.
+    #[tokio::test]
+    async fn session_path_matches_legacy_result_set() {
+        // Entry-guard allowance (F-06 + F-32, #1217): loopback fixture
+        // through the production router.
+        let _guard = webfang_test_utils::EnvGuard::with(&[(
+            crate::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )]);
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/index.html"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    r#"<html><body><a href="/page2.html">Page 2</a></body></html>"#,
+                ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/page2.html"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("<html><body>Two</body></html>"),
+            )
+            .mount(&server)
+            .await;
+        let seed = Url::parse(&format!("{}/index.html", server.uri())).expect("seed URL");
+        async fn run_once(seed: &Url, via_session: bool) -> Result<CrawlResult, CrawlError> {
+            let config = CrawlerConfig::builder(seed.clone()).max_depth(2).build();
+            let options = EngineOptions {
+                ignore_robots: true,
+                js_strategy: JsStrategy::Static,
+                downloader_factory: Some(Arc::new(DefaultDownloaderFactory)),
+                ..Default::default()
+            };
+            if via_session {
+                crawl_site_with_options(config, options).await
+            } else {
+                crawl_site_with_options_legacy(config, options, CorrelationId::new()).await
+            }
+        }
+        // NOTE: sequential awaits (no join!) — two engines share the
+        // process-wide checkpoint/registry state, so concurrent runs
+        // would contend; determinism first.
+        let via_session = run_once(&seed, true)
+            .await
+            .expect("session path must succeed");
+        let via_legacy = run_once(&seed, false)
+            .await
+            .expect("legacy path must succeed");
+        let mut a: Vec<String> = via_session
+            .urls
+            .iter()
+            .map(|u| u.url.as_str().to_string())
+            .collect();
+        let mut b: Vec<String> = via_legacy
+            .urls
+            .iter()
+            .map(|u| u.url.as_str().to_string())
+            .collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "session and legacy paths must crawl the same set");
+        assert_eq!(via_session.total_pages, via_legacy.total_pages);
+    }
 
     /// Spec scenario (Q1 DECOUPLE): raising the configured crawler
     /// concurrency must NOT move the rate-limiter burst — the burst is a
