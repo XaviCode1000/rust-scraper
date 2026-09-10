@@ -868,6 +868,10 @@ impl Engine {
         self.log_crawl_summary(total_pages, errors, start);
         // P6-2: the session close carries the run label and the F-01
         // verdict so `--trace-file` shows what happened to resume state.
+        // NOTE: distinct message from the canonical `crawl completed`
+        // summary below — the benchmark aggregator keys on that message
+        // and a second line with the same message but fewer numeric
+        // fields breaks its parse (P6-2 slice 1 CI).
         if let Some((run_label, action)) = session_close {
             let checkpoint_action = match action {
                 CheckpointAction::Delete => "deleted",
@@ -878,7 +882,7 @@ impl Engine {
                 run_label = %run_label,
                 checkpoint_action = %checkpoint_action,
                 total_pages = total_pages,
-                "crawl completed"
+                "crawl session closed"
             );
         }
 
