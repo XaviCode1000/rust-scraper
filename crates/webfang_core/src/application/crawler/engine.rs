@@ -336,6 +336,7 @@ impl Engine {
             transport.backoff_base_ms,
             transport.backoff_max_ms,
             transport.obscura_binary.clone(),
+            transport.chrome_binary.clone(),
         )?;
         engine.session = Some(session);
         Ok(engine)
@@ -1438,6 +1439,7 @@ async fn crawl_site_inner(
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
             obscura_binary: crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY.to_string(),
+            chrome_binary: None,
             session_pool_enabled: false,
             autoscale_enabled: false,
             ignore_robots,

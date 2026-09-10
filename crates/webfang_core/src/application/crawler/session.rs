@@ -80,6 +80,11 @@ pub(crate) struct TransportPolicy {
     pub backoff_max_ms: u64,
     /// Hybrid Layer 2 binary name or path (#787).
     pub obscura_binary: String,
+    /// Gate-certified Chrome binary (F-52-c, #1278). `None` keeps launcher
+    /// auto-detection. Threaded into `with_js_strategy` like every other
+    /// transport knob (added on rebase over 08eee306; `post_load_wait`
+    /// follows after F-52-b merges).
+    pub chrome_binary: Option<std::path::PathBuf>,
     /// Domain session pool enabled (pool itself arrives via [`CrawlPorts`]).
     pub session_pool_enabled: bool,
     /// Autoscaled concurrency from system RAM.
@@ -513,6 +518,7 @@ impl From<&crate::application::crawler::engine::EngineOptions> for TransportPoli
             backoff_base_ms: options.backoff_base_ms,
             backoff_max_ms: options.backoff_max_ms,
             obscura_binary: options.obscura_binary.clone(),
+            chrome_binary: options.chrome_binary.clone(),
             session_pool_enabled: options.session_pool_enabled,
             autoscale_enabled: options.autoscale_enabled,
             ignore_robots: options.ignore_robots,
@@ -538,6 +544,7 @@ mod tests {
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
             obscura_binary: "obscura".to_string(),
+            chrome_binary: None,
             session_pool_enabled: false,
             autoscale_enabled: false,
             ignore_robots: false,
