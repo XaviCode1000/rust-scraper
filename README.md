@@ -115,8 +115,8 @@ scripts/analyze-trace.sh debug.jsonl errors
 scripts/analyze-trace.sh debug.jsonl slow 20
 ```
 
-See [docs/debugging.md](docs/debugging.md) for the full query cookbook and
-[docs/troubleshooting.md](docs/troubleshooting.md) for common problems.
+See [docs/src/debugging.md](docs/src/debugging.md) for the full query cookbook and
+[docs/src/troubleshooting.md](docs/src/troubleshooting.md) for common problems.
 
 ### AI cleaning
 
@@ -332,7 +332,7 @@ codedb index .
 | Resource | Covers |
 |----------|--------|
 | [AGENTS.md](AGENTS.md) | AI agent instructions, code intelligence integration |
-| [docs/debugging.md](docs/debugging.md) | Tracing, correlation IDs, `jq` query cookbook (`scripts/analyze-trace.sh`) |
+| [docs/src/debugging.md](docs/src/debugging.md) | Tracing, correlation IDs, `jq` query cookbook (`scripts/analyze-trace.sh`) |
 | [Wiki](https://github.com/XaviCode1000/webfang/wiki) | Architecture, API reference, guides |
 | `webfang --help` | Full CLI reference |
 
