@@ -1,6 +1,5 @@
 ---
 source: crates/webfang_core/tests/cli_binary_test.rs
-assertion_line: 71
 expression: "redact_nondeterministic(Path::new(\"__no_temp__\"), &stdout)"
 ---
 CLI Arguments for the webfang binary.
@@ -300,6 +299,12 @@ JS Rendering:
           
           [env: WEBFANG_JS_STRATEGY=]
           [default: static]
+
+      --js-wait <JS_WAIT>
+          Post-load settlement wait for the chromium render path: idle (network-idle, default), <ms> fixed wait (1..=30000), none (capture immediately)
+          
+          [env: WEBFANG_JS_WAIT=]
+          [default: idle]
 
       --obscura-binary <OBSCURA_BINARY>
           Path to the obscura binary (default: "obscura")
